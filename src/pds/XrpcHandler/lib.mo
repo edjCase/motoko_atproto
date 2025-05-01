@@ -29,12 +29,13 @@ module {
     public func process(request : Request) : Response {
 
         let json : Text = switch (request.nsid) {
+            case ("_health") "{\"version\": \"0.0.1\"}";
             case ("com.atproto.server.describeServer") {
-                let did = "1";
-                let availableUserDomains = "[\"atproto.com\"]";
-                let inviteCodeRequired = "false";
-                let privacyPolicy = "https://atproto.com/privacy";
-                let termsOfService = "https://atproto.com/terms";
+                let did = "did:web:edjcase.com";
+                let availableUserDomains = "[\"edjcase.com\"]";
+                let inviteCodeRequired = "true";
+                let privacyPolicy = "";
+                let termsOfService = "";
                 let contactEmailAddress = "gekctek@edjcase.com";
                 "{\"did\": \"" # did # "\", \"availableUserDomains\": " # availableUserDomains # ", \"inviteCodeRequired\": " # inviteCodeRequired # ", \"links\": { \"privacyPolicy\": \"" # privacyPolicy # "\", \"termsOfService\": \"" # termsOfService # "\" }, \"contact\": { \"email\": \"" # contactEmailAddress # "\" } }";
             };

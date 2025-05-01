@@ -1,28 +1,105 @@
 import HttpTypes "mo:http-types";
 import Text "mo:base/Text";
-import Blob "mo:base/Blob";
 import Iter "mo:base/Iter";
-import Debug "mo:base/Debug";
+import HashMap "mo:base/HashMap";
+import Blob "mo:base/Blob";
+import Array "mo:base/Array";
+import Int "mo:base/Int";
+import Time "mo:base/Time";
 import XrpcHandler "./XrpcHandler";
 import HttpParser "mo:http-parser";
+import CertifiedCache "mo:certified-cache";
+import DID "../did";
 
 actor {
+
+  let urls = HashMap.HashMap<Text, ()>(10, Text.equal, Text.hash);
+
+  type CachedResponse = {
+    body : Blob;
+    headers : [HttpTypes.Header];
+  };
+  stable var certifiedCacheEntries : [(Text, (CachedResponse, Nat))] = [];
+  let two_days_in_nanos = 2 * 24 * 60 * 60 * 1000 * 1000 * 1000; // 2 days in nanoseconds
+  var certifiedCache = CertifiedCache.fromEntries<Text, CachedResponse>(
+    certifiedCacheEntries,
+    Text.equal,
+    Text.hash,
+    Text.encodeUtf8,
+    func(b : CachedResponse) : Blob { b.body },
+    two_days_in_nanos + Int.abs(Time.now()),
+  );
+
+  public query func getUrls() : async [Text] {
+    urls.keys() |> Iter.toArray(_);
+  };
+
   public query func http_request(request : HttpTypes.Request) : async HttpTypes.Response {
-    routeRequest(request, [handleXrpc]);
+    let cachedResponseOrNull = certifiedCache.get(request.url);
+    switch (cachedResponseOrNull) {
+      case (?response) {
+        {
+          status_code : Nat16 = 200;
+          headers = Array.append(response.headers, [certifiedCache.certificationHeader(request.url)]);
+          body = response.body;
+          streaming_strategy = null;
+          upgrade = null;
+        };
+      };
+      case (null) {
+        // Upgrade request to get certified response
+        {
+          status_code = 200;
+          headers = [];
+          body = Blob.fromArray([]);
+          streaming_strategy = null;
+          upgrade = ?true;
+        };
+      };
+    };
   };
 
   public func http_request_update(request : HttpTypes.UpdateRequest) : async HttpTypes.UpdateResponse {
-    routeRequest(request, [handleXrpc]);
+    let parsedRequest = HttpParser.parse(request);
+    urls.put(parsedRequest.url.path.original, ());
+    let routes : [(HttpParser.ParsedHttpRequest) -> async* ?HttpTypes.Response] = [
+      handleXrpc,
+      handleStatic,
+    ];
+    label f for (route in routes.vals()) {
+      let ?response = await* route(parsedRequest) else continue f;
+      certifiedCache.put(
+        parsedRequest.url.path.original,
+        {
+          body = response.body;
+          headers = response.headers;
+        },
+        null,
+      );
+      return response;
+    };
+    {
+      status_code = 200;
+      headers = [("Content-Type", "text/plain")];
+      body = Text.encodeUtf8("This is the PDS server");
+      streaming_strategy = null;
+      upgrade = null;
+    };
   };
+
+  let xrpcResponseHeaders = [("Access-Control-Allow-Origin", "*"), ("Access-Control-Allow-Methods", "GET, POST"), ("Access-Control-Allow-Headers", "atproto-accept-labelers")];
 
   private func xrpcToHttpResponse(xrpcResponse : XrpcHandler.Response) : HttpTypes.Response {
     switch (xrpcResponse) {
       case (#ok(ok)) {
         {
           status_code = 200;
-          headers = [
-            ("Content-Type", ok.contentType),
-          ];
+          headers = Array.append(
+            xrpcResponseHeaders,
+            [
+              ("Content-Type", ok.contentType),
+            ],
+          );
           body = ok.body;
           streaming_strategy = null;
           upgrade = null;
@@ -34,7 +111,7 @@ actor {
 
         {
           status_code = 400; // TODO: map error to status code?
-          headers = [("Content-Type", "application/json")];
+          headers = Array.append(xrpcResponseHeaders, [("Content-Type", "application/json")]);
           body = Text.encodeUtf8(json);
           streaming_strategy = null;
           upgrade = null;
@@ -43,7 +120,7 @@ actor {
     };
   };
 
-  private func handleXrpc(request : HttpParser.ParsedHttpRequest) : ?HttpTypes.Response {
+  private func handleXrpc(request : HttpParser.ParsedHttpRequest) : async* ?HttpTypes.Response {
     switch (tryParseXrpcRequest(request)) {
       case (#notXrpc) null;
       case (#xrpc(xrpcRequest)) {
@@ -54,7 +131,7 @@ actor {
         let json = "{\"error\": \"invalid\", \"message\": \"" # msg # "\"}";
         ?{
           status_code = 400;
-          headers = [];
+          headers = Array.append(xrpcResponseHeaders, [("Content-Type", "application/json")]);
           body = Text.encodeUtf8(json);
           streaming_strategy = null;
           upgrade = null;
@@ -63,19 +140,41 @@ actor {
     };
   };
 
-  private func routeRequest(request : HttpTypes.UpdateRequest, routes : [(HttpParser.ParsedHttpRequest) -> ?HttpTypes.Response]) : HttpTypes.Response {
-    Debug.print("http_request url: " # request.url);
-    let parsedRequest = HttpParser.parse(request);
-    label f for (route in routes.vals()) {
-      let ?response = route(parsedRequest) else continue f;
-      return response;
-    };
-    {
-      status_code = 404;
-      headers = [];
-      body = Blob.fromArray([]);
-      streaming_strategy = null;
-      upgrade = null;
+  private func handleStatic(request : HttpParser.ParsedHttpRequest) : async* ?HttpTypes.Response {
+    switch (request.url.path.original) {
+      case ("/.well-known/did.json") {
+        let didDoc = switch (await* DID.generateDIDDocument("edjcase.com", null)) {
+          // TODO
+          case (#ok(doc)) doc;
+          case (#err(err)) {
+            let json = "{\"error\": \"failed to generate DID document\", \"message\": \"" # err # "\"}";
+            return ?{
+              status_code = 500;
+              headers = [("Content-Type", "application/json")];
+              body = Text.encodeUtf8(json);
+              streaming_strategy = null;
+              upgrade = null;
+            };
+          };
+        };
+        ?{
+          status_code = 200;
+          headers = [("Content-Type", "application/json")];
+          body = Text.encodeUtf8(didDoc);
+          streaming_strategy = null;
+          upgrade = null;
+        };
+      };
+      case ("/.well-known/ic-domains") {
+        ?{
+          status_code = 200;
+          headers = [("Content-Type", "text/plain")];
+          body = Text.encodeUtf8("edjcase.com"); // TODO
+          streaming_strategy = null;
+          upgrade = null;
+        };
+      };
+      case (_) null;
     };
   };
 

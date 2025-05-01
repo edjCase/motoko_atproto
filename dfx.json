@@ -1,4 +1,5 @@
 {
+  "dfx": "0.24.0",
   "canisters": {
     "pds": {
       "main": "src/pds/main.mo",
