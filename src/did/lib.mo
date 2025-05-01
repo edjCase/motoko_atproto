@@ -5,14 +5,14 @@ import Blob "mo:base/Blob";
 import Text "mo:base/Text";
 import Buffer "mo:base/Buffer";
 import IC "mo:ic";
-import { Base64 = Base64Engine; V2 } "mo:base64";
+import BaseX "mo:base-x-encoder";
 
 module {
     let ic = actor ("aaaaa-aa") : IC.Service;
 
     // Helper to convert public key blob to JWK format string
     private func publicKeyToJWK(publicKey : Blob) : Text {
-        let base64EncodedKey : Text = Base64Engine(#v(V2), ?false).encode(#bytes(Blob.toArray(publicKey)));
+        let base64EncodedKey : Text = BaseX.toBase64(publicKey.vals(), false);
         "{" #
         "\"kty\":\"EC\"," #
         "\"crv\":\"secp256k1\"," #

@@ -1,20 +1,16 @@
-[dependencies]
-base = "0.11.3"
-itertools = "0.2.2"
-sha2 = "0.1.0"
-http-types = "1.0.1"
-http-parser = "0.3.3"
-certified-cache = "0.3.0"
-ic = "2.0.0"
-base64 = "1.0.0"
-
 [package]
 name = "atproto"
-version = "0.1.0"
-description = "A library for creating, voting on and executing proposals"
-repository = "https://github.com/edjcase/motoko_proposal_engine"
-keywords = [ "dao", "proposal", "proposals", "vote", "voting" ]
+version = "0.0.1"
+description = ""
+repository = "https://github.com/edjcase/motoko_atproto"
+keywords = []
 license = "MIT"
 
+[dependencies]
+base = "0.14.9"
+itertools = "0.2.2"
+liminal = "0.0.1"
+base-x-encoder = "0.0.1"
+
 [dev-dependencies]
-test = "1.0.1"
+test = "2.1.1"
