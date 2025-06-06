@@ -39,6 +39,25 @@ module {
                 let contactEmailAddress = "gekctek@edjcase.com";
                 "{\"did\": \"" # did # "\", \"availableUserDomains\": " # availableUserDomains # ", \"inviteCodeRequired\": " # inviteCodeRequired # ", \"links\": { \"privacyPolicy\": \"" # privacyPolicy # "\", \"termsOfService\": \"" # termsOfService # "\" }, \"contact\": { \"email\": \"" # contactEmailAddress # "\" } }";
             };
+            case ("com.atproto.server.listRepos") {
+                "{
+    \"cursor\": \"1748318014419::did:plc:ia76kvnndjutgedggx2ibrem\",
+    \"repos\": [
+        {
+            \"did\": \"did:plc:xnd7c75ouxsftdh2saf2oyu3\",
+            \"head\": \"bafyreifckqehf2j2b32427vvdy7v2a2pzv2vy3rhkd4cpcqgxxgk3mozsi\",
+            \"rev\": \"3lqwydh42bd2c\",
+            \"active\": true
+        },
+        {
+            \"did\": \"did:plc:ia76kvnndjutgedggx2ibrem\",
+            \"head\": \"bafyreici6qqhtvn2cycg26oxa5qpdz6ij2a7hmabsodiviulya6iiyijsi\",
+            \"rev\": \"3lqx56znrdd2c\",
+            \"active\": true
+        }
+    ]
+}";
+            };
             case (_) {
                 // TODO
                 let method = switch (request.method) {

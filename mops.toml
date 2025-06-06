@@ -7,10 +7,13 @@ keywords = []
 license = "MIT"
 
 [dependencies]
-base = "0.14.9"
+base = "0.14.11"
 itertools = "0.2.2"
-liminal = "0.0.1"
-base-x-encoder = "0.0.1"
+liminal = "0.0.4"
+base-x-encoder = "0.1.0"
 
 [dev-dependencies]
 test = "2.1.1"
+
+[toolchain]
+moc = "0.14.10"

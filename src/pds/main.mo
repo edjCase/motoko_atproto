@@ -1,7 +1,6 @@
 import Text "mo:base/Text";
 import Iter "mo:base/Iter";
 import HashMap "mo:base/HashMap";
-import Array "mo:base/Array";
 import XrpcHandler "./XrpcHandler";
 import RouterMiddleware "mo:liminal/Middleware/Router";
 import CompressionMiddleware "mo:liminal/Middleware/Compression";
@@ -10,7 +9,7 @@ import JWTMiddleware "mo:liminal/Middleware/JWT";
 import Liminal "mo:liminal";
 import App "mo:liminal/App";
 import Router "mo:liminal/Router";
-import Route "mo:liminal/Route";
+import RouteContext "mo:liminal/RouteContext";
 import Debug "mo:new-base/Debug";
 import DID "../did";
 
@@ -35,23 +34,12 @@ actor {
     };
   };
 
-  let xrpcResponseHeaders = [
-    ("Access-Control-Allow-Origin", "*"),
-    ("Access-Control-Allow-Methods", "GET, POST"),
-    ("Access-Control-Allow-Headers", "atproto-accept-labelers"),
-  ];
-
   private func xrpcToHttpResponse(xrpcResponse : XrpcHandler.Response) : App.HttpResponse {
     switch (xrpcResponse) {
       case (#ok(ok)) {
         {
           statusCode = 200;
-          headers = Array.append(
-            xrpcResponseHeaders,
-            [
-              ("Content-Type", ok.contentType),
-            ],
-          );
+          headers = [("Content-Type", ok.contentType)];
           body = ?ok.body;
           streamingStrategy = null;
         };
@@ -62,7 +50,7 @@ actor {
 
         {
           statusCode = 400; // TODO: map error to status code?
-          headers = Array.append(xrpcResponseHeaders, [("Content-Type", "application/json")]);
+          headers = [("Content-Type", "application/json")];
           body = ?Text.encodeUtf8(json);
           streamingStrategy = null;
         };
@@ -76,7 +64,7 @@ actor {
     routes = [
       Router.getQuery(
         "/xrpc/{nsid}",
-        func(routeContext : Route.RouteContext) : App.HttpResponse {
+        func(routeContext : RouteContext.RouteContext) : App.HttpResponse {
           let nsid = routeContext.getRouteParam("nsid");
           let response = XrpcHandler.process({
             method = #get;
@@ -87,7 +75,7 @@ actor {
       ),
       Router.postUpdate(
         "/xrpc/{nsid}",
-        func<system>(routeContext : Route.RouteContext) : App.HttpResponse {
+        func<system>(routeContext : RouteContext.RouteContext) : App.HttpResponse {
           let nsid = routeContext.getRouteParam("nsid");
           let response = XrpcHandler.process({
             method = #post(?routeContext.httpContext.request.body);
@@ -98,7 +86,7 @@ actor {
       ),
       Router.getAsyncUpdate(
         "/.well-known/did.json",
-        func<system>(routeContext : Route.RouteContext) : async* App.HttpResponse {
+        func<system>(routeContext : RouteContext.RouteContext) : async* App.HttpResponse {
           let didDoc = switch (await* DID.generateDIDDocument("edjcase.com", null)) {
             // TODO
             case (#ok(doc)) doc;
@@ -122,7 +110,7 @@ actor {
       ),
       Router.getQuery(
         "/.well-known/ic-domains",
-        func(routeContext : Route.RouteContext) : App.HttpResponse {
+        func(routeContext : RouteContext.RouteContext) : App.HttpResponse {
           {
             statusCode = 200;
             headers = [("Content-Type", "text/plain")];
@@ -139,7 +127,12 @@ actor {
     middleware = [
       loggingMiddleware(),
       CompressionMiddleware.default(),
-      CORSMiddleware.default(),
+      CORSMiddleware.new({
+        CORSMiddleware.defaultOptions with
+        allowOrigins = [];
+        allowHeaders = [];
+        allowMethods = [#get, #post];
+      }),
       JWTMiddleware.new({
         locations = JWTMiddleware.defaultLocations;
         validation = {
@@ -155,6 +148,7 @@ actor {
     ];
     errorSerializer = Liminal.defaultJsonErrorSerializer;
     candidRepresentationNegotiator = Liminal.defaultCandidRepresentationNegotiator;
+    logger = Liminal.debugLogger;
   });
 
   // Http server methods
