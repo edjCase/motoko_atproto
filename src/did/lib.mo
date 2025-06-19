@@ -8,11 +8,10 @@ import IC "mo:ic";
 import BaseX "mo:base-x-encoder";
 
 module {
-    let ic = actor ("aaaaa-aa") : IC.Service;
 
     // Helper to convert public key blob to JWK format string
     private func publicKeyToJWK(publicKey : Blob) : Text {
-        let base64EncodedKey : Text = BaseX.toBase64(publicKey.vals(), false);
+        let base64EncodedKey : Text = BaseX.toBase64(publicKey.vals(), #standard({ includePadding = true }));
         "{" #
         "\"kty\":\"EC\"," #
         "\"crv\":\"secp256k1\"," #
@@ -73,7 +72,7 @@ module {
         let { derivationPath; keyId } = getDerivationPath(userId, derivedId);
 
         try {
-            let { public_key } = await ic.ecdsa_public_key({
+            let { public_key } = await IC.ic.ecdsa_public_key({
                 canister_id = null;
                 derivation_path = derivationPath;
                 key_id = keyId;
@@ -89,7 +88,7 @@ module {
         let { derivationPath; keyId } = getDerivationPath(userId, derivedId);
 
         try {
-            let { signature } = await ic.sign_with_ecdsa({
+            let { signature } = await IC.ic.sign_with_ecdsa({
                 message_hash = messageHash;
                 derivation_path = derivationPath;
                 key_id = keyId;
