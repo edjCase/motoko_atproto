@@ -11,16 +11,16 @@ import JWTMiddleware "mo:liminal/Middleware/JWT";
 import Liminal "mo:liminal";
 import App "mo:liminal/App";
 import Router "mo:liminal/Router";
-import RouteContext "mo:liminal/RouteContext";
 import Debug "mo:new-base/Debug";
-import DID "../did";
 import RepositoryHandler "Handlers/RepositoryHandler";
 import ServerInfoHandler "Handlers/ServerInfoHandler";
 import ServerInfo "Types/ServerInfo";
 import { ic } "mo:ic";
 import Error "mo:new-base/Error";
-import Cbor "mo:cbor";
+import DagCbor "mo:dag-cbor";
 import Array "mo:new-base/Array";
+import Sha256 "mo:sha2/Sha256";
+import KeyDID "mo:did/Key";
 
 actor {
 
@@ -140,18 +140,20 @@ actor {
   };
 
   public func buildPlcRequest() : async Result.Result<SignedPlcRequest, Text> {
-    let rotationPublicKeyDid = switch (await* getPublicKeyDid("rotation_key_test")) {
+    let rotationKeyId : [Blob] = [];
+    let verificationKeyId : [Blob] = ["\00"];
+    let rotationPublicKeyDid = switch (await* getPublicKeyDid(rotationKeyId)) {
       case (#ok(did)) did;
       case (#err(err)) return #err("Failed to get rotation public key: " # err);
     };
-    let verificationPublicKeyDid = switch (await* getPublicKeyDid("verification_key_test")) {
+    let verificationPublicKeyDid = switch (await* getPublicKeyDid(verificationKeyId)) {
       case (#ok(did)) did;
       case (#err(err)) return #err("Failed to get verification public key: " # err);
     };
     let request : PlcRequest = {
       type_ = "plc_operation";
-      rotationKeys = [rotationPublicKeyDid];
-      verificationMethods = [("atproto", verificationPublicKeyDid)];
+      rotationKeys = [KeyDID.toText(rotationPublicKeyDid, #base58btc)];
+      verificationMethods = [("atproto", KeyDID.toText(verificationPublicKeyDid, #base58btc))];
       alsoKnownAs = ["at://edjcase.com"];
       services = [{
         type_ = "atproto_pds";
@@ -160,63 +162,84 @@ actor {
       prev = null;
     };
     let rotationKeysCbor = request.rotationKeys
-    |> Array.map<Text, Cbor.Value>(_, func(key : Text) : Cbor.Value = #majorType3(key));
+    |> Array.map<Text, DagCbor.Value>(_, func(key : Text) : DagCbor.Value = #text(key));
     let verificationMethodsCbor = request.verificationMethods
-    |> Array.map<(Text, Text), Cbor.Value>(
+    |> Array.map<(Text, Text), DagCbor.Value>(
       _,
-      func(pair : (Text, Text)) : Cbor.Value = #majorType5([
-        (#majorType3("type"), #majorType3(pair.0)),
-        (#majorType3("did"), #majorType3(pair.1)),
+      func(pair : (Text, Text)) : DagCbor.Value = #map([
+        ("type", #text(pair.0)),
+        ("did", #text(pair.1)),
       ]),
     );
     let alsoKnownAsCbor = request.alsoKnownAs
-    |> Array.map<Text, Cbor.Value>(_, func(aka : Text) : Cbor.Value = #majorType3(aka));
+    |> Array.map<Text, DagCbor.Value>(_, func(aka : Text) : DagCbor.Value = #text(aka));
     let servicesCbor = request.services
-    |> Array.map<PlcService, Cbor.Value>(
+    |> Array.map<PlcService, DagCbor.Value>(
       _,
-      func(service : PlcService) : Cbor.Value = #majorType5([
-        (#majorType3("type"), #majorType3(service.type_)),
-        (#majorType3("endpoint"), #majorType3(service.endpoint)),
+      func(service : PlcService) : DagCbor.Value = #map([
+        ("type", #text(service.type_)),
+        ("endpoint", #text(service.endpoint)),
       ]),
     );
 
-    let prevCbor : Cbor.Value = switch (request.prev) {
-      case (?prev) #majorType3(prev);
-      case (null) #majorType7(#_null);
+    let prevCbor : DagCbor.Value = switch (request.prev) {
+      case (?prev) #text(prev);
+      case (null) #null_;
     };
 
-    let requestCbor : Cbor.Value = #majorType5([
-      (#majorType3("type"), #majorType3(request.type_)),
-      (#majorType3("rotationKeys"), #majorType4(rotationKeysCbor)),
-      (#majorType3("verificationMethods"), #majorType4(verificationMethodsCbor)),
-      (#majorType3("alsoKnownAs"), #majorType4(alsoKnownAsCbor)),
-      (#majorType3("services"), #majorType4(servicesCbor)),
-      (#majorType3("prev"), prevCbor),
+    let requestCbor : DagCbor.Value = #map([
+      ("type", #text(request.type_)),
+      ("rotationKeys", #array(rotationKeysCbor)),
+      ("verificationMethods", #array(verificationMethodsCbor)),
+      ("alsoKnownAs", #array(alsoKnownAsCbor)),
+      ("services", #array(servicesCbor)),
+      ("prev", prevCbor),
     ]);
-    let messageCbor : [Nat8] = switch (Cbor.encode(requestCbor)) {
+    let messageDagCborBytes : [Nat8] = switch (DagCbor.encode(requestCbor)) {
       case (#ok(blob)) blob;
       case (#err(err)) return #err("Failed to encode request to CBOR: " # debug_show (err));
     };
-    let messageHash : Blob = "";
-    let signature : Blob = "";
-    #ok({
-      request with
-      sig = signature;
-    });
+    let messageHash : Blob = Sha256.fromArray(#sha256, messageDagCborBytes);
+    switch (await* sign(rotationKeyId, messageHash)) {
+      case (#ok(sig)) #ok({
+        request with
+        sig = sig;
+      });
+      case (#err(err)) return #err("Failed to sign message: " # err);
+    };
 
   };
 
-  private func getPublicKeyDid(name : Text) : async* Result.Result<Text, Text> {
+  private func sign(derivationPath : [Blob], messageHash : Blob) : async* Result.Result<Blob, Text> {
+    try {
+      let { signature } = await (with cycles = 26_153_846_153) ic.sign_with_ecdsa({
+        derivation_path = derivationPath;
+        key_id = {
+          curve = #secp256k1;
+          name = "dfx_test_key"; // TODO based on environment
+        };
+        message_hash = messageHash;
+      });
+      #ok(signature);
+    } catch (e) {
+      #err("Failed to sign message: " # Error.message(e));
+    };
+  };
+
+  private func getPublicKeyDid(derivationPath : [Blob]) : async* Result.Result<KeyDID.DID, Text> {
     try {
       let { public_key } = await ic.ecdsa_public_key({
         canister_id = null;
-        derivation_path = [];
+        derivation_path = derivationPath;
         key_id = {
           curve = #secp256k1;
-          name = name;
+          name = "dfx_test_key"; // TODO based on environment
         };
       });
-      #ok("did:key:" # debug_show (public_key));
+      #ok({
+        keyType = #secp256k1;
+        publicKey = public_key;
+      });
     } catch (e) {
       #err("Failed to get public key: " # Error.message(e));
     };

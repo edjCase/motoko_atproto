@@ -11,8 +11,9 @@ base = "0.14.13"
 itertools = "0.2.2"
 liminal = "0.0.6"
 base-x-encoder = "1.1.0"
-cbor = "2.0.0"
+dag-cbor = "0.0.1"
 cid = "0.0.1"
+did = "0.0.1"
 
 [dev-dependencies]
 test = "2.1.1"

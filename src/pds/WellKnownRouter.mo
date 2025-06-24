@@ -15,7 +15,7 @@ module {
 
     public class Router() {
 
-        public func getDidDocument<system>(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
+        public func getDidDocument<system>(_ : RouteContext.RouteContext) : async* Route.HttpResponse {
             let didDoc = switch (await* DID.generateDIDDocument("edjcase.com", null)) {
                 // TODO
                 case (#ok(doc)) doc;
@@ -37,7 +37,7 @@ module {
             };
         };
 
-        public func getIcDomains(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
+        public func getIcDomains(_ : RouteContext.RouteContext) : Route.HttpResponse {
             {
                 statusCode = 200;
                 headers = [("Content-Type", "text/plain")];
