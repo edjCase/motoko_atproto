@@ -143,7 +143,17 @@ actor {
     type_ : Text;
     endpoint : Text;
   };
-  public func buildPlcRequest() : async Result.Result<(Text, Text), Text> {
+
+  public func isInitialized() : async Bool {
+    false; // TODO
+  };
+
+  public type BuildPlcRequest = {
+    alsoKnownAs : [Text];
+    services : [PlcService];
+  };
+
+  public func buildPlcRequest(request : BuildPlcRequest) : async Result.Result<(Text, Text), Text> {
     let rotationKeyId : [Blob] = [];
     let verificationKeyId : [Blob] = ["\00"];
 
@@ -158,21 +168,17 @@ actor {
     };
 
     // Build the request object
-    let request : PlcRequest = {
+    let plcRequest : PlcRequest = {
       type_ = "plc_operation";
       rotationKeys = [KeyDID.toText(rotationPublicKeyDid, #base58btc)];
       verificationMethods = [("atproto", KeyDID.toText(verificationPublicKeyDid, #base58btc))];
-      alsoKnownAs = ["at://edjcase.com"];
-      services = [{
-        name = "atproto_pds";
-        type_ = "AtprotoPersonalDataServer";
-        endpoint = "https://edjcase.com";
-      }];
+      alsoKnownAs = request.alsoKnownAs;
+      services = request.services;
       prev = null;
     };
 
     // Convert to CBOR and sign
-    let requestCborMap = switch (requestToCborMap(request)) {
+    let requestCborMap = switch (requestToCborMap(plcRequest)) {
       case (#ok(cbor)) cbor;
       case (#err(err)) return #err(err);
     };
@@ -201,7 +207,7 @@ actor {
     };
 
     // Convert to JSON
-    let json = requestToJson(request, signatureText);
+    let json = requestToJson(plcRequest, signatureText);
 
     #ok((did, json));
   };

@@ -2,11 +2,20 @@ import type { Principal } from '@dfinity/principal';
 import type { ActorMethod } from '@dfinity/agent';
 import type { IDL } from '@dfinity/candid';
 
+export interface BuildPlcRequest {
+  'services' : Array<PlcService>,
+  'alsoKnownAs' : Array<string>,
+}
 export interface CallbackStreamingStrategy {
   'token' : StreamingToken,
   'callback' : StreamingCallback,
 }
 export type Header = [string, string];
+export interface PlcService {
+  'endpoint' : string,
+  'name' : string,
+  'type' : string,
+}
 export interface RawQueryHttpRequest {
   'url' : string,
   'method' : string,
@@ -57,7 +66,7 @@ export interface StreamingCallbackResponse {
 export type StreamingStrategy = { 'Callback' : CallbackStreamingStrategy };
 export type StreamingToken = Uint8Array | number[];
 export interface _SERVICE {
-  'buildPlcRequest' : ActorMethod<[], Result_1>,
+  'buildPlcRequest' : ActorMethod<[BuildPlcRequest], Result_1>,
   'getUrls' : ActorMethod<[], Array<string>>,
   'http_request' : ActorMethod<[RawQueryHttpRequest], RawQueryHttpResponse>,
   'http_request_update' : ActorMethod<
@@ -65,6 +74,7 @@ export interface _SERVICE {
     RawUpdateHttpResponse
   >,
   'initialize' : ActorMethod<[ServerInfo], Result>,
+  'isInitialized' : ActorMethod<[], boolean>,
 }
 export declare const idlFactory: IDL.InterfaceFactory;
 export declare const init: (args: { IDL: typeof IDL }) => IDL.Type[];

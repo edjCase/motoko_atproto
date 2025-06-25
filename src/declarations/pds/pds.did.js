@@ -1,4 +1,13 @@
 export const idlFactory = ({ IDL }) => {
+  const PlcService = IDL.Record({
+    'endpoint' : IDL.Text,
+    'name' : IDL.Text,
+    'type' : IDL.Text,
+  });
+  const BuildPlcRequest = IDL.Record({
+    'services' : IDL.Vec(PlcService),
+    'alsoKnownAs' : IDL.Vec(IDL.Text),
+  });
   const Result_1 = IDL.Variant({
     'ok' : IDL.Tuple(IDL.Text, IDL.Text),
     'err' : IDL.Text,
@@ -58,7 +67,7 @@ export const idlFactory = ({ IDL }) => {
   });
   const Result = IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text });
   return IDL.Service({
-    'buildPlcRequest' : IDL.Func([], [Result_1], []),
+    'buildPlcRequest' : IDL.Func([BuildPlcRequest], [Result_1], []),
     'getUrls' : IDL.Func([], [IDL.Vec(IDL.Text)], ['query']),
     'http_request' : IDL.Func(
         [RawQueryHttpRequest],
@@ -71,6 +80,7 @@ export const idlFactory = ({ IDL }) => {
         [],
       ),
     'initialize' : IDL.Func([ServerInfo], [Result], []),
+    'isInitialized' : IDL.Func([], [IDL.Bool], []),
   });
 };
 export const init = ({ IDL }) => { return []; };

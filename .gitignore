@@ -3,3 +3,5 @@
 .dfx/
 .env
 node_modules/
+.svelte-kit/
+dist/

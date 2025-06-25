@@ -60,6 +60,12 @@ type RawQueryHttpRequest =
    method: text;
    url: text;
  };
+type PlcService = 
+ record {
+   endpoint: text;
+   name: text;
+   "type": text;
+ };
 type Header = 
  record {
    text;
@@ -70,12 +76,18 @@ type CallbackStreamingStrategy =
    callback: StreamingCallback;
    token: StreamingToken;
  };
+type BuildPlcRequest = 
+ record {
+   alsoKnownAs: vec text;
+   services: vec PlcService;
+ };
 service : {
-  buildPlcRequest: () -> (Result_1);
+  buildPlcRequest: (request: BuildPlcRequest) -> (Result_1);
   getUrls: () -> (vec text) query;
   http_request: (request: RawQueryHttpRequest) ->
    (RawQueryHttpResponse) query;
   http_request_update: (request: RawUpdateHttpRequest) ->
    (RawUpdateHttpResponse);
   initialize: (serverInfo: ServerInfo) -> (Result);
+  isInitialized: () -> (bool);
 }

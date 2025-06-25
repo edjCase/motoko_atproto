@@ -10,30 +10,369 @@ img {
   margin: auto;
 }
 
-form {
+main {
+  max-width: 80vw;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.plc-section {
+  margin-top: 2rem;
+  padding: 1.5rem;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  background-color: #f9f9f9;
+}
+
+.plc-section h2 {
+  margin-top: 0;
+  color: #333;
+  text-align: center;
+}
+
+.plc-form {
+  margin-bottom: 2rem;
+}
+
+.form-section {
+  margin-bottom: 2rem;
+  padding: 1rem;
+  background-color: #fff;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+}
+
+.form-section h3 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  color: #333;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 0.5rem;
+}
+
+.dynamic-list {
   display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.list-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.service-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 1rem;
+  background-color: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+}
+
+.service-fields {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr 2fr;
+  gap: 1rem;
+  align-items: start;
+}
+
+.field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.field-group label {
+  font-weight: bold;
+  font-size: 0.9rem;
+  color: #333;
+}
+
+.text-input {
+  padding: 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  transition: border-color 0.2s ease;
+}
+
+.text-input:focus {
+  outline: none;
+  border-color: #007bff;
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+}
+
+.add-button {
+  align-self: flex-start;
+  padding: 0.5rem 1rem;
+  background-color: #28a745;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.add-button:hover {
+  background-color: #218838;
+}
+
+.remove-button {
+  padding: 0.25rem 0.5rem;
+  background-color: #dc3545;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  flex-shrink: 0;
+}
+
+.remove-button:hover:not(:disabled) {
+  background-color: #c82333;
+}
+
+.remove-button:disabled {
+  background-color: #6c757d;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+@media (max-width: 768px) {
+  .service-fields {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+  
+  .service-item {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .remove-button {
+    align-self: flex-end;
+  }
+}
+
+.button-group {
+  display: flex;
+  gap: 1rem;
   justify-content: center;
-  gap: 0.5em;
-  flex-flow: row wrap;
-  max-width: 40vw;
-  margin: auto;
-  align-items: baseline;
+  margin: 1.5rem 0;
+  flex-wrap: wrap;
 }
 
-button[type="submit"] {
-  padding: 5px 20px;
-  margin: 10px auto;
-  float: right;
+.build-button, .verify-button {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 5px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
 }
 
-#greeting {
-  margin: 10px auto;
-  padding: 10px 60px;
-  border: 1px solid #222;
+.build-button {
+  background-color: #007bff;
+  color: white;
 }
 
-#greeting:empty {
-  display: none;
+.build-button:hover:not(:disabled) {
+  background-color: #0056b3;
+}
+
+.verify-button {
+  background-color: #17a2b8;
+  color: white;
+}
+
+.verify-button:hover:not(:disabled) {
+  background-color: #138496;
+}
+
+.build-button:disabled, .verify-button:disabled {
+  background-color: #6c757d;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.result {
+  margin: 1rem 0;
+  padding: 1rem;
+  border-radius: 5px;
+  font-size: 1rem;
+}
+
+.build-result {
+  background-color: #e3f2fd;
+  border: 1px solid #2196f3;
+  color: #1565c0;
+}
+
+.verify-result.success {
+  background-color: #e8f5e8;
+  border: 1px solid #4caf50;
+  color: #2e7d32;
+}
+
+.verify-result.error {
+  background-color: #ffebee;
+  border: 1px solid #f44336;
+  color: #c62828;
+}
+
+.request-data {
+  margin: 1.5rem 0;
+  padding: 1rem;
+  background-color: #fff;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+}
+
+.request-data h3 {
+  margin-top: 0;
+  color: #333;
+}
+
+.data-field {
+  margin: 1rem 0;
+}
+
+.data-field code {
+  background-color: #f1f1f1;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: 'Courier New', monospace;
+  word-break: break-all;
+}
+
+.json-preview {
+  background-color: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 4px;
+  padding: 1rem;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.curl-section {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  background-color: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 5px;
+}
+
+.curl-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.curl-header h4 {
+  margin: 0;
+  color: #333;
+}
+
+.curl-container {
+  position: relative;
+}
+
+.curl-command {
+  flex: 1;
+  background-color: #2d3748;
+  color: #e2e8f0;
+  border: 1px solid #4a5568;
+  border-radius: 4px;
+  padding: 1rem;
+  font-family: 'Courier New', monospace;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+  margin: 0;
+}
+
+.copy-button {
+  background-color: #4a5568;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  white-space: nowrap;
+}
+
+.copy-button:hover:not(:disabled) {
+  background-color: #2d3748;
+}
+
+.copy-button.copied {
+  background-color: #38a169;
+  color: white;
+}
+
+.copy-button.error {
+  background-color: #e53e3e;
+  color: white;
+}
+
+.copy-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.8;
+}
+
+.json-section {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  background-color: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 5px;
+}
+
+.json-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.json-header h4 {
+  margin: 0;
+  color: #333;
+}
+
+.toggle-button {
+  background-color: #6c757d;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  white-space: nowrap;
+}
+
+.toggle-button:hover {
+  background-color: #5a6268;
+}
+
+.json-container {
+  margin-top: 0.5rem;
 }
 
 .browser-warning {
