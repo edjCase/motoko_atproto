@@ -14,6 +14,8 @@ base-x-encoder = "1.1.0"
 dag-cbor = "0.0.1"
 cid = "0.0.1"
 did = "0.0.1"
+json = "1.2.1"
+xtended-text = "1.0.0"
 
 [dev-dependencies]
 test = "2.1.1"

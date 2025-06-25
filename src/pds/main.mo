@@ -21,6 +21,9 @@ import DagCbor "mo:dag-cbor";
 import Array "mo:new-base/Array";
 import Sha256 "mo:sha2/Sha256";
 import KeyDID "mo:did/Key";
+import Json "mo:json";
+import BaseX "mo:base-x-encoder";
+import TextX "mo:xtended-text/TextX";
 
 actor {
 
@@ -135,11 +138,12 @@ actor {
   };
 
   public type PlcService = {
+    name : Text;
     type_ : Text;
     endpoint : Text;
   };
 
-  public func buildPlcRequest() : async Result.Result<SignedPlcRequest, Text> {
+  public func buildPlcRequest() : async Result.Result<(Text, Text), Text> {
     let rotationKeyId : [Blob] = [];
     let verificationKeyId : [Blob] = ["\00"];
     let rotationPublicKeyDid = switch (await* getPublicKeyDid(rotationKeyId)) {
@@ -156,7 +160,8 @@ actor {
       verificationMethods = [("atproto", KeyDID.toText(verificationPublicKeyDid, #base58btc))];
       alsoKnownAs = ["at://edjcase.com"];
       services = [{
-        type_ = "atproto_pds";
+        name = "atproto_pds";
+        type_ = "AtprotoPersonalDataServer";
         endpoint = "https://edjcase.com";
       }];
       prev = null;
@@ -173,13 +178,18 @@ actor {
     );
     let alsoKnownAsCbor = request.alsoKnownAs
     |> Array.map<Text, DagCbor.Value>(_, func(aka : Text) : DagCbor.Value = #text(aka));
-    let servicesCbor = request.services
-    |> Array.map<PlcService, DagCbor.Value>(
-      _,
-      func(service : PlcService) : DagCbor.Value = #map([
-        ("type", #text(service.type_)),
-        ("endpoint", #text(service.endpoint)),
-      ]),
+    let servicesCbor : DagCbor.Value = #map(
+      request.services
+      |> Array.map<PlcService, (Text, DagCbor.Value)>(
+        _,
+        func(service : PlcService) : (Text, DagCbor.Value) = (
+          service.name,
+          #map([
+            ("type", #text(service.type_)),
+            ("endpoint", #text(service.endpoint)),
+          ]),
+        ),
+      )
     );
 
     let prevCbor : DagCbor.Value = switch (request.prev) {
@@ -192,7 +202,7 @@ actor {
       ("rotationKeys", #array(rotationKeysCbor)),
       ("verificationMethods", #array(verificationMethodsCbor)),
       ("alsoKnownAs", #array(alsoKnownAsCbor)),
-      ("services", #array(servicesCbor)),
+      ("services", servicesCbor),
       ("prev", prevCbor),
     ]);
     let messageDagCborBytes : [Nat8] = switch (DagCbor.encode(requestCbor)) {
@@ -200,14 +210,61 @@ actor {
       case (#err(err)) return #err("Failed to encode request to CBOR: " # debug_show (err));
     };
     let messageHash : Blob = Sha256.fromArray(#sha256, messageDagCborBytes);
-    switch (await* sign(rotationKeyId, messageHash)) {
-      case (#ok(sig)) #ok({
-        request with
-        sig = sig;
-      });
+    let signature = switch (await* sign(rotationKeyId, messageHash)) {
+      case (#ok(sig)) sig;
       case (#err(err)) return #err("Failed to sign message: " # err);
     };
 
+    func toTextArray<T>(arr : [Text]) : [Json.Json] {
+      arr |> Array.map(_, func(item : Text) : Json.Json = #string(item));
+    };
+
+    let verificationMethodsJsonObj : Json.Json = #object_(
+      request.verificationMethods
+      |> Array.map<(Text, Text), (Text, Json.Json)>(
+        _,
+        func(pair : (Text, Text)) : (Text, Json.Json) = (pair.0, #string(pair.1)),
+      )
+    );
+
+    let servicesJsonObj : Json.Json = #object_(
+      request.services
+      |> Array.map<PlcService, (Text, Json.Json)>(
+        _,
+        func(service : PlcService) : (Text, Json.Json) = (
+          service.name,
+          #object_([
+            ("type", #string(service.type_)),
+            ("endpoint", #string(service.endpoint)),
+          ]),
+        ),
+      )
+    );
+
+    let jsonObj : Json.Json = #object_([
+      ("type", #string(request.type_)),
+      ("rotationKeys", #array(request.rotationKeys |> toTextArray(_))),
+      ("verificationMethods", verificationMethodsJsonObj),
+      ("alsoKnownAs", #array(request.alsoKnownAs |> toTextArray(_))),
+      ("services", servicesJsonObj),
+      (
+        "prev",
+        switch (request.prev) {
+          case (?prev) #string(prev);
+          case (null) #null_;
+        },
+      ),
+      ("sig", #string(BaseX.toBase64(signature.vals(), #url({ includePadding = false })))),
+    ]);
+
+    let json = Json.stringify(
+      jsonObj,
+      null,
+    );
+    let hash = Sha256.fromArray(#sha256, messageDagCborBytes);
+    let base32Hash = BaseX.toBase32(hash.vals(), #standard({ isUpper = false; includePadding = false }));
+    let did = "did:plc:" # TextX.slice(base32Hash, 0, 24);
+    #ok((did, json));
   };
 
   private func sign(derivationPath : [Blob], messageHash : Blob) : async* Result.Result<Blob, Text> {
