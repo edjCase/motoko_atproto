@@ -1,14 +1,10 @@
 import Text "mo:base/Text";
-import Blob "mo:base/Blob";
 import Result "mo:base/Result";
 import Array "mo:new-base/Array";
-import Nat64 "mo:new-base/Nat64";
-import Bool "mo:new-base/Bool";
 import Repository "./Types/Repository";
 import RepositoryHandler "Handlers/RepositoryHandler";
 import ServerInfoHandler "Handlers/ServerInfoHandler";
 import RouteContext "mo:liminal/RouteContext";
-import Liminal "mo:liminal";
 import Route "mo:liminal/Route";
 import Serde "mo:serde";
 

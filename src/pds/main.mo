@@ -19,6 +19,7 @@ import { ic } "mo:ic";
 import Error "mo:new-base/Error";
 import DagCbor "mo:dag-cbor";
 import Array "mo:new-base/Array";
+import Blob "mo:new-base/Blob";
 import Sha256 "mo:sha2/Sha256";
 import KeyDID "mo:did/Key";
 import Json "mo:json";
@@ -142,10 +143,11 @@ actor {
     type_ : Text;
     endpoint : Text;
   };
-
   public func buildPlcRequest() : async Result.Result<(Text, Text), Text> {
     let rotationKeyId : [Blob] = [];
     let verificationKeyId : [Blob] = ["\00"];
+
+    // Get public keys
     let rotationPublicKeyDid = switch (await* getPublicKeyDid(rotationKeyId)) {
       case (#ok(did)) did;
       case (#err(err)) return #err("Failed to get rotation public key: " # err);
@@ -154,6 +156,8 @@ actor {
       case (#ok(did)) did;
       case (#err(err)) return #err("Failed to get verification public key: " # err);
     };
+
+    // Build the request object
     let request : PlcRequest = {
       type_ = "plc_operation";
       rotationKeys = [KeyDID.toText(rotationPublicKeyDid, #base58btc)];
@@ -166,18 +170,57 @@ actor {
       }];
       prev = null;
     };
+
+    // Convert to CBOR and sign
+    let requestCborMap = switch (requestToCborMap(request)) {
+      case (#ok(cbor)) cbor;
+      case (#err(err)) return #err(err);
+    };
+
+    let messageDagCborBytes : [Nat8] = switch (DagCbor.encode(#map(requestCborMap))) {
+      case (#ok(blob)) blob;
+      case (#err(err)) return #err("Failed to encode request to CBOR: " # debug_show (err));
+    };
+
+    let messageHash : Blob = Sha256.fromArray(#sha256, messageDagCborBytes);
+    let signature = switch (await* sign(rotationKeyId, messageHash)) {
+      case (#ok(sig)) sig;
+      case (#err(err)) return #err("Failed to sign message: " # err);
+    };
+    let signatureText = BaseX.toBase64(signature.vals(), #url({ includePadding = false }));
+
+    // Create signed operation and generate DID
+    let signedCborMap = Array.concat(
+      requestCborMap,
+      [("sig", #text(signatureText))],
+    );
+
+    let did = switch (generateDidFromCbor(#map(signedCborMap))) {
+      case (#ok(did)) did;
+      case (#err(err)) return #err(err);
+    };
+
+    // Convert to JSON
+    let json = requestToJson(request, signatureText);
+
+    #ok((did, json));
+  };
+
+  private func requestToCborMap(request : PlcRequest) : Result.Result<[(Text, DagCbor.Value)], Text> {
     let rotationKeysCbor = request.rotationKeys
     |> Array.map<Text, DagCbor.Value>(_, func(key : Text) : DagCbor.Value = #text(key));
-    let verificationMethodsCbor = request.verificationMethods
-    |> Array.map<(Text, Text), DagCbor.Value>(
-      _,
-      func(pair : (Text, Text)) : DagCbor.Value = #map([
-        ("type", #text(pair.0)),
-        ("did", #text(pair.1)),
-      ]),
+
+    let verificationMethodsCbor = #map(
+      request.verificationMethods
+      |> Array.map<(Text, Text), (Text, DagCbor.Value)>(
+        _,
+        func(pair : (Text, Text)) : (Text, DagCbor.Value) = (pair.0, #text(pair.1)),
+      )
     );
+
     let alsoKnownAsCbor = request.alsoKnownAs
     |> Array.map<Text, DagCbor.Value>(_, func(aka : Text) : DagCbor.Value = #text(aka));
+
     let servicesCbor : DagCbor.Value = #map(
       request.services
       |> Array.map<PlcService, (Text, DagCbor.Value)>(
@@ -197,25 +240,30 @@ actor {
       case (null) #null_;
     };
 
-    let requestCbor : DagCbor.Value = #map([
+    #ok([
       ("type", #text(request.type_)),
       ("rotationKeys", #array(rotationKeysCbor)),
-      ("verificationMethods", #array(verificationMethodsCbor)),
+      ("verificationMethods", verificationMethodsCbor),
       ("alsoKnownAs", #array(alsoKnownAsCbor)),
       ("services", servicesCbor),
       ("prev", prevCbor),
     ]);
-    let messageDagCborBytes : [Nat8] = switch (DagCbor.encode(requestCbor)) {
+  };
+
+  private func generateDidFromCbor(signedCbor : DagCbor.Value) : Result.Result<Text, Text> {
+    let signedDagCborBytes : [Nat8] = switch (DagCbor.encode(signedCbor)) {
       case (#ok(blob)) blob;
-      case (#err(err)) return #err("Failed to encode request to CBOR: " # debug_show (err));
-    };
-    let messageHash : Blob = Sha256.fromArray(#sha256, messageDagCborBytes);
-    let signature = switch (await* sign(rotationKeyId, messageHash)) {
-      case (#ok(sig)) sig;
-      case (#err(err)) return #err("Failed to sign message: " # err);
+      case (#err(err)) return #err("Failed to encode signed request to CBOR: " # debug_show (err));
     };
 
-    func toTextArray<T>(arr : [Text]) : [Json.Json] {
+    let hash = Sha256.fromArray(#sha256, signedDagCborBytes);
+    let base32Hash = BaseX.toBase32(hash.vals(), #standard({ isUpper = false; includePadding = false }));
+    let did = "did:plc:" # TextX.slice(base32Hash, 0, 24);
+    #ok(did);
+  };
+
+  private func requestToJson(request : PlcRequest, signature : Text) : Text {
+    func toTextArray(arr : [Text]) : [Json.Json] {
       arr |> Array.map(_, func(item : Text) : Json.Json = #string(item));
     };
 
@@ -254,17 +302,10 @@ actor {
           case (null) #null_;
         },
       ),
-      ("sig", #string(BaseX.toBase64(signature.vals(), #url({ includePadding = false })))),
+      ("sig", #string(signature)),
     ]);
 
-    let json = Json.stringify(
-      jsonObj,
-      null,
-    );
-    let hash = Sha256.fromArray(#sha256, messageDagCborBytes);
-    let base32Hash = BaseX.toBase32(hash.vals(), #standard({ isUpper = false; includePadding = false }));
-    let did = "did:plc:" # TextX.slice(base32Hash, 0, 24);
-    #ok((did, json));
+    Json.stringify(jsonObj, null);
   };
 
   private func sign(derivationPath : [Blob], messageHash : Blob) : async* Result.Result<Blob, Text> {

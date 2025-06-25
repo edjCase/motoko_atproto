@@ -1,0 +1,81 @@
+type StreamingToken = blob;
+type StreamingStrategy = variant {Callback: CallbackStreamingStrategy;};
+type StreamingCallbackResponse = 
+ record {
+   body: blob;
+   token: opt StreamingToken;
+ };
+type StreamingCallback = func (StreamingToken) ->
+                          (StreamingCallbackResponse) query;
+type ServerInfo = 
+ record {
+   availableUserDomains: vec text;
+   contactEmailAddress: text;
+   did: text;
+   inviteCodeRequired: bool;
+   privacyPolicy: text;
+   termsOfService: text;
+   version: text;
+ };
+type Result_1 = 
+ variant {
+   err: text;
+   ok: record {
+         text;
+         text;
+       };
+ };
+type Result = 
+ variant {
+   err: text;
+   ok;
+ };
+type RawUpdateHttpResponse = 
+ record {
+   body: blob;
+   headers: vec Header;
+   status_code: nat16;
+   streaming_strategy: opt StreamingStrategy;
+ };
+type RawUpdateHttpRequest = 
+ record {
+   body: blob;
+   headers: vec Header;
+   method: text;
+   url: text;
+ };
+type RawQueryHttpResponse = 
+ record {
+   body: blob;
+   headers: vec Header;
+   status_code: nat16;
+   streaming_strategy: opt StreamingStrategy;
+   upgrade: opt bool;
+ };
+type RawQueryHttpRequest = 
+ record {
+   body: blob;
+   certificate_version: opt nat16;
+   headers: vec Header;
+   method: text;
+   url: text;
+ };
+type Header = 
+ record {
+   text;
+   text;
+ };
+type CallbackStreamingStrategy = 
+ record {
+   callback: StreamingCallback;
+   token: StreamingToken;
+ };
+service : {
+  buildPlcRequest: () -> (Result_1);
+  getUrls: () -> (vec text) query;
+  http_request: (request: RawQueryHttpRequest) ->
+   (RawQueryHttpResponse) query;
+  http_request_update: (request: RawUpdateHttpRequest) ->
+   (RawUpdateHttpResponse);
+  initialize: (serverInfo: ServerInfo) -> (Result);
+}

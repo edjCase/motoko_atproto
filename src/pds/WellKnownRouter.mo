@@ -1,7 +1,7 @@
 import Text "mo:base/Text";
 import RouteContext "mo:liminal/RouteContext";
 import Route "mo:liminal/Route";
-import DID "../did";
+import DID "./did";
 
 module {
 
