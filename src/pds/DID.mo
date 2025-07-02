@@ -1,22 +1,25 @@
-import Principal "mo:base/Principal";
 import Result "mo:base/Result";
 import Blob "mo:base/Blob";
 import Text "mo:base/Text";
 import DagCbor "mo:dag-cbor";
-import KeyDID "mo:did/Key";
-import Array "mo:new-base/Array";
 import Sha256 "mo:sha2/Sha256";
-import ServerInfo "./Types/ServerInfo";
 import PlcDID "mo:did/Plc";
-import WebDID "mo:did/Web";
 import DID "mo:did";
-import KeyHandler "./Handlers/KeyHandler";
+import BaseX "mo:base-x-encoder";
+import TextX "mo:xtended-text/TextX";
+import KeyHandler "Handlers/KeyHandler";
+import Array "mo:new-base/Array";
 
 module {
 
     public type BuildPlcRequest = {
         alsoKnownAs : [Text];
         services : [PlcService];
+    };
+
+    public type PlcRequestInfo = {
+        request : SignedPlcRequest;
+        did : DID.Plc.DID;
     };
 
     public type PlcRequest = {
@@ -29,7 +32,7 @@ module {
     };
 
     public type SignedPlcRequest = PlcRequest and {
-        sig : Blob;
+        signature : Blob;
     };
 
     public type PlcService = {
@@ -51,17 +54,17 @@ module {
         id : Text;
         type_ : Text;
         controller : DID.DID;
-        publicKeyMultibase : ?KeyDID.DID;
+        publicKeyMultibase : ?DID.Key.DID;
     };
 
     // Generate the AT Protocol DID Document
     public func generateDIDDocument(
         plcDid : PlcDID.DID,
-        webDid : WebDID.DID,
-        verificationPublicKey : KeyDID.DID,
+        webDid : DID.Web.DID,
+        verificationPublicKey : DID.Key.DID,
     ) : DidDocument {
 
-        let webDidText : Text = WebDID.toText(webDid);
+        let webDidText : Text = DID.Web.toText(webDid);
         let plcDidText : Text = PlcDID.toText(plcDid);
         {
             id = #web(webDid);
@@ -87,7 +90,10 @@ module {
         };
     };
 
-    public func buildPlcRequest(request : BuildPlcRequest, keyHandler : KeyHandler.Handler) : async* Result.Result<SignedPlcRequest, Text> {
+    public func buildPlcRequest(
+        request : BuildPlcRequest,
+        keyHandler : KeyHandler.Handler,
+    ) : async* Result.Result<PlcRequestInfo, Text> {
 
         let rotationPublicKeyDid = switch (await* keyHandler.getPublicKey(#rotation)) {
             case (#ok(did)) did;
@@ -100,8 +106,8 @@ module {
         // Build the request object
         let plcRequest : PlcRequest = {
             type_ = "plc_operation";
-            rotationKeys = [KeyDID.toText(rotationPublicKeyDid, #base58btc)];
-            verificationMethods = [("atproto", KeyDID.toText(verificationPublicKeyDid, #base58btc))];
+            rotationKeys = [DID.Key.toText(rotationPublicKeyDid, #base58btc)];
+            verificationMethods = [("atproto", DID.Key.toText(verificationPublicKeyDid, #base58btc))];
             alsoKnownAs = request.alsoKnownAs;
             services = request.services;
             prev = null;
@@ -123,9 +129,25 @@ module {
             case (#ok(sig)) sig;
             case (#err(err)) return #err("Failed to sign message: " # err);
         };
-        #ok({
+        let signedPlcRequest : SignedPlcRequest = {
             plcRequest with
-            sig = signature;
+            signature = signature;
+        };
+
+        let signedCborMap = Array.concat(
+            requestCborMap,
+            [
+                ("sig", #text(BaseX.toBase64(signature.vals(), #url({ includePadding = false })))),
+            ],
+        );
+
+        let did = switch (generateDidFromCbor(#map(signedCborMap))) {
+            case (#ok(did)) did;
+            case (#err(err)) return #err("Failed to generate DID from signed request: " # err);
+        };
+        #ok({
+            request = signedPlcRequest;
+            did = did;
         });
     };
 
@@ -171,6 +193,19 @@ module {
             ("services", servicesCbor),
             ("prev", prevCbor),
         ]);
+    };
+
+    private func generateDidFromCbor(signedCbor : DagCbor.Value) : Result.Result<DID.Plc.DID, Text> {
+        let signedDagCborBytes : [Nat8] = switch (DagCbor.encode(signedCbor)) {
+            case (#ok(blob)) blob;
+            case (#err(err)) return #err("Failed to encode signed request to CBOR: " # debug_show (err));
+        };
+
+        let hash = Sha256.fromArray(#sha256, signedDagCborBytes);
+        let base32Hash = BaseX.toBase32(hash.vals(), #standard({ isUpper = false; includePadding = false }));
+        #ok({
+            identifier = TextX.slice(base32Hash, 0, 24);
+        });
     };
 
 };

@@ -4,7 +4,7 @@ import PlcDID "mo:did/Plc";
 module {
     public type ServerInfo = {
         domain : Domain.Domain;
-        plcDids : [PlcDID.DID];
+        plcDid : PlcDID.DID;
         contactEmailAddress : ?Text;
     };
 };

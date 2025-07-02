@@ -16,6 +16,91 @@ main {
   padding: 20px;
 }
 
+.initialize-section {
+  margin-bottom: 3rem;
+  padding: 1.5rem;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  background-color: #f0f8ff;
+}
+
+.initialize-section h2 {
+  margin-top: 0;
+  color: #333;
+  text-align: center;
+}
+
+.status-indicator {
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+  border-radius: 5px;
+  text-align: center;
+  background-color: #fff3cd;
+  border: 1px solid #ffeaa7;
+  color: #856404;
+}
+
+.status-indicator.success {
+  background-color: #d4edda;
+  border-color: #c3e6cb;
+  color: #155724;
+}
+
+.initialize-instructions {
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background-color: #e7f3ff;
+  border: 1px solid #b3d7ff;
+  border-radius: 5px;
+}
+
+.initialize-instructions h3 {
+  margin-top: 0;
+  color: #0056b3;
+}
+
+.initialize-instructions ol {
+  margin-bottom: 0;
+  padding-left: 1.5rem;
+}
+
+.initialize-instructions li {
+  margin-bottom: 0.5rem;
+  line-height: 1.4;
+}
+
+.initialize-form {
+  margin-bottom: 1.5rem;
+}
+
+.initialize-form small {
+  color: #6c757d;
+  font-size: 0.85rem;
+  margin-top: 0.25rem;
+  display: block;
+}
+
+.initialize-button {
+  padding: 0.75rem 1.5rem;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.initialize-button:hover:not(:disabled) {
+  background-color: #0056b3;
+}
+
+.initialize-button:disabled {
+  background-color: #6c757d;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .plc-section {
   margin-top: 2rem;
   padding: 1.5rem;
@@ -221,6 +306,18 @@ main {
 }
 
 .verify-result.error {
+  background-color: #ffebee;
+  border: 1px solid #f44336;
+  color: #c62828;
+}
+
+.result.success {
+  background-color: #e8f5e8;
+  border: 1px solid #4caf50;
+  color: #2e7d32;
+}
+
+.result.error {
   background-color: #ffebee;
   border: 1px solid #f44336;
   color: #c62828;

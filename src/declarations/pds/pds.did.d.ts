@@ -10,6 +10,12 @@ export interface CallbackStreamingStrategy {
   'token' : StreamingToken,
   'callback' : StreamingCallback,
 }
+export interface DID { 'identifier' : string }
+export interface Domain {
+  'name' : string,
+  'subdomains' : Array<string>,
+  'suffix' : string,
+}
 export type Header = [string, string];
 export interface PlcService {
   'endpoint' : string,
@@ -47,13 +53,9 @@ export type Result = { 'ok' : null } |
 export type Result_1 = { 'ok' : [string, string] } |
   { 'err' : string };
 export interface ServerInfo {
-  'did' : string,
-  'privacyPolicy' : string,
-  'contactEmailAddress' : string,
-  'inviteCodeRequired' : boolean,
-  'availableUserDomains' : Array<string>,
-  'version' : string,
-  'termsOfService' : string,
+  'domain' : Domain,
+  'plcDid' : DID,
+  'contactEmailAddress' : [] | [string],
 }
 export type StreamingCallback = ActorMethod<
   [StreamingToken],
@@ -67,7 +69,6 @@ export type StreamingStrategy = { 'Callback' : CallbackStreamingStrategy };
 export type StreamingToken = Uint8Array | number[];
 export interface _SERVICE {
   'buildPlcRequest' : ActorMethod<[BuildPlcRequest], Result_1>,
-  'getUrls' : ActorMethod<[], Array<string>>,
   'http_request' : ActorMethod<[RawQueryHttpRequest], RawQueryHttpResponse>,
   'http_request_update' : ActorMethod<
     [RawUpdateHttpRequest],

@@ -1,6 +1,4 @@
 import Text "mo:base/Text";
-import Iter "mo:base/Iter";
-import HashMap "mo:base/HashMap";
 import Result "mo:base/Result";
 import XrpcRouter "./XrpcRouter";
 import WellKnownRouter "./WellKnownRouter";
@@ -9,19 +7,14 @@ import CompressionMiddleware "mo:liminal/Middleware/Compression";
 import CORSMiddleware "mo:liminal/Middleware/CORS";
 import JWTMiddleware "mo:liminal/Middleware/JWT";
 import Liminal "mo:liminal";
-import App "mo:liminal/App";
 import Router "mo:liminal/Router";
-import Debug "mo:new-base/Debug";
 import RepositoryHandler "Handlers/RepositoryHandler";
 import ServerInfoHandler "Handlers/ServerInfoHandler";
+import KeyHandler "Handlers/KeyHandler";
 import ServerInfo "Types/ServerInfo";
-import Error "mo:new-base/Error";
-import Array "mo:new-base/Array";
-import Blob "mo:new-base/Blob";
-import Sha256 "mo:sha2/Sha256";
-import Json "mo:json";
-import BaseX "mo:base-x-encoder";
-import TextX "mo:xtended-text/TextX";
+import DIDModule "./DID";
+import JsonSerializer "./JsonSerializer";
+import DID "mo:did";
 
 actor {
 
@@ -52,7 +45,7 @@ actor {
   };
 
   let xrpcRouter = XrpcRouter.Router(repositoryHandler, serverInfoHandler);
-  let wellKnownRouter = WellKnownRouter.Router();
+  let wellKnownRouter = WellKnownRouter.Router(serverInfoHandler, keyHandler);
 
   let routerConfig : RouterMiddleware.Config = {
     prefix = null;
@@ -103,89 +96,36 @@ actor {
     await* app.http_request_update(request);
   };
 
+  // Candid API methods
+
   public func initialize(serverInfo : ServerInfo.ServerInfo) : async Result.Result<(), Text> {
+    if (serverInfoHandler.get() != null) {
+      return #err("Server is already initialized");
+    };
     serverInfoHandler.set(serverInfo);
     #ok;
   };
 
   public func isInitialized() : async Bool {
-    false; // TODO
+    serverInfoHandler.get() != null;
   };
 
-  public func buildPlcRequest(request : BuildPlcRequest) : async Result.Result<(Text, Text), Text> {
+  public func buildPlcRequest(request : DIDModule.BuildPlcRequest) : async Result.Result<(Text, Text), Text> {
 
-    let signedPlcRequest = DID.buildPlcRequest(
-      request,
-      keyHandler,
-    );
-
-    let did = switch (generateDidFromCbor(signedPlcRequest)) {
-      case (#ok(did)) did;
-      case (#err(err)) return #err("Failed to generate DID from signed request: " # err);
+    let requestInfo = switch (
+      await* DIDModule.buildPlcRequest(
+        request,
+        keyHandler,
+      )
+    ) {
+      case (#ok(info)) info;
+      case (#err(err)) return #err("Failed to build PLC request: " # err);
     };
 
     // Convert to JSON
-    let json = requestToJson(signedPlcRequest);
+    let json = JsonSerializer.signedPlcRequest(requestInfo.request);
 
-    #ok((did, json));
-  };
-
-  private func generateDidFromCbor(signedCbor : DagCbor.Value) : Result.Result<Text, Text> {
-    let signedDagCborBytes : [Nat8] = switch (DagCbor.encode(signedCbor)) {
-      case (#ok(blob)) blob;
-      case (#err(err)) return #err("Failed to encode signed request to CBOR: " # debug_show (err));
-    };
-
-    let hash = Sha256.fromArray(#sha256, signedDagCborBytes);
-    let base32Hash = BaseX.toBase32(hash.vals(), #standard({ isUpper = false; includePadding = false }));
-    let did = "did:plc:" # TextX.slice(base32Hash, 0, 24);
-    #ok(did);
-  };
-
-  private func requestToJson(request : SignedPlcRequest) : Text {
-    func toTextArray(arr : [Text]) : [Json.Json] {
-      arr |> Array.map(_, func(item : Text) : Json.Json = #string(item));
-    };
-
-    let verificationMethodsJsonObj : Json.Json = #object_(
-      request.verificationMethods
-      |> Array.map<(Text, Text), (Text, Json.Json)>(
-        _,
-        func(pair : (Text, Text)) : (Text, Json.Json) = (pair.0, #string(pair.1)),
-      )
-    );
-
-    let servicesJsonObj : Json.Json = #object_(
-      request.services
-      |> Array.map<PlcService, (Text, Json.Json)>(
-        _,
-        func(service : PlcService) : (Text, Json.Json) = (
-          service.name,
-          #object_([
-            ("type", #string(service.type_)),
-            ("endpoint", #string(service.endpoint)),
-          ]),
-        ),
-      )
-    );
-
-    let jsonObj : Json.Json = #object_([
-      ("type", #string(request.type_)),
-      ("rotationKeys", #array(request.rotationKeys |> toTextArray(_))),
-      ("verificationMethods", verificationMethodsJsonObj),
-      ("alsoKnownAs", #array(request.alsoKnownAs |> toTextArray(_))),
-      ("services", servicesJsonObj),
-      (
-        "prev",
-        switch (request.prev) {
-          case (?prev) #string(prev);
-          case (null) #null_;
-        },
-      ),
-      ("sig", #string(signature)),
-    ]);
-
-    Json.stringify(jsonObj, null);
+    #ok((DID.Plc.toText(requestInfo.did), json));
   };
 
 };

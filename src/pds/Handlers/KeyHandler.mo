@@ -1,5 +1,5 @@
 import Result "mo:new-base/Result";
-import KeyDID "mo:did/Key";
+import DID "mo:did";
 import Blob "mo:new-base/Blob";
 import Text "mo:new-base/Text";
 import Error "mo:new-base/Error";
@@ -39,7 +39,7 @@ module {
             };
         };
 
-        public func getPublicKey(key : KeyKind) : async* Result.Result<KeyDID.DID, Text> {
+        public func getPublicKey(key : KeyKind) : async* Result.Result<DID.Key.DID, Text> {
             let derivationPath = getDerivationPathForKey(key);
             try {
                 let { public_key } = await ic.ecdsa_public_key({

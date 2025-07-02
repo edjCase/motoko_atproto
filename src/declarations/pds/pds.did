@@ -9,13 +9,9 @@ type StreamingCallback = func (StreamingToken) ->
                           (StreamingCallbackResponse) query;
 type ServerInfo = 
  record {
-   availableUserDomains: vec text;
-   contactEmailAddress: text;
-   did: text;
-   inviteCodeRequired: bool;
-   privacyPolicy: text;
-   termsOfService: text;
-   version: text;
+   contactEmailAddress: opt text;
+   domain: Domain;
+   plcDid: DID;
  };
 type Result_1 = 
  variant {
@@ -71,6 +67,13 @@ type Header =
    text;
    text;
  };
+type Domain = 
+ record {
+   name: text;
+   subdomains: vec text;
+   suffix: text;
+ };
+type DID = record {identifier: text;};
 type CallbackStreamingStrategy = 
  record {
    callback: StreamingCallback;
@@ -83,7 +86,6 @@ type BuildPlcRequest =
  };
 service : {
   buildPlcRequest: (request: BuildPlcRequest) -> (Result_1);
-  getUrls: () -> (vec text) query;
   http_request: (request: RawQueryHttpRequest) ->
    (RawQueryHttpResponse) query;
   http_request_update: (request: RawUpdateHttpRequest) ->

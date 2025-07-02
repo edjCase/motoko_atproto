@@ -1,6 +1,7 @@
 <script>
   import "../index.scss";
   import { backend } from "$lib/canisters";
+  import { onMount } from "svelte";
 
   let did = "";
   let rawJsonText = "";
@@ -11,6 +12,18 @@
   let verifyRequestSuccess = false;
   let copyButtonState = "copy"; // "copy", "copied", "error"
   let jsonExpanded = false;
+
+  // Initialize section state
+  let isInitialized = false;
+  let checkingInitialization = false;
+  let initializeLoading = false;
+  let initializeResult = "";
+  let initializeSuccess = false;
+
+  // Initialize form data
+  let initDomain = "";
+  let initPlcDid = "";
+  let initContactEmail = "";
 
   // Form data for buildPlcRequest
   let alsoKnownAs = [""];
@@ -36,6 +49,73 @@
 
   function removeService(index) {
     services = services.filter((_, i) => i !== index);
+  }
+
+  // Initialize section functions
+  onMount(async () => {
+    await checkInitializationStatus();
+  });
+
+  async function checkInitializationStatus() {
+    checkingInitialization = true;
+    try {
+      isInitialized = await backend.isInitialized();
+    } catch (error) {
+      console.error("Error checking initialization status:", error);
+    } finally {
+      checkingInitialization = false;
+    }
+  }
+
+  async function initializePDS() {
+    if (!initDomain.trim() || !initPlcDid.trim()) {
+      initializeResult = "Error: Domain and PLC DID are required";
+      initializeSuccess = false;
+      return;
+    }
+
+    initializeLoading = true;
+    initializeResult = "";
+
+    try {
+      // Parse domain - for simplicity, we'll treat the whole input as domain name
+      // In a more sophisticated implementation, you might want to parse subdomains
+      const domainParts = initDomain.trim().split('.');
+      const suffix = domainParts.length > 1 ? domainParts.pop() : "";
+      const name = domainParts.join('.');
+      
+      const serverInfo = {
+        domain: {
+          name: name,
+          subdomains: [],
+          suffix: suffix
+        },
+        plcDid: {
+          identifier: initPlcDid.trim()
+        },
+        contactEmailAddress: initContactEmail.trim() ? [initContactEmail.trim()] : []
+      };
+
+      const response = await backend.initialize(serverInfo);
+      
+      if ("ok" in response) {
+        initializeResult = "✅ PDS initialized successfully!";
+        initializeSuccess = true;
+        isInitialized = true;
+        // Clear the form
+        initDomain = "";
+        initPlcDid = "";
+        initContactEmail = "";
+      } else {
+        initializeResult = `❌ Error: ${response.err}`;
+        initializeSuccess = false;
+      }
+    } catch (error) {
+      initializeResult = `❌ Network error: ${error.message}`;
+      initializeSuccess = false;
+    } finally {
+      initializeLoading = false;
+    }
   }
 
   async function buildPlcRequest() {
@@ -144,6 +224,97 @@
 </script>
 
 <main>
+  <section class="initialize-section">
+    <h2>Initialize PDS</h2>
+    
+    {#if checkingInitialization}
+      <div class="status-indicator">
+        <p>⏳ Checking initialization status...</p>
+      </div>
+    {:else if isInitialized}
+      <div class="status-indicator success">
+        <p>✅ PDS is already initialized and ready to use!</p>
+      </div>
+    {:else}
+      <div class="status-indicator">
+        <p>⚠️ PDS needs to be initialized before use</p>
+      </div>
+      
+      <div class="initialize-instructions">
+        <h3>Initialization Steps:</h3>
+        <ol>
+          <li>Use the PLC Directory Integration below to build a PLC request</li>
+          <li>Submit the request to plc.directory using the generated cURL command</li>
+          <li>Copy the resulting PLC DID from the directory</li>
+          <li>Fill in the form below to initialize your PDS</li>
+        </ol>
+      </div>
+
+      <form class="initialize-form">
+        <div class="form-section">
+          <h3>Server Information</h3>
+          
+          <div class="field-group">
+            <label for="init-domain">Domain *:</label>
+            <input
+              id="init-domain"
+              type="text"
+              bind:value={initDomain}
+              placeholder="example.com"
+              class="text-input"
+              required
+            />
+            <small>Enter your full domain name (e.g., pds.example.com)</small>
+          </div>
+          
+          <div class="field-group">
+            <label for="init-plc-did">PLC DID *:</label>
+            <input
+              id="init-plc-did"
+              type="text"
+              bind:value={initPlcDid}
+              placeholder="did:plc:..."
+              class="text-input"
+              required
+            />
+            <small>Enter the DID you received after submitting to plc.directory</small>
+          </div>
+          
+          <div class="field-group">
+            <label for="init-contact-email">Contact Email (optional):</label>
+            <input
+              id="init-contact-email"
+              type="email"
+              bind:value={initContactEmail}
+              placeholder="admin@example.com"
+              class="text-input"
+            />
+          </div>
+        </div>
+      </form>
+
+      <div class="button-group">
+        <button
+          on:click={initializePDS}
+          disabled={initializeLoading || !initDomain.trim() || !initPlcDid.trim()}
+          class="initialize-button"
+        >
+          {initializeLoading ? "Initializing..." : "Initialize PDS"}
+        </button>
+      </div>
+
+      {#if initializeResult}
+        <div
+          class="result"
+          class:success={initializeSuccess}
+          class:error={!initializeSuccess}
+        >
+          <strong>Initialize Result:</strong> {initializeResult}
+        </div>
+      {/if}
+    {/if}
+  </section>
+
   <section class="plc-section">
     <h2>PLC Directory Integration</h2>
 
@@ -182,8 +353,9 @@
             <div class="service-item">
               <div class="service-fields">
                 <div class="field-group">
-                  <label>Name:</label>
+                  <label for="service-name-{index}">Name:</label>
                   <input
+                    id="service-name-{index}"
                     type="text"
                     bind:value={services[index].name}
                     placeholder="Service name"
@@ -191,8 +363,9 @@
                   />
                 </div>
                 <div class="field-group">
-                  <label>Type:</label>
+                  <label for="service-type-{index}">Type:</label>
                   <input
+                    id="service-type-{index}"
                     type="text"
                     bind:value={services[index].type}
                     placeholder="Service type"
@@ -200,8 +373,9 @@
                   />
                 </div>
                 <div class="field-group">
-                  <label>Endpoint:</label>
+                  <label for="service-endpoint-{index}">Endpoint:</label>
                   <input
+                    id="service-endpoint-{index}"
                     type="url"
                     bind:value={services[index].endpoint}
                     placeholder="https://example.com"

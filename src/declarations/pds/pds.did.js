@@ -56,19 +56,20 @@ export const idlFactory = ({ IDL }) => {
     'streaming_strategy' : IDL.Opt(StreamingStrategy),
     'status_code' : IDL.Nat16,
   });
+  const Domain = IDL.Record({
+    'name' : IDL.Text,
+    'subdomains' : IDL.Vec(IDL.Text),
+    'suffix' : IDL.Text,
+  });
+  const DID = IDL.Record({ 'identifier' : IDL.Text });
   const ServerInfo = IDL.Record({
-    'did' : IDL.Text,
-    'privacyPolicy' : IDL.Text,
-    'contactEmailAddress' : IDL.Text,
-    'inviteCodeRequired' : IDL.Bool,
-    'availableUserDomains' : IDL.Vec(IDL.Text),
-    'version' : IDL.Text,
-    'termsOfService' : IDL.Text,
+    'domain' : Domain,
+    'plcDid' : DID,
+    'contactEmailAddress' : IDL.Opt(IDL.Text),
   });
   const Result = IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text });
   return IDL.Service({
     'buildPlcRequest' : IDL.Func([BuildPlcRequest], [Result_1], []),
-    'getUrls' : IDL.Func([], [IDL.Vec(IDL.Text)], ['query']),
     'http_request' : IDL.Func(
         [RawQueryHttpRequest],
         [RawQueryHttpResponse],
