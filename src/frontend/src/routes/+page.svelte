@@ -18,8 +18,8 @@
     {
       name: "atproto_pds",
       type: "AtprotoPersonalDataServer",
-      endpoint: ""
-    }
+      endpoint: "",
+    },
   ];
 
   function addAlsoKnownAs() {
@@ -42,26 +42,30 @@
     buildRequestLoading = true;
     buildRequestResult = "";
     verifyRequestResult = ""; // Clear verify result
-    
+
     try {
       // Filter out empty alsoKnownAs entries
-      const filteredAlsoKnownAs = alsoKnownAs.filter(item => item.trim() !== "");
-      
-      // Filter out incomplete services
-      const filteredServices = services.filter(service => 
-        service.name.trim() !== "" && 
-        service.type.trim() !== "" && 
-        service.endpoint.trim() !== ""
+      const filteredAlsoKnownAs = alsoKnownAs.filter(
+        (item) => item.trim() !== ""
       );
-      
+
+      // Filter out incomplete services
+      const filteredServices = services.filter(
+        (service) =>
+          service.name.trim() !== "" &&
+          service.type.trim() !== "" &&
+          service.endpoint.trim() !== ""
+      );
+
       const requestData = {
         alsoKnownAs: filteredAlsoKnownAs,
-        services: filteredServices
+        services: filteredServices,
       };
-      
-      const response = await backend.buildPlcRequest(requestData);
 
-      if ('ok' in response) {
+      const response = await backend.buildPlcRequest(requestData);
+      console.log("PLC request response:", response);
+
+      if ("ok" in response) {
         const [didValue, jsonValue] = response.ok;
         did = didValue;
         rawJsonText = jsonValue;

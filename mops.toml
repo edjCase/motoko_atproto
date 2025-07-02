@@ -7,13 +7,13 @@ keywords = [ ]
 license = "MIT"
 
 [dependencies]
-base = "0.14.13"
+base = "0.14.14"
 itertools = "0.2.2"
-liminal = "0.0.6"
+liminal = "0.2.0"
 base-x-encoder = "1.1.0"
 dag-cbor = "0.0.1"
 cid = "0.0.1"
-did = "0.0.1"
+did = "1.0.0"
 json = "1.2.1"
 xtended-text = "1.0.0"
 
@@ -21,4 +21,4 @@ xtended-text = "1.0.0"
 test = "2.1.1"
 
 [toolchain]
-moc = "0.14.10"
+moc = "0.14.14"

@@ -1,0 +1,26 @@
+{
+  "@context": [
+    "https://www.w3.org/ns/did/v1",
+    "https://w3id.org/security/multikey/v1",
+    "https://w3id.org/security/suites/secp256k1-2019/v1"
+  ],
+  "alsoKnownAs": [
+    "at://edjcase.com"
+  ],
+  "id": "did:plc:sdpv6troz7ozrjf2titdtcd2",
+  "service": [
+    {
+      "id": "#atproto_pds",
+      "serviceEndpoint": "https://edjcase.com",
+      "type": "AtprotoPersonalDataServer"
+    }
+  ],
+  "verificationMethod": [
+    {
+      "controller": "did:plc:sdpv6troz7ozrjf2titdtcd2",
+      "id": "did:plc:sdpv6troz7ozrjf2titdtcd2#atproto",
+      "publicKeyMultibase": "zQ3shPQF4Ruk6Tfw9pWdpSmzco5mZbdtS1HfMqEJWW1XSsU9N",
+      "type": "Multikey"
+    }
+  ]
+}

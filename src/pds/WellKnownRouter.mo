@@ -1,41 +1,39 @@
 import Text "mo:base/Text";
 import RouteContext "mo:liminal/RouteContext";
 import Route "mo:liminal/Route";
-import DID "./did";
+import DID "./DID";
+import KeyHandler "./Handlers/KeyHandler";
+import KeyDID "mo:did/Key";
+import ServerInfoHandler "./Handlers/ServerInfoHandler";
+import Domain "mo:url-kit/Domain";
 
 module {
 
-    public class Router() {
+    public class Router(
+        serverInfoHandler : ServerInfoHandler.Handler,
+        keyHandler : KeyHandler.Handler,
+    ) = this {
 
-        public func getDidDocument<system>(_ : RouteContext.RouteContext) : async* Route.HttpResponse {
-            let didDoc = switch (await* DID.generateDIDDocument("edjcase.com", null)) {
-                // TODO
-                case (#ok(doc)) doc;
-                case (#err(err)) {
-                    let json = "{\"error\": \"failed to generate DID document\", \"message\": \"" # err # "\"}";
-                    return {
-                        statusCode = 500;
-                        headers = [("Content-Type", "application/json")];
-                        body = ?Text.encodeUtf8(json);
-                        streamingStrategy = null;
-                    };
-                };
+        public func getDidDocument<system>(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
+            let publicKeyDID : KeyDID.DID = switch (await* keyHandler.getPublicKey(#verification)) {
+                case (#ok(did)) did;
+                case (#err(e)) return routeContext.buildResponse(#internalServerError, #error(#a()));
             };
-            {
-                statusCode = 200;
-                headers = [("Content-Type", "application/json")];
-                body = ?Text.encodeUtf8(didDoc);
-                streamingStrategy = null;
-            };
+            let didDoc = DID.generateDIDDocument(publicKeyDID, plcDid, webDid);
+            let didDocJson = #object_([
+                ("id", #text(didDoc.id)),
+                ("context", #array(didDoc.context)),
+                ("alsoKnownAs", #array(didDoc.alsoKnownAs)),
+                ("verificationMethod", #array(didDoc.verificationMethod)),
+                ("authentication", #array(didDoc.authentication)),
+                ("assertionMethod", #array(didDoc.assertionMethod)),
+            ]);
+            routeContext.buildResponse(#ok, #json(didDocJson));
         };
 
-        public func getIcDomains(_ : RouteContext.RouteContext) : Route.HttpResponse {
-            {
-                statusCode = 200;
-                headers = [("Content-Type", "text/plain")];
-                body = ?Text.encodeUtf8("edjcase.com"); // TODO
-                streamingStrategy = null;
-            };
+        public func getIcDomains(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
+            let ?serverInfo = serverInfoHandler.get() else return routeContext.buildResponse(#internalServerError, #text("Server not initialized"));
+            routeContext.buildResponse(#ok, #text(Domain.toText(serverInfo.domain)));
         };
     };
 

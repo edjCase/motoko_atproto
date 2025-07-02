@@ -28,7 +28,7 @@ module {
             let nsid = routeContext.getRouteParam("nsid");
             let _data = routeContext.httpContext.request.body;
 
-            let result = switch (nsid) {
+            let result : Result.Result<Any, Text> = switch (nsid) {
                 case ("_health") health();
                 case ("com.atproto.server.describeServer") describeServer();
                 case ("com.atproto.server.listRepos") listRepos();
@@ -51,25 +51,23 @@ module {
         func describeServer() : Result.Result<Serde.Candid, Text> {
             let ?info = serverInfoHandler.get() else return #err("Server not initialized");
 
-            let userDomainsCandid = Array.map<Text, Serde.Candid>(
-                info.availableUserDomains,
-                func(domain : Text) : Serde.Candid = #Text(domain),
-            );
-
             let linksCandid = [
-                ("privacyPolicy", #Text(info.privacyPolicy)),
-                ("termsOfService", #Text(info.termsOfService)),
+                // ("privacyPolicy", #Text(info.privacyPolicy)), // TODO?
+                // ("termsOfService", #Text(info.termsOfService)), // TODO?
             ];
 
-            let contactCandid = [
-                ("email", #Text(info.contactEmailAddress)),
-            ];
+            let contactCandid = switch (info.contactEmailAddress) {
+                case (null) [];
+                case (?email) [
+                    ("email", #Text(email)),
+                ];
+            };
 
             #ok(
                 #Record([
                     ("did", #Text(info.did)),
-                    ("availableUserDomains", #Array(userDomainsCandid)),
-                    ("inviteCodeRequired", #Bool(info.inviteCodeRequired)),
+                    ("availableUserDomains", #Array(["." # info.domain])),
+                    ("inviteCodeRequired", #Bool(true)),
                     ("links", #Record(linksCandid)),
                     ("contact", #Record(contactCandid)),
                 ])

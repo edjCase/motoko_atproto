@@ -15,20 +15,15 @@ import Debug "mo:new-base/Debug";
 import RepositoryHandler "Handlers/RepositoryHandler";
 import ServerInfoHandler "Handlers/ServerInfoHandler";
 import ServerInfo "Types/ServerInfo";
-import { ic } "mo:ic";
 import Error "mo:new-base/Error";
-import DagCbor "mo:dag-cbor";
 import Array "mo:new-base/Array";
 import Blob "mo:new-base/Blob";
 import Sha256 "mo:sha2/Sha256";
-import KeyDID "mo:did/Key";
 import Json "mo:json";
 import BaseX "mo:base-x-encoder";
 import TextX "mo:xtended-text/TextX";
 
 actor {
-
-  let urls = HashMap.HashMap<Text, ()>(10, Text.equal, Text.hash);
 
   stable var repositoryStableData : RepositoryHandler.StableData = {
     repositories = [];
@@ -36,55 +31,43 @@ actor {
   stable var serverInfoStableData : ServerInfoHandler.StableData = {
     info = null;
   };
+  stable var keyHandlerStableData : KeyHandler.StableData = {
+    verificationDerivationPath = ["\00"]; // TODO
+  };
 
   var repositoryHandler = RepositoryHandler.Handler(repositoryStableData);
   var serverInfoHandler = ServerInfoHandler.Handler(serverInfoStableData);
+  var keyHandler = KeyHandler.Handler(keyHandlerStableData);
 
   system func preupgrade() {
     repositoryStableData := repositoryHandler.toStableData();
     serverInfoStableData := serverInfoHandler.toStableData();
+    keyHandlerStableData := keyHandler.toStableData();
   };
 
   system func postupgrade() {
     repositoryHandler := RepositoryHandler.Handler(repositoryStableData);
     serverInfoHandler := ServerInfoHandler.Handler(serverInfoStableData);
+    keyHandler := KeyHandler.Handler(keyHandlerStableData);
   };
 
   let xrpcRouter = XrpcRouter.Router(repositoryHandler, serverInfoHandler);
   let wellKnownRouter = WellKnownRouter.Router();
 
-  public query func getUrls() : async [Text] {
-    urls.keys() |> Iter.toArray(_);
-  };
-
-  private func loggingMiddleware() : App.Middleware {
-    {
-      handleQuery = func(context : Liminal.HttpContext, next : App.Next) : App.QueryResult {
-        next();
-      };
-      handleUpdate = func(context : Liminal.HttpContext, next : App.NextAsync) : async* App.HttpResponse {
-        Debug.print("Update request: " # context.request.url);
-        urls.put(context.request.url, ());
-        await* next();
-      };
-    };
-  };
-
   let routerConfig : RouterMiddleware.Config = {
     prefix = null;
     identityRequirement = null;
     routes = [
-      Router.getQuery("/xrpc/{nsid}", xrpcRouter.routeGet),
+      Router.getUpdate("/xrpc/{nsid}", xrpcRouter.routeGet),
       Router.postUpdate("/xrpc/{nsid}", xrpcRouter.routePost),
       Router.getAsyncUpdate("/.well-known/did.json", wellKnownRouter.getDidDocument),
-      Router.getQuery("/.well-known/ic-domains", wellKnownRouter.getIcDomains),
+      Router.getUpdate("/.well-known/ic-domains", wellKnownRouter.getIcDomains),
     ];
   };
 
   // Http App
   let app = Liminal.App({
     middleware = [
-      loggingMiddleware(),
       CompressionMiddleware.default(),
       CORSMiddleware.new({
         CORSMiddleware.defaultOptions with
@@ -107,7 +90,7 @@ actor {
     ];
     errorSerializer = Liminal.defaultJsonErrorSerializer;
     candidRepresentationNegotiator = Liminal.defaultCandidRepresentationNegotiator;
-    logger = Liminal.debugLogger;
+    logger = Liminal.buildDebugLogger(#info);
   });
 
   // Http server methods
@@ -125,135 +108,26 @@ actor {
     #ok;
   };
 
-  public type PlcRequest = {
-    type_ : Text;
-    rotationKeys : [Text];
-    verificationMethods : [(Text, Text)];
-    alsoKnownAs : [Text];
-    services : [PlcService];
-    prev : ?Text;
-  };
-
-  public type SignedPlcRequest = PlcRequest and {
-    sig : Blob;
-  };
-
-  public type PlcService = {
-    name : Text;
-    type_ : Text;
-    endpoint : Text;
-  };
-
   public func isInitialized() : async Bool {
     false; // TODO
   };
 
-  public type BuildPlcRequest = {
-    alsoKnownAs : [Text];
-    services : [PlcService];
-  };
-
   public func buildPlcRequest(request : BuildPlcRequest) : async Result.Result<(Text, Text), Text> {
-    let rotationKeyId : [Blob] = [];
-    let verificationKeyId : [Blob] = ["\00"];
 
-    // Get public keys
-    let rotationPublicKeyDid = switch (await* getPublicKeyDid(rotationKeyId)) {
-      case (#ok(did)) did;
-      case (#err(err)) return #err("Failed to get rotation public key: " # err);
-    };
-    let verificationPublicKeyDid = switch (await* getPublicKeyDid(verificationKeyId)) {
-      case (#ok(did)) did;
-      case (#err(err)) return #err("Failed to get verification public key: " # err);
-    };
-
-    // Build the request object
-    let plcRequest : PlcRequest = {
-      type_ = "plc_operation";
-      rotationKeys = [KeyDID.toText(rotationPublicKeyDid, #base58btc)];
-      verificationMethods = [("atproto", KeyDID.toText(verificationPublicKeyDid, #base58btc))];
-      alsoKnownAs = request.alsoKnownAs;
-      services = request.services;
-      prev = null;
-    };
-
-    // Convert to CBOR and sign
-    let requestCborMap = switch (requestToCborMap(plcRequest)) {
-      case (#ok(cbor)) cbor;
-      case (#err(err)) return #err(err);
-    };
-
-    let messageDagCborBytes : [Nat8] = switch (DagCbor.encode(#map(requestCborMap))) {
-      case (#ok(blob)) blob;
-      case (#err(err)) return #err("Failed to encode request to CBOR: " # debug_show (err));
-    };
-
-    let messageHash : Blob = Sha256.fromArray(#sha256, messageDagCborBytes);
-    let signature = switch (await* sign(rotationKeyId, messageHash)) {
-      case (#ok(sig)) sig;
-      case (#err(err)) return #err("Failed to sign message: " # err);
-    };
-    let signatureText = BaseX.toBase64(signature.vals(), #url({ includePadding = false }));
-
-    // Create signed operation and generate DID
-    let signedCborMap = Array.concat(
-      requestCborMap,
-      [("sig", #text(signatureText))],
+    let signedPlcRequest = DID.buildPlcRequest(
+      request,
+      keyHandler,
     );
 
-    let did = switch (generateDidFromCbor(#map(signedCborMap))) {
+    let did = switch (generateDidFromCbor(signedPlcRequest)) {
       case (#ok(did)) did;
-      case (#err(err)) return #err(err);
+      case (#err(err)) return #err("Failed to generate DID from signed request: " # err);
     };
 
     // Convert to JSON
-    let json = requestToJson(plcRequest, signatureText);
+    let json = requestToJson(signedPlcRequest);
 
     #ok((did, json));
-  };
-
-  private func requestToCborMap(request : PlcRequest) : Result.Result<[(Text, DagCbor.Value)], Text> {
-    let rotationKeysCbor = request.rotationKeys
-    |> Array.map<Text, DagCbor.Value>(_, func(key : Text) : DagCbor.Value = #text(key));
-
-    let verificationMethodsCbor = #map(
-      request.verificationMethods
-      |> Array.map<(Text, Text), (Text, DagCbor.Value)>(
-        _,
-        func(pair : (Text, Text)) : (Text, DagCbor.Value) = (pair.0, #text(pair.1)),
-      )
-    );
-
-    let alsoKnownAsCbor = request.alsoKnownAs
-    |> Array.map<Text, DagCbor.Value>(_, func(aka : Text) : DagCbor.Value = #text(aka));
-
-    let servicesCbor : DagCbor.Value = #map(
-      request.services
-      |> Array.map<PlcService, (Text, DagCbor.Value)>(
-        _,
-        func(service : PlcService) : (Text, DagCbor.Value) = (
-          service.name,
-          #map([
-            ("type", #text(service.type_)),
-            ("endpoint", #text(service.endpoint)),
-          ]),
-        ),
-      )
-    );
-
-    let prevCbor : DagCbor.Value = switch (request.prev) {
-      case (?prev) #text(prev);
-      case (null) #null_;
-    };
-
-    #ok([
-      ("type", #text(request.type_)),
-      ("rotationKeys", #array(rotationKeysCbor)),
-      ("verificationMethods", verificationMethodsCbor),
-      ("alsoKnownAs", #array(alsoKnownAsCbor)),
-      ("services", servicesCbor),
-      ("prev", prevCbor),
-    ]);
   };
 
   private func generateDidFromCbor(signedCbor : DagCbor.Value) : Result.Result<Text, Text> {
@@ -268,7 +142,7 @@ actor {
     #ok(did);
   };
 
-  private func requestToJson(request : PlcRequest, signature : Text) : Text {
+  private func requestToJson(request : SignedPlcRequest) : Text {
     func toTextArray(arr : [Text]) : [Json.Json] {
       arr |> Array.map(_, func(item : Text) : Json.Json = #string(item));
     };
@@ -312,41 +186,6 @@ actor {
     ]);
 
     Json.stringify(jsonObj, null);
-  };
-
-  private func sign(derivationPath : [Blob], messageHash : Blob) : async* Result.Result<Blob, Text> {
-    try {
-      let { signature } = await (with cycles = 26_153_846_153) ic.sign_with_ecdsa({
-        derivation_path = derivationPath;
-        key_id = {
-          curve = #secp256k1;
-          name = "dfx_test_key"; // TODO based on environment
-        };
-        message_hash = messageHash;
-      });
-      #ok(signature);
-    } catch (e) {
-      #err("Failed to sign message: " # Error.message(e));
-    };
-  };
-
-  private func getPublicKeyDid(derivationPath : [Blob]) : async* Result.Result<KeyDID.DID, Text> {
-    try {
-      let { public_key } = await ic.ecdsa_public_key({
-        canister_id = null;
-        derivation_path = derivationPath;
-        key_id = {
-          curve = #secp256k1;
-          name = "dfx_test_key"; // TODO based on environment
-        };
-      });
-      #ok({
-        keyType = #secp256k1;
-        publicKey = public_key;
-      });
-    } catch (e) {
-      #err("Failed to get public key: " # Error.message(e));
-    };
   };
 
 };

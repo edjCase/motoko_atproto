@@ -1,12 +1,10 @@
-module {
+import Domain "mo:url-kit/Domain";
+import PlcDID "mo:did/Plc";
 
+module {
     public type ServerInfo = {
-        version : Text;
-        did : Text;
-        availableUserDomains : [Text];
-        inviteCodeRequired : Bool;
-        privacyPolicy : Text;
-        termsOfService : Text;
-        contactEmailAddress : Text;
+        domain : Domain.Domain;
+        plcDids : [PlcDID.DID];
+        contactEmailAddress : ?Text;
     };
 };
