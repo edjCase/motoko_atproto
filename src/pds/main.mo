@@ -1,3 +1,4 @@
+// Updated src/pds/main.mo
 import Text "mo:base/Text";
 import Result "mo:base/Result";
 import XrpcRouter "./XrpcRouter";
@@ -15,8 +16,10 @@ import ServerInfo "Types/ServerInfo";
 import DIDModule "./DID";
 import JsonSerializer "./JsonSerializer";
 import DID "mo:did";
+import TID "mo:tid";
 
 actor {
+  let tidGenerator = TID.Generator();
 
   stable var repositoryStableData : RepositoryHandler.StableData = {
     repositories = [];
@@ -25,10 +28,10 @@ actor {
     info = null;
   };
   stable var keyHandlerStableData : KeyHandler.StableData = {
-    verificationDerivationPath = ["\00"]; // TODO
+    verificationDerivationPath = ["\00"]; // TODO: configure properly
   };
 
-  var repositoryHandler = RepositoryHandler.Handler(repositoryStableData);
+  var repositoryHandler = RepositoryHandler.Handler(repositoryStableData, tidGenerator);
   var serverInfoHandler = ServerInfoHandler.Handler(serverInfoStableData);
   var keyHandler = KeyHandler.Handler(keyHandlerStableData);
 
@@ -39,12 +42,12 @@ actor {
   };
 
   system func postupgrade() {
-    repositoryHandler := RepositoryHandler.Handler(repositoryStableData);
+    repositoryHandler := RepositoryHandler.Handler(repositoryStableData, tidGenerator);
     serverInfoHandler := ServerInfoHandler.Handler(serverInfoStableData);
     keyHandler := KeyHandler.Handler(keyHandlerStableData);
   };
 
-  let xrpcRouter = XrpcRouter.Router(repositoryHandler, serverInfoHandler);
+  let xrpcRouter = XrpcRouter.Router(repositoryHandler, serverInfoHandler, commitHandler);
   let wellKnownRouter = WellKnownRouter.Router(serverInfoHandler, keyHandler);
 
   let routerConfig : RouterMiddleware.Config = {
@@ -78,7 +81,6 @@ actor {
           expiration = false;
         };
       }),
-      // RequireAuthMiddleware.new(#authenticated),
       RouterMiddleware.new(routerConfig),
     ];
     errorSerializer = Liminal.defaultJsonErrorSerializer;
@@ -87,7 +89,6 @@ actor {
   });
 
   // Http server methods
-
   public query func http_request(request : Liminal.RawQueryHttpRequest) : async Liminal.RawQueryHttpResponse {
     app.http_request(request);
   };
@@ -97,13 +98,20 @@ actor {
   };
 
   // Candid API methods
-
   public func initialize(serverInfo : ServerInfo.ServerInfo) : async Result.Result<(), Text> {
     if (serverInfoHandler.get() != null) {
       return #err("Server is already initialized");
     };
+
     serverInfoHandler.set(serverInfo);
-    repositoryHandler.create(serverInfo.plcDid, head, rev);
+
+    // Initialize repository with empty MST
+    let initialRev = TID.now();
+    let emptyMST = MST.empty();
+    let mstCID = await* generateMSTCID(emptyMST); // You'll need to implement this
+    let initialHead = await* createInitialCommit(serverInfo.plcDid, mstCID, initialRev);
+
+    let repo = repositoryHandler.create(serverInfo.plcDid, initialHead, initialRev);
     #ok;
   };
 
@@ -112,7 +120,6 @@ actor {
   };
 
   public func buildPlcRequest(request : DIDModule.BuildPlcRequest) : async Result.Result<(Text, Text), Text> {
-
     let requestInfo = switch (
       await* DIDModule.buildPlcRequest(
         request,
@@ -125,7 +132,6 @@ actor {
 
     // Convert to JSON
     let json = JsonSerializer.signedPlcRequest(requestInfo.request);
-
     #ok((DID.Plc.toText(requestInfo.did), json));
   };
 

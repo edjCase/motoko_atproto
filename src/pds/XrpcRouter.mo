@@ -1,6 +1,7 @@
 import Text "mo:base/Text";
 import Array "mo:new-base/Array";
 import Repository "./Types/Repository";
+import Record "./Types/Record";
 import RepositoryHandler "Handlers/RepositoryHandler";
 import ServerInfoHandler "Handlers/ServerInfoHandler";
 import RouteContext "mo:liminal/RouteContext";
@@ -10,32 +11,38 @@ import DID "mo:did";
 import Domain "mo:url-kit/Domain";
 import CID "mo:cid";
 import TID "mo:tid";
+import Json "mo:json";
+import Result "mo:base/Result";
+import DagCbor "mo:dag-cbor";
+import RecordHandler "Handlers/RecordHandler";
+import Blob "mo:new-base/Blob";
 
 module {
 
     public class Router(
         repositoryHandler : RepositoryHandler.Handler,
         serverInfoHandler : ServerInfoHandler.Handler,
+        recordHandler : RecordHandler.Handler,
     ) {
 
         public func routeGet<system>(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
-            // TODO query vs update
             route(routeContext);
         };
 
-        public func routePost<system>(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
-            route(routeContext);
+        public func routePost<system>(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
+            await* routeAsync(routeContext);
         };
 
         func route(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
             let nsid = routeContext.getRouteParam("nsid");
-            let _data = routeContext.httpContext.request.body;
 
             switch (Text.toLowercase(nsid)) {
                 case ("_health") health(routeContext);
                 case ("com.atproto.server.describeserver") describeServer(routeContext);
                 case ("com.atproto.repo.describerepo") describeRepo(routeContext);
                 case ("com.atproto.server.listrepos") listRepos(routeContext);
+                case ("com.atproto.repo.getrecord") getRecord(routeContext);
+                case ("com.atproto.repo.listrecords") listRecords(routeContext);
                 case (_) {
                     routeContext.buildResponse(
                         #badRequest,
@@ -43,13 +50,23 @@ module {
                     );
                 };
             };
+        };
 
+        func routeAsync(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
+            let nsid = routeContext.getRouteParam("nsid");
+
+            switch (Text.toLowercase(nsid)) {
+                case ("com.atproto.repo.createrecord") await* createRecord(routeContext);
+                case ("com.atproto.repo.putrecord") await* putRecord(routeContext);
+                case ("com.atproto.repo.deleterecord") await* deleteRecord(routeContext);
+                case (_) route(routeContext); // Fall back to sync routes
+            };
         };
 
         func health(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
             routeContext.buildResponse(
                 #ok,
-                #content(#Record([("version", #Text("0.0.1")), /* TODO: use actual version */])),
+                #content(#Record([("version", #Text("0.0.1"))])),
             );
         };
 
@@ -112,12 +129,11 @@ module {
         };
 
         func listRepos(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
-            // TODO pagination/cursor
+            // TODO: pagination/cursor
             let repos = repositoryHandler.getAll();
             let reposCandid = Array.map<Repository.Repository, Serde.Candid>(
                 repos,
                 func(repo : Repository.Repository) : Serde.Candid {
-
                     var fields : [(Text, Serde.Candid)] = [
                         ("did", #Text(DID.Plc.toText(repo.did))),
                         ("head", #Text(CID.toText(repo.head))),
@@ -145,6 +161,127 @@ module {
                 ),
             );
         };
-    };
 
+        func createRecord(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
+            // Parse request body
+            let requestBody = routeContext.httpContext.request.body;
+            let ?jsonText = Text.decodeUtf8(Blob.fromArray(requestBody)) else return routeContext.buildResponse(
+                #badRequest,
+                #error(#message("Invalid UTF-8 in request body")),
+            );
+
+            let parsedJson = switch (Json.parse(jsonText)) {
+                case (#ok(json)) json;
+                case (#err(e)) return routeContext.buildResponse(
+                    #badRequest,
+                    #error(#message("Invalid JSON: " # e)),
+                );
+            };
+
+            // Extract fields from JSON
+            let createRecordRequest = switch (parseCreateRecordRequest(parsedJson)) {
+                case (#ok(req)) req;
+                case (#err(e)) return routeContext.buildResponse(
+                    #badRequest,
+                    #error(#message("Invalid request: " # e)),
+                );
+            };
+
+            let recordResult = await* recordHandler.add(
+                createRecordRequest.repo,
+                createRecordRequest.collection,
+                createRecordRequest.rkey,
+                createRecordRequest.record,
+            );
+
+            switch (recordCIDResult) {
+                case (#ok(recordCID)) {
+                    routeContext.buildResponse(
+                        #ok,
+                        #content(#Record([("uri", #Text("at://" # DID.Plc.toText(createRecordRequest.repo) # "/" # createRecordRequest.collection # "/" # record.key)), ("cid", #Text(CID.toText(recordCID)))])),
+                    );
+                };
+                case (#err(e)) {
+                    routeContext.buildResponse(
+                        #internalServerError,
+                        #error(#message("Failed to create record: " # e)),
+                    );
+                };
+            };
+        };
+
+        func putRecord(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
+            // Similar to createRecord but for updates
+            routeContext.buildResponse(
+                #notImplemented,
+                #error(#message("putRecord not implemented yet")),
+            );
+        };
+
+        func deleteRecord(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
+            // Delete record implementation
+            routeContext.buildResponse(
+                #notImplemented,
+                #error(#message("deleteRecord not implemented yet")),
+            );
+        };
+
+        func getRecord(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
+            let ?repo = routeContext.getQueryParam("repo") else return routeContext.buildResponse(
+                #badRequest,
+                #error(#message("Missing 'repo' parameter")),
+            );
+            let ?collection = routeContext.getQueryParam("collection") else return routeContext.buildResponse(
+                #badRequest,
+                #error(#message("Missing 'collection' parameter")),
+            );
+            let ?rkey = routeContext.getQueryParam("rkey") else return routeContext.buildResponse(
+                #badRequest,
+                #error(#message("Missing 'rkey' parameter")),
+            );
+
+            switch (recordHandler.get(collection, rkey)) {
+                case (#ok(cid)) {
+                    routeContext.buildResponse(
+                        #ok,
+                        #content(
+                            #Record([
+                                ("uri", #Text("at://" # repo # "/" # collection # "/" # rkey)),
+                                ("cid", #Text(CID.toText(cid))),
+                                /* TODO: Include actual record value */
+                            ])
+                        ),
+                    );
+                };
+                case (#err(e)) {
+                    routeContext.buildResponse(
+                        #notFound,
+                        #error(#message("Record not found: " # e)),
+                    );
+                };
+            };
+        };
+
+        func listRecords(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
+            // TODO: Implement record listing with MST traversal
+            routeContext.buildResponse(
+                #notImplemented,
+                #error(#message("listRecords not implemented yet")),
+            );
+        };
+
+        // Helper parsing functions
+        type CreateRecordRequest = {
+            repo : DID.Plc.DID;
+            collection : Text;
+            rkey : Text;
+            record : Json.Json;
+        };
+
+        private func parseCreateRecordRequest(json : Json.Json) : Result.Result<CreateRecordRequest, Text> {
+            // Parse JSON into CreateRecordRequest
+            // This is a simplified implementation
+            #err("JSON parsing not implemented");
+        };
+    };
 };

@@ -12,11 +12,11 @@ itertools = "0.2.2"
 liminal = "0.2.0"
 base-x-encoder = "1.2.0"
 dag-cbor = "0.0.3"
-cid = "0.0.3"
+cid = "0.0.4"
 did = "1.1.1"
 json = "1.2.1"
 xtended-text = "1.0.0"
-tid = "0.0.3"
+tid = "0.0.5"
 
 [dev-dependencies]
 test = "2.1.1"

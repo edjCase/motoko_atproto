@@ -1,0 +1,107 @@
+import CID "mo:cid";
+import Commit "Types/Commit";
+import DID "mo:did";
+import TID "mo:tid";
+import DagCbor "mo:dag-cbor";
+import Sha256 "mo:sha2/Sha256";
+import BaseX "mo:base-x-encoder";
+import Text "mo:new-base/Text";
+import Array "mo:new-base/Array";
+import Runtime "mo:new-base/Runtime";
+import MST "Types/MST";
+import Nat8 "mo:new-base/Nat8";
+
+module {
+    public func fromRecord(key : Text, value : DagCbor.Value) : CID.CID {
+        let cborMap = [
+            ("key", #text(key)),
+            ("value", value),
+        ];
+        fromDagCbor(#map(cborMap));
+    };
+
+    public func fromUnsignedCommit(commit : Commit.UnsignedCommit) : CID.CID {
+        let cborMap = unsignedCommitToCbor(commit);
+
+        fromDagCbor(#map(cborMap));
+    };
+
+    public func fromCommit(commit : Commit.Commit) : CID.CID {
+        let unsignedCborMap = unsignedCommitToCbor(commit);
+        let cborMap = Array.concat(
+            unsignedCborMap,
+            [(
+                "sig",
+                #text(BaseX.toBase64(commit.sig.vals(), #url({ includePadding = false }))),
+            )],
+        );
+
+        fromDagCbor(#map(cborMap));
+    };
+
+    public func fromMSTNode(node : MST.Node) : CID.CID {
+        // Convert left CID
+        let leftCbor : DagCbor.Value = switch (node.l) {
+            case null #null_;
+            case (?cid) #text(CID.toText(cid));
+        };
+
+        // Convert entries array
+        let entriesCbor = node.e
+        |> Array.map<MST.TreeEntry, DagCbor.Value>(
+            _,
+            func(entry : MST.TreeEntry) : DagCbor.Value {
+                let keyCbor = entry.k
+                |> Array.map<Nat8, DagCbor.Value>(_, func(byte : Nat8) : DagCbor.Value = #int(Nat8.toNat(byte)));
+
+                let rightCbor : DagCbor.Value = switch (entry.t) {
+                    case null #null_;
+                    case (?cid) #text(CID.toText(cid));
+                };
+
+                #map([
+                    ("p", #int(entry.p)),
+                    ("k", #array(keyCbor)),
+                    ("v", #text(CID.toText(entry.v))),
+                    ("t", rightCbor),
+                ]);
+            },
+        );
+
+        let cborValue = #map([
+            ("l", leftCbor),
+            ("e", #array(entriesCbor)),
+        ]);
+        fromDagCbor(cborValue);
+    };
+
+    func unsignedCommitToCbor(unsigned : Commit.UnsignedCommit) : [(Text, DagCbor.Value)] {
+        [
+            ("did", #text(DID.Plc.toText(unsigned.did))),
+            ("version", #int(3)), // Current version is always 3
+            ("data", #text(CID.toText(unsigned.data))),
+            ("rev", #text(TID.toText(unsigned.rev))),
+            (
+                "prev",
+                switch (unsigned.prev) {
+                    case (null) #null_;
+                    case (?cid) #text(CID.toText(cid));
+                },
+            ),
+        ];
+    };
+
+    func fromDagCbor(cbor : DagCbor.Value) : CID.CID {
+        let bytes = switch (DagCbor.encode(cbor)) {
+            case (#ok(blob)) blob;
+            case (#err(e)) Runtime.trap("Failed to encode commit to CBOR: " # debug_show (e));
+        };
+        // Generate CID from bytes
+        let hash = Sha256.fromArray(#sha256, bytes);
+        #v1({
+            codec = #dag_cbor;
+            hashAlgorithm = #sha2_256;
+            hash = hash;
+        });
+    };
+};
