@@ -80,24 +80,26 @@
     try {
       // Parse domain - for simplicity, we'll treat the whole input as domain name
       // In a more sophisticated implementation, you might want to parse subdomains
-      const domainParts = initDomain.trim().split('.');
+      const domainParts = initDomain.trim().split(".");
       const suffix = domainParts.length > 1 ? domainParts.pop() : "";
-      const name = domainParts.join('.');
-      
+      const name = domainParts.join(".");
+
       const serverInfo = {
         domain: {
           name: name,
           subdomains: [],
-          suffix: suffix
+          suffix: suffix,
         },
         plcDid: {
-          identifier: initPlcDid.trim()
+          identifier: initPlcDid.trim(),
         },
-        contactEmailAddress: initContactEmail.trim() ? [initContactEmail.trim()] : []
+        contactEmailAddress: initContactEmail.trim()
+          ? [initContactEmail.trim()]
+          : [],
       };
 
       const response = await backend.initialize(serverInfo);
-      
+
       if ("ok" in response) {
         initializeResult = "✅ PDS initialized successfully!";
         initializeSuccess = true;
@@ -226,7 +228,7 @@
 <main>
   <section class="initialize-section">
     <h2>Initialize PDS</h2>
-    
+
     {#if checkingInitialization}
       <div class="status-indicator">
         <p>⏳ Checking initialization status...</p>
@@ -239,12 +241,16 @@
       <div class="status-indicator">
         <p>⚠️ PDS needs to be initialized before use</p>
       </div>
-      
+
       <div class="initialize-instructions">
         <h3>Initialization Steps:</h3>
         <ol>
-          <li>Use the PLC Directory Integration below to build a PLC request</li>
-          <li>Submit the request to plc.directory using the generated cURL command</li>
+          <li>
+            Use the PLC Directory Integration below to build a PLC request
+          </li>
+          <li>
+            Submit the request to plc.directory using the generated cURL command
+          </li>
           <li>Copy the resulting PLC DID from the directory</li>
           <li>Fill in the form below to initialize your PDS</li>
         </ol>
@@ -253,7 +259,7 @@
       <form class="initialize-form">
         <div class="form-section">
           <h3>Server Information</h3>
-          
+
           <div class="field-group">
             <label for="init-domain">Domain *:</label>
             <input
@@ -266,7 +272,7 @@
             />
             <small>Enter your full domain name (e.g., pds.example.com)</small>
           </div>
-          
+
           <div class="field-group">
             <label for="init-plc-did">PLC DID *:</label>
             <input
@@ -277,9 +283,11 @@
               class="text-input"
               required
             />
-            <small>Enter the DID you received after submitting to plc.directory</small>
+            <small
+              >Enter the DID you received after submitting to plc.directory</small
+            >
           </div>
-          
+
           <div class="field-group">
             <label for="init-contact-email">Contact Email (optional):</label>
             <input
@@ -296,7 +304,9 @@
       <div class="button-group">
         <button
           on:click={initializePDS}
-          disabled={initializeLoading || !initDomain.trim() || !initPlcDid.trim()}
+          disabled={initializeLoading ||
+            !initDomain.trim() ||
+            !initPlcDid.trim()}
           class="initialize-button"
         >
           {initializeLoading ? "Initializing..." : "Initialize PDS"}
@@ -309,7 +319,8 @@
           class:success={initializeSuccess}
           class:error={!initializeSuccess}
         >
-          <strong>Initialize Result:</strong> {initializeResult}
+          <strong>Initialize Result:</strong>
+          {initializeResult}
         </div>
       {/if}
     {/if}

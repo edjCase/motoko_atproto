@@ -16,7 +16,7 @@ cid = "0.0.3"
 did = "1.1.1"
 json = "1.2.1"
 xtended-text = "1.0.0"
-tid = "0.0.1"
+tid = "0.0.3"
 
 [dev-dependencies]
 test = "2.1.1"

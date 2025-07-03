@@ -103,6 +103,7 @@ actor {
       return #err("Server is already initialized");
     };
     serverInfoHandler.set(serverInfo);
+    repositoryHandler.create(serverInfo.plcDid, head, rev);
     #ok;
   };
 
