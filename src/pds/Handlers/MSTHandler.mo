@@ -19,11 +19,6 @@ import PureMap "mo:new-base/pure/Map";
 
 module {
 
-    public type AddError = {
-        #invalidKey;
-        #keyExists;
-    };
-
     public class Handler(nodes_ : PureMap.Map<Text, MST.Node>) {
         var nodes = nodes_;
 
@@ -76,36 +71,19 @@ module {
         };
 
         // Add a key-value pair to the MST
-        public func addCID(root : MST.Node, key : [Nat8], value : CID.CID) : Result.Result<MST.Node, AddError> {
+        public func addCID(
+            rootNodeCID : CID.CID,
+            key : [Nat8],
+            value : CID.CID,
+        ) : Result.Result<MST.Node, Text> {
             if (key.size() == 0) {
-                return #err(#invalidKey);
+                return #err("Key cannot be empty");
             };
 
             if (not isValidKey(key)) {
-                return #err(#invalidKey);
+                return #err("Invalid key");
             };
-
-            addToNode(root, key, value);
-        };
-
-        // Store a node and return its CID
-        public func addNode(node : MST.Node) : CID.CID {
-            let cid = CIDBuilder.fromMSTNode(node);
-            let key = CID.toText(cid);
-            nodes := PureMap.add(nodes, Text.compare, key, node);
-            cid;
-        };
-
-        public func getNode(cid : CID.CID) : ?MST.Node {
-            let cidText = CID.toText(cid);
-            PureMap.get(nodes, Text.compare, cidText);
-        };
-
-        public func toStableData() : PureMap.Map<Text, MST.Node> {
-            nodes;
-        };
-
-        func addToNode(node : MST.Node, key : [Nat8], value : CID.CID) : Result.Result<MST.Node, AddError> {
+            let ?node = getNode(rootNodeCID) else return #err("Node not found: " # CID.toText(rootNodeCID));
             let keyDepth = calculateDepth(key);
 
             // Find insertion point
@@ -117,7 +95,7 @@ module {
                 let comparison = compareKeys(key, entryKey);
 
                 if (comparison == #equal) {
-                    return #err(#keyExists);
+                    return #err("Key already exists: " # debug_show (key));
                 } else if (comparison == #less) {
                     insertIndex := i;
                     found := true;
@@ -136,7 +114,7 @@ module {
 
             if (keyDepth == nodeDepth) {
                 // Add entry at this level
-                let newEntry = {
+                let newEntry : MST.TreeEntry = {
                     p = 0; // Will be calculated when compressing
                     k = key;
                     v = value;
@@ -159,6 +137,23 @@ module {
                 // TODO
                 Debug.todo();
             };
+        };
+
+        // Store a node and return its CID
+        public func addNode(node : MST.Node) : CID.CID {
+            let cid = CIDBuilder.fromMSTNode(node);
+            let key = CID.toText(cid);
+            nodes := PureMap.add(nodes, Text.compare, key, node);
+            cid;
+        };
+
+        public func getNode(cid : CID.CID) : ?MST.Node {
+            let cidText = CID.toText(cid);
+            PureMap.get(nodes, Text.compare, cidText);
+        };
+
+        public func getNodes() : PureMap.Map<Text, MST.Node> {
+            nodes;
         };
     };
 

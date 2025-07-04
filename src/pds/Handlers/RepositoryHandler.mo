@@ -15,14 +15,23 @@ import Text "mo:new-base/Text";
 import Order "mo:new-base/Order";
 import Blob "mo:new-base/Blob";
 import MSTHandler "../Handlers/MSTHandler";
+import Iter "mo:new-base/Iter";
 
 module {
     public type StableData = {
         repositories : PureMap.Map<DID.Plc.DID, RepositoryWithData>;
     };
 
+    type Commit = {
+        did : DID.Plc.DID;
+        version : Nat;
+        data : CID.CID;
+        prev : ?CID.CID;
+        sig : Blob;
+    };
+
     public type RepositoryWithData = Repository.RepositoryWithoutDID and {
-        commits : [Commit.Commit];
+        commits : PureMap.Map<TID.TID, Commit>;
         records : PureMap.Map<CID.CID, DagCbor.Value>;
         nodes : PureMap.Map<Text, MST.Node>;
     };
@@ -35,118 +44,210 @@ module {
         var repositories = stableData.repositories;
 
         public func getAll() : [Repository.Repository] {
-            return repositories;
+            return PureMap.entries(repositories)
+            |> Iter.map(
+                _,
+                func((did, repo) : (DID.Plc.DID, RepositoryWithData)) : Repository.Repository {
+                    {
+                        repo with
+                        did = did;
+                    };
+                },
+            )
+            |> Iter.toArray(_);
         };
 
-        public func get(repoId : DID.Plc.DID) : ?Repository.Repository {
-            let ?repo = Map.get(repositories, comparePlcDID, repoId) else return null;
-            {
+        public func get(id : DID.Plc.DID) : ?Repository.Repository {
+            let ?repo = PureMap.get(repositories, comparePlcDID, id) else return null;
+            ?{
                 repo with
-                did = repoId;
+                did = id;
             };
         };
 
         public func create(
-            plcDid : DID.Plc.DID,
-            head : CID.CID,
-        ) : Repository.Repository {
-            let newRepo = {
-                did = plcDid;
-                head = head;
-                rev = tidGenerator.next();
+            id : DID.Plc.DID
+        ) : async* Result.Result<Repository.Repository, Text> {
+
+            let mstHandler = MSTHandler.Handler(PureMap.empty<Text, MST.Node>());
+            // First node is empty
+            let newMST : MST.Node = {
+                l = null;
+                e = [];
+            };
+            let rev = tidGenerator.next();
+            let newMSTCID = mstHandler.addNode(newMST);
+            let signedCommit = switch (await* createCommit(id, rev, newMSTCID, null)) {
+                case (#ok(commit)) commit;
+                case (#err(e)) return #err("Failed to create commit: " # e);
+            };
+            let signedCommitCID = CIDBuilder.fromCommit(signedCommit);
+            let newRepo : RepositoryWithData = {
+                head = signedCommitCID;
+                rev = rev;
                 active = true;
                 status = null;
-                commits = [];
+                commits = PureMap.singleton<TID.TID, Commit>(rev, signedCommit);
                 records = PureMap.empty<CID.CID, DagCbor.Value>();
+                nodes = mstHandler.getNodes();
             };
-            repositories := Array.concat(repositories, [newRepo]);
-            return newRepo;
+            let (newRepositories, idExists) = PureMap.insert(
+                repositories,
+                comparePlcDID,
+                id,
+                newRepo,
+            );
+            if (idExists) {
+                return #err("Repository with DID " # DID.Plc.toText(id) # " already exists");
+            };
+            repositories := newRepositories;
+            #ok({
+                newRepo with
+                did = id;
+            });
         };
 
-        public func addRecord(
-            repoDid : DID.Plc.DID,
-            collectionId : Text,
-            key : Text,
-            value : DagCbor.Value,
-        ) : async* Result.Result<(), Text> {
+        public func createRecord(
+            request : Repository.CreateRecordRequest
+        ) : async* Result.Result<Repository.CreateRecordResponse, Text> {
 
-            let ?repo = PureMap.get(repositories, comparePlcDID, repoId) else return #err("Repository not found: " # DID.Plc.toText(repoDid));
+            let key = switch (request.rkey) {
+                case (?rkey) {
+                    if (Text.size(rkey) > 512) {
+                        return #err("Record key exceeds maximum length of 512 characters");
+                    };
+                    rkey;
+                };
+                case (null) TID.toText(tidGenerator.next());
+            };
 
-            let recordCID = CIDBuilder.fromRecord(key, value);
-            let updatedRecords = PureMap.add(repo.records, compareCID, recordCID, value);
+            let ?repo = PureMap.get(repositories, comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
+
+            let recordCID = CIDBuilder.fromRecord(request.rkey, request.record);
+            let updatedRecords = PureMap.add(repo.records, compareCID, recordCID, request.record);
 
             // Create record path
-            let path = AtUri.toText({ collectionId; recordKey = key });
+            let path = AtUri.toText({
+                collectionId = request.collection;
+                recordKey = request.rkey;
+            });
             let pathKey = MST.pathToKey(path);
 
             let mstHandler = MSTHandler.Handler(repo.nodes);
 
+            // Get current MST root from the latest commit
+            let ?currentCommit = PureMap.get<TID.TID, Commit>(
+                repo.commits,
+                TID.compare,
+                repo.rev,
+            ) else return #err("No commits found in repository");
+
+            let currentNodeCID = currentCommit.data;
+
             // Add to MST
-            let newMST = switch (mstHandler.addCID(currentMST, pathKey, recordCID)) {
+            let newNode = switch (mstHandler.addCID(currentCommit.data, pathKey, recordCID)) {
                 case (#ok(mst)) mst;
                 case (#err(e)) return #err("Failed to add to MST: " # debug_show (e));
             };
 
+            let newNodeCID = CIDBuilder.fromMSTNode(newNode);
             // Create new commit
             let newRev = tidGenerator.next();
-            let mstRootCID = CIDBuilder.fromMSTNode(newMST);
 
-            let unsignedCommit = {
-                did = repoDid;
-                version = 1; // TODO?
-                data = mstRootCID;
-                rev = newRev;
-                prev = currentHead;
-            };
-
-            // Sign commit
-            let signedCommit = switch (await* signCommit(unsignedCommit)) {
+            let signedCommit = switch (
+                await* createCommit(
+                    repoId,
+                    newRev,
+                    newNodeCID,
+                    ?currentNodeCID,
+                )
+            ) {
                 case (#ok(commit)) commit;
-                case (#err(e)) return #err("Failed to sign commit: " # e);
+                case (#err(e)) return #err("Failed to create commit: " # e);
             };
 
             // Store new state
             let commitCID = CIDBuilder.fromCommit(signedCommit);
-            let updatedCommits = PureMap.add<TID.TID, Commit.Commit>(repo.commits, TID.compare, newRev, signedCommit);
+            let updatedCommits = PureMap.add<TID.TID, Commit>(
+                repo.commits,
+                TID.compare,
+                newRev,
+                signedCommit,
+            );
 
             repositories := PureMap.add(
                 repositories,
                 comparePlcDID,
-                repoDid,
+                repoId,
                 {
                     repo with
                     head = commitCID;
                     rev = newRev;
                     commits = updatedCommits;
                     records = updatedRecords;
-                    nodes = mstHandler.toStableData();
+                    nodes = mstHandler.getNodes();
                 },
             );
 
-            #ok;
+            #ok({
+
+            });
         };
 
         public func getRecord(
-            repoDid : DID.Plc.DID,
+            repoId : DID.Plc.DID,
             collectionId : Text,
             recordKey : Text,
-        ) : ?DagCbor.Value {
-            let ?repo = PureMap.get(repositories, comparePlcDID, repoDid) else return #err("Repository not found: " # DID.Plc.toText(repoDid));
+        ) : ?{
+            cid : CID.CID;
+            value : DagCbor.Value;
+        } {
+            let ?repo = PureMap.get(repositories, comparePlcDID, repoId) else return null;
 
             let path = AtUri.toText({ collectionId; recordKey });
             let pathKey = MST.pathToKey(path);
 
             let mstHandler = MSTHandler.Handler(repo.nodes);
 
-            let rootNode =;
+            // Get the current commit to find the MST root
+            let ?currentCommit = PureMap.get(repo.commits, TID.compare, repo.rev) else return null;
+
+            // Get the root MST node from the commit's data field
+            let ?rootNode = mstHandler.getNode(currentCommit.data) else return null;
 
             let ?recordCID = mstHandler.getCID(rootNode, pathKey) else return null;
-            PureMap.get(repo.records, compareCID, recordCID);
+            let ?value = PureMap.get(repo.records, compareCID, recordCID) else return null;
+            ?{
+                cid = recordCID;
+                value = value;
+            };
         };
 
         public func toStableData() : StableData {
             return {
                 repositories = repositories;
+            };
+        };
+
+        private func createCommit(
+            repoId : DID.Plc.DID,
+            rev : TID.TID,
+            newNodeCID : CID.CID,
+            lastNodeCID : ?CID.CID,
+        ) : async* Result.Result<Commit.Commit, Text> {
+
+            let unsignedCommit : Commit.UnsignedCommit = {
+                did = repoId;
+                version = 3; // TODO?
+                data = newNodeCID;
+                rev = rev;
+                prev = lastNodeCID;
+            };
+
+            // Sign commit
+            switch (await* signCommit(unsignedCommit)) {
+                case (#ok(commit)) #ok(commit);
+                case (#err(e)) return #err("Failed to sign commit: " # e);
             };
         };
 

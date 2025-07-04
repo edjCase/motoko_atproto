@@ -17,12 +17,13 @@ import DIDModule "./DID";
 import JsonSerializer "./JsonSerializer";
 import DID "mo:did";
 import TID "mo:tid";
+import PureMap "mo:new-base/pure/Map";
 
 actor {
   let tidGenerator = TID.Generator();
 
   stable var repositoryStableData : RepositoryHandler.StableData = {
-    repositories = [];
+    repositories = PureMap.empty<DID.Plc.DID, RepositoryHandler.RepositoryWithData>();
   };
   stable var serverInfoStableData : ServerInfoHandler.StableData = {
     info = null;
@@ -31,23 +32,23 @@ actor {
     verificationDerivationPath = ["\00"]; // TODO: configure properly
   };
 
-  var repositoryHandler = RepositoryHandler.Handler(repositoryStableData, tidGenerator);
-  var serverInfoHandler = ServerInfoHandler.Handler(serverInfoStableData);
   var keyHandler = KeyHandler.Handler(keyHandlerStableData);
+  var repositoryHandler = RepositoryHandler.Handler(repositoryStableData, keyHandler, tidGenerator);
+  var serverInfoHandler = ServerInfoHandler.Handler(serverInfoStableData);
 
   system func preupgrade() {
+    keyHandlerStableData := keyHandler.toStableData();
     repositoryStableData := repositoryHandler.toStableData();
     serverInfoStableData := serverInfoHandler.toStableData();
-    keyHandlerStableData := keyHandler.toStableData();
   };
 
   system func postupgrade() {
-    repositoryHandler := RepositoryHandler.Handler(repositoryStableData, tidGenerator);
-    serverInfoHandler := ServerInfoHandler.Handler(serverInfoStableData);
     keyHandler := KeyHandler.Handler(keyHandlerStableData);
+    repositoryHandler := RepositoryHandler.Handler(repositoryStableData, keyHandler, tidGenerator);
+    serverInfoHandler := ServerInfoHandler.Handler(serverInfoStableData);
   };
 
-  let xrpcRouter = XrpcRouter.Router(repositoryHandler, serverInfoHandler, commitHandler);
+  let xrpcRouter = XrpcRouter.Router(repositoryHandler, serverInfoHandler);
   let wellKnownRouter = WellKnownRouter.Router(serverInfoHandler, keyHandler);
 
   let routerConfig : RouterMiddleware.Config = {
@@ -55,7 +56,7 @@ actor {
     identityRequirement = null;
     routes = [
       Router.getUpdate("/xrpc/{nsid}", xrpcRouter.routeGet),
-      Router.postUpdate("/xrpc/{nsid}", xrpcRouter.routePost),
+      Router.postAsyncUpdate("/xrpc/{nsid}", xrpcRouter.routePost),
       Router.getAsyncUpdate("/.well-known/did.json", wellKnownRouter.getDidDocument),
       Router.getUpdate("/.well-known/ic-domains", wellKnownRouter.getIcDomains),
     ];
@@ -105,14 +106,10 @@ actor {
 
     serverInfoHandler.set(serverInfo);
 
-    // Initialize repository with empty MST
-    let initialRev = TID.now();
-    let emptyMST = MST.empty();
-    let mstCID = await* generateMSTCID(emptyMST); // You'll need to implement this
-    let initialHead = await* createInitialCommit(serverInfo.plcDid, mstCID, initialRev);
-
-    let repo = repositoryHandler.create(serverInfo.plcDid, initialHead, initialRev);
-    #ok;
+    switch (await* repositoryHandler.create(serverInfo.plcDid)) {
+      case (#ok(_)) #ok;
+      case (#err(e)) return #err("Failed to create repository: " # e);
+    };
   };
 
   public func isInitialized() : async Bool {
