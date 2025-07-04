@@ -2,6 +2,8 @@ import DID "mo:did";
 import CID "mo:cid";
 import TID "mo:tid";
 import Commit "./Commit";
+import DagCbor "mo:dag-cbor";
+import AtUri "./AtUri";
 
 module {
 

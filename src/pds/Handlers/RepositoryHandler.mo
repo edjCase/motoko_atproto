@@ -111,7 +111,7 @@ module {
             request : Repository.CreateRecordRequest
         ) : async* Result.Result<Repository.CreateRecordResponse, Text> {
 
-            let key = switch (request.rkey) {
+            let rKey : Text = switch (request.rkey) {
                 case (?rkey) {
                     if (Text.size(rkey) > 512) {
                         return #err("Record key exceeds maximum length of 512 characters");
@@ -121,15 +121,29 @@ module {
                 case (null) TID.toText(tidGenerator.next());
             };
 
+            if (request.swapCommit == ?true) {
+                // TODO handle swapCommit field
+                Debug.todo();
+            };
+
+            let isValid : ?Bool = switch (request.validate) {
+                case (?true) ?LexiconValidator.validateRecord(request.record, request.collection, false);
+                case (?false) null;
+                case (null) ?LexiconValidator.validateRecord(request.record, request.collection, true);
+            };
+            if (isValid == ?false) {
+                return #err("Record validation failed");
+            };
+
             let ?repo = PureMap.get(repositories, comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
 
-            let recordCID = CIDBuilder.fromRecord(request.rkey, request.record);
+            let recordCID = CIDBuilder.fromRecord(rKey, request.record);
             let updatedRecords = PureMap.add(repo.records, compareCID, recordCID, request.record);
 
             // Create record path
             let path = AtUri.toText({
                 collectionId = request.collection;
-                recordKey = request.rkey;
+                recordKey = rKey;
             });
             let pathKey = MST.pathToKey(path);
 
@@ -190,7 +204,16 @@ module {
             );
 
             #ok({
-
+                cid = recordCID;
+                commit = ?{
+                    cid = commitCID;
+                    rev = newRev;
+                };
+                uri = {
+                    repoId = request.repo;
+                    collectionAndRecord = ?(request.collection, ?rKey);
+                };
+                validationStatus = if (isValid == ?true) #valid else #unknown; // TODO
             });
         };
 

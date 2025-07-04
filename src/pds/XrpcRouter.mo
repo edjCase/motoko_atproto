@@ -188,7 +188,7 @@ module {
 
             let record = JsonSerializer.toDagCbor(createRecordRequest.record);
 
-            let recordCIDResult = await* repositoryHandler.addRecord(
+            let recordCIDResult = await* repositoryHandler.createRecord(
                 createRecordRequest.repo,
                 createRecordRequest.collection,
                 createRecordRequest.rkey,
@@ -196,16 +196,12 @@ module {
             );
 
             switch (recordCIDResult) {
-                case (#ok(recordCID)) {
-                    let atUri = "at://" # DID.Plc.toText(createRecordRequest.repo) # AtUri.toText({
-                        collectionId = createRecordRequest.collection;
-                        recordKey = createRecordRequest.rkey;
-                    });
+                case (#ok({ uri; cid })) {
                     routeContext.buildResponse(
                         #ok,
                         #json(
                             #object_([
-                                ("uri", #string(atUri)),
+                                ("uri", #string(AtUri.toText(atUri))),
                                 ("cid", #string(CID.toText(recordCID))),
                             ])
                         ),
@@ -255,17 +251,13 @@ module {
             );
 
             switch (recordCIDResult) {
-                case (#ok(recordCID)) {
-                    let atUri = "at://" # DID.Plc.toText(createRecordRequest.repo) # AtUri.toText({
-                        collectionId = createRecordRequest.collection;
-                        recordKey = createRecordRequest.rkey;
-                    });
+                case (#ok({ uri; cid })) {
                     routeContext.buildResponse(
                         #ok,
                         #json(
                             #object_([
-                                ("uri", #string(atUri)),
-                                ("cid", #string(CID.toText(recordCID))),
+                                ("uri", #string(AtUri.toText(uri))),
+                                ("cid", #string(CID.toText(cid))),
                             ])
                         ),
                     );
@@ -312,9 +304,9 @@ module {
                 #notFound,
                 #error(#message("Record not found")),
             );
-            let atUri = "at://" # DID.Plc.toText(repoDid) # AtUri.toText({
-                collectionId = collection;
-                recordKey = rkey;
+            let atUri = AtUri.toText({
+                repoId = repoDid;
+                collectionAndRecord = ?(collection, ?rkey);
             });
             let valueJson = JsonSerializer.fromDagCbor(value);
             routeContext.buildResponse(

@@ -65,7 +65,6 @@ module {
     ) : DidDocument {
 
         let webDidText : Text = DID.Web.toText(webDid);
-        let plcDidText : Text = PlcDID.toText(plcDid);
         {
             id = #web(webDid);
             context = [
@@ -73,7 +72,10 @@ module {
                 "https://w3id.org/security/suites/secp256k1-2019/v1",
             ];
             alsoKnownAs = [
-                "at://" # plcDidText
+                AtUri.toText({
+                    repoId = plcDid;
+                    collectionAndRecord = null;
+                })
             ];
             verificationMethod = [{
                 id = webDidText # "#atproto";
