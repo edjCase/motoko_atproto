@@ -16,6 +16,8 @@ import Order "mo:new-base/Order";
 import Blob "mo:new-base/Blob";
 import MSTHandler "../Handlers/MSTHandler";
 import Iter "mo:new-base/Iter";
+import LexiconValidator "../LexiconValidator";
+import Debug "mo:new-base/Debug";
 
 module {
     public type StableData = {
@@ -111,6 +113,8 @@ module {
             request : Repository.CreateRecordRequest
         ) : async* Result.Result<Repository.CreateRecordResponse, Text> {
 
+            let ?_ = get(request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
+
             let rKey : Text = switch (request.rkey) {
                 case (?rkey) {
                     if (Text.size(rkey) > 512) {
@@ -121,18 +125,22 @@ module {
                 case (null) TID.toText(tidGenerator.next());
             };
 
-            if (request.swapCommit == ?true) {
-                // TODO handle swapCommit field
-                Debug.todo();
+            switch (request.swapCommit) {
+                case (?_) {
+                    // Handle swapCommit field
+                    Debug.todo();
+                };
+                case (null) ();
             };
 
-            let isValid : ?Bool = switch (request.validate) {
-                case (?true) ?LexiconValidator.validateRecord(request.record, request.collection, false);
-                case (?false) null;
-                case (null) ?LexiconValidator.validateRecord(request.record, request.collection, true);
+            let validationResult : Result.Result<Repository.ValidationStatus, Text> = switch (request.validate) {
+                case (?true) LexiconValidator.validateRecord(request.record, request.collection, false);
+                case (?false) #ok(#unknown);
+                case (null) LexiconValidator.validateRecord(request.record, request.collection, true);
             };
-            if (isValid == ?false) {
-                return #err("Record validation failed");
+            let validationStatus = switch (validationResult) {
+                case (#ok(status)) status;
+                case (#err(e)) return #err("Record validation failed: " # e);
             };
 
             let ?repo = PureMap.get(repositories, comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
@@ -142,8 +150,8 @@ module {
 
             // Create record path
             let path = AtUri.toText({
-                collectionId = request.collection;
-                recordKey = rKey;
+                repoId = request.repo;
+                collectionAndRecord = ?(request.collection, ?rKey);
             });
             let pathKey = MST.pathToKey(path);
 
@@ -170,7 +178,7 @@ module {
 
             let signedCommit = switch (
                 await* createCommit(
-                    repoId,
+                    request.repo,
                     newRev,
                     newNodeCID,
                     ?currentNodeCID,
@@ -192,7 +200,7 @@ module {
             repositories := PureMap.add(
                 repositories,
                 comparePlcDID,
-                repoId,
+                request.repo,
                 {
                     repo with
                     head = commitCID;
@@ -213,7 +221,7 @@ module {
                     repoId = request.repo;
                     collectionAndRecord = ?(request.collection, ?rKey);
                 };
-                validationStatus = if (isValid == ?true) #valid else #unknown; // TODO
+                validationStatus = validationStatus;
             });
         };
 
@@ -227,7 +235,7 @@ module {
         } {
             let ?repo = PureMap.get(repositories, comparePlcDID, repoId) else return null;
 
-            let path = AtUri.toText({ collectionId; recordKey });
+            let path = collectionId # "/" # recordKey;
             let pathKey = MST.pathToKey(path);
 
             let mstHandler = MSTHandler.Handler(repo.nodes);

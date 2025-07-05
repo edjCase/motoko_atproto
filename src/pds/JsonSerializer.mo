@@ -20,6 +20,8 @@ import TextX "mo:xtended-text/TextX";
 import DIDModule "./DID";
 import DagCbor "mo:dag-cbor";
 import CID "mo:cid";
+import Repository "Types/Repository";
+import DID "mo:did";
 
 module {
 
@@ -71,48 +73,63 @@ module {
 
     public func toPutRecordRequest(
         json : Json.Json
-    ) : ?DIDModule.PutRecordRequest {
-        let #object_(obj) = json else return null;
-        // Helper function to get a field from the object
-        func getField(name : Text) : ?Json.Json {
-            switch (Array.find<(Text, Json.Json)>(obj, func(pair) = pair.0 == name)) {
-                case (?pair) ?pair.1;
-                case (null) null;
-            };
-        };
+    ) : Result.Result<Repository.PutRecordRequest, Text> {
 
         // Extract required fields
-        let ?#string(repo) = getField("repo") else return null;
 
-        let ?#string(collection) = getField("collection") else return null;
-
-        let ?#string(rkey) = getField("rkey") else return null;
-
-        let ?record = getField("record") else return null;
-        let recordDagCbor = switch (DagCbor.fromJson(record)) {
-            case (#ok(dagCbor)) dagCbor;
-            case (#err(e)) return null; // Invalid DagCbor
+        let repoText = switch (Json.getAsText(json, "repo")) {
+            case (#ok(repo)) repo;
+            case (#err(#pathNotFound)) return #err("Missing required field: repo");
+            case (#err(#typeMismatch)) return #err("Invalid repo field, expected string");
+        };
+        let repo = switch (DID.Plc.fromText(repoText)) {
+            case (#ok(did)) did;
+            case (#err(e)) return #err("Invalid repo DID: " # e);
         };
 
-        let value = switch (getField("validate")) {
-            case (?v) v;
-            case (null) return #err("Missing required field: validate");
+        let collection = switch (Json.getAsText(json, "collection")) {
+            case (#ok(collection)) collection;
+            case (#err(#pathNotFound)) return #err("Missing required field: collection");
+            case (#err(#typeMismatch)) return #err("Invalid collection field, expected string");
         };
+
+        let rkey = switch (Json.getAsText(json, "rkey")) {
+            case (#ok(rkey)) rkey;
+            case (#err(#pathNotFound)) return #err("Missing required field: rkey");
+            case (#err(#typeMismatch)) return #err("Invalid rkey field, expected string");
+        };
+
+        let recordJson = switch (Json.get(json, "record")) {
+            case (?record) record;
+            case (null) return #err("Missing required field: record");
+        };
+
+        let recordDagCbor = toDagCbor(recordJson);
 
         // Extract optional fields
-        let validate = switch (getBooleanField("validate")) {
-            case (#ok(v)) v;
-            case (#err(e)) return #err(e);
+
+        let validate = switch (Json.getAsBool(json, "validate")) {
+            case (#ok(validate)) ?validate;
+            case (#err(#pathNotFound)) null;
+            case (#err(#typeMismatch)) return #err("Invalid validate field, expected boolean");
         };
 
-        let swapRecord = switch (getStringField("swapRecord")) {
-            case (#ok(s)) s;
-            case (#err(e)) return #err(e);
+        let swapRecord = switch (Json.getAsText(json, "swapRecord")) {
+            case (#ok(s)) switch (CID.fromText(s)) {
+                case (#ok(cid)) ?cid;
+                case (#err(e)) return #err("Invalid swapRecord CID: " # e);
+            };
+            case (#err(#pathNotFound)) null;
+            case (#err(#typeMismatch)) return #err("Invalid swapRecord field, expected string");
         };
 
-        let swapCommit = switch (getStringField("swapCommit")) {
-            case (#ok(s)) s;
-            case (#err(e)) return #err(e);
+        let swapCommit = switch (Json.getAsText(json, "swapCommit")) {
+            case (#ok(s)) switch (CID.fromText(s)) {
+                case (#ok(cid)) ?cid;
+                case (#err(e)) return #err("Invalid swapCommit CID: " # e);
+            };
+            case (#err(#pathNotFound)) null;
+            case (#err(#typeMismatch)) return #err("Invalid swapCommit field, expected string");
         };
 
         #ok({
@@ -120,7 +137,7 @@ module {
             collection = collection;
             rkey = rkey;
             validate = validate;
-            record = record;
+            record = recordDagCbor;
             swapRecord = swapRecord;
             swapCommit = swapCommit;
         });

@@ -9,6 +9,7 @@ import BaseX "mo:base-x-encoder";
 import TextX "mo:xtended-text/TextX";
 import KeyHandler "Handlers/KeyHandler";
 import Array "mo:new-base/Array";
+import AtUri "./Types/AtUri";
 
 module {
 
