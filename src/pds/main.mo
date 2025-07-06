@@ -18,6 +18,7 @@ import JsonSerializer "./JsonSerializer";
 import DID "mo:did";
 import TID "mo:tid";
 import PureMap "mo:new-base/pure/Map";
+import Json "mo:json";
 
 actor {
   let tidGenerator = TID.Generator();
@@ -128,8 +129,8 @@ actor {
     };
 
     // Convert to JSON
-    let json = JsonSerializer.signedPlcRequest(requestInfo.request);
-    #ok((DID.Plc.toText(requestInfo.did), json));
+    let json = JsonSerializer.fromSignedPlcRequest(requestInfo.request);
+    #ok((DID.Plc.toText(requestInfo.did), Json.stringify(json, null)));
   };
 
 };

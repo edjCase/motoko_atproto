@@ -22,6 +22,9 @@ import DagCbor "mo:dag-cbor";
 import CID "mo:cid";
 import Repository "Types/Repository";
 import DID "mo:did";
+import TID "mo:tid";
+import Int "mo:new-base/Int";
+import AtUri "Types/AtUri";
 
 module {
 
@@ -141,6 +144,358 @@ module {
             swapRecord = swapRecord;
             swapCommit = swapCommit;
         });
+    };
+
+    public func toCreateRecordRequest(
+        json : Json.Json
+    ) : Result.Result<Repository.CreateRecordRequest, Text> {
+
+        // Extract required fields
+
+        let repoText = switch (Json.getAsText(json, "repo")) {
+            case (#ok(repo)) repo;
+            case (#err(#pathNotFound)) return #err("Missing required field: repo");
+            case (#err(#typeMismatch)) return #err("Invalid repo field, expected string");
+        };
+        let repo = switch (DID.Plc.fromText(repoText)) {
+            case (#ok(did)) did;
+            case (#err(e)) return #err("Invalid repo DID: " # e);
+        };
+
+        let collection = switch (Json.getAsText(json, "collection")) {
+            case (#ok(collection)) collection;
+            case (#err(#pathNotFound)) return #err("Missing required field: collection");
+            case (#err(#typeMismatch)) return #err("Invalid collection field, expected string");
+        };
+
+        let recordJson = switch (Json.get(json, "record")) {
+            case (?record) record;
+            case (null) return #err("Missing required field: record");
+        };
+
+        let recordDagCbor = toDagCbor(recordJson);
+
+        // Extract optional fields
+
+        let rkey = switch (Json.getAsText(json, "rkey")) {
+            case (#ok(rkey)) ?rkey;
+            case (#err(#pathNotFound)) null;
+            case (#err(#typeMismatch)) return #err("Invalid rkey field, expected string");
+        };
+
+        let validate = switch (Json.getAsBool(json, "validate")) {
+            case (#ok(validate)) ?validate;
+            case (#err(#pathNotFound)) null;
+            case (#err(#typeMismatch)) return #err("Invalid validate field, expected boolean");
+        };
+
+        let swapCommit = switch (Json.getAsText(json, "swapCommit")) {
+            case (#ok(s)) switch (CID.fromText(s)) {
+                case (#ok(cid)) ?cid;
+                case (#err(e)) return #err("Invalid swapCommit CID: " # e);
+            };
+            case (#err(#pathNotFound)) null;
+            case (#err(#typeMismatch)) return #err("Invalid swapCommit field, expected string");
+        };
+
+        #ok({
+            repo = repo;
+            collection = collection;
+            rkey = rkey;
+            record = recordDagCbor;
+            validate = validate;
+            swapCommit = swapCommit;
+        });
+    };
+
+    public func toDeleteRecordRequest(
+        json : Json.Json
+    ) : Result.Result<Repository.DeleteRecordRequest, Text> {
+
+        // Extract required fields
+
+        let repoText = switch (Json.getAsText(json, "repo")) {
+            case (#ok(repo)) repo;
+            case (#err(#pathNotFound)) return #err("Missing required field: repo");
+            case (#err(#typeMismatch)) return #err("Invalid repo field, expected string");
+        };
+        let repo = switch (DID.Plc.fromText(repoText)) {
+            case (#ok(did)) did;
+            case (#err(e)) return #err("Invalid repo DID: " # e);
+        };
+
+        let collection = switch (Json.getAsText(json, "collection")) {
+            case (#ok(collection)) collection;
+            case (#err(#pathNotFound)) return #err("Missing required field: collection");
+            case (#err(#typeMismatch)) return #err("Invalid collection field, expected string");
+        };
+
+        let rkey = switch (Json.getAsText(json, "rkey")) {
+            case (#ok(rkey)) rkey;
+            case (#err(#pathNotFound)) return #err("Missing required field: rkey");
+            case (#err(#typeMismatch)) return #err("Invalid rkey field, expected string");
+        };
+
+        // Extract optional fields
+
+        let swapRecord = switch (Json.getAsText(json, "swapRecord")) {
+            case (#ok(s)) switch (CID.fromText(s)) {
+                case (#ok(cid)) ?cid;
+                case (#err(e)) return #err("Invalid swapRecord CID: " # e);
+            };
+            case (#err(#pathNotFound)) null;
+            case (#err(#typeMismatch)) return #err("Invalid swapRecord field, expected string");
+        };
+
+        let swapCommit = switch (Json.getAsText(json, "swapCommit")) {
+            case (#ok(s)) switch (CID.fromText(s)) {
+                case (#ok(cid)) ?cid;
+                case (#err(e)) return #err("Invalid swapCommit CID: " # e);
+            };
+            case (#err(#pathNotFound)) null;
+            case (#err(#typeMismatch)) return #err("Invalid swapCommit field, expected string");
+        };
+
+        #ok({
+            repo = repo;
+            collection = collection;
+            rkey = rkey;
+            swapRecord = swapRecord;
+            swapCommit = swapCommit;
+        });
+    };
+
+    public func toGetRecordRequest(
+        json : Json.Json
+    ) : Result.Result<Repository.GetRecordRequest, Text> {
+
+        // Extract required fields
+
+        let repoText = switch (Json.getAsText(json, "repo")) {
+            case (#ok(repo)) repo;
+            case (#err(#pathNotFound)) return #err("Missing required field: repo");
+            case (#err(#typeMismatch)) return #err("Invalid repo field, expected string");
+        };
+        let repo = switch (DID.Plc.fromText(repoText)) {
+            case (#ok(did)) did;
+            case (#err(e)) return #err("Invalid repo DID: " # e);
+        };
+
+        let collection = switch (Json.getAsText(json, "collection")) {
+            case (#ok(collection)) collection;
+            case (#err(#pathNotFound)) return #err("Missing required field: collection");
+            case (#err(#typeMismatch)) return #err("Invalid collection field, expected string");
+        };
+
+        let rkey = switch (Json.getAsText(json, "rkey")) {
+            case (#ok(rkey)) rkey;
+            case (#err(#pathNotFound)) return #err("Missing required field: rkey");
+            case (#err(#typeMismatch)) return #err("Invalid rkey field, expected string");
+        };
+
+        // Extract optional fields
+
+        let cid = switch (Json.getAsText(json, "cid")) {
+            case (#ok(s)) switch (CID.fromText(s)) {
+                case (#ok(cid)) ?cid;
+                case (#err(e)) return #err("Invalid cid: " # e);
+            };
+            case (#err(#pathNotFound)) null;
+            case (#err(#typeMismatch)) return #err("Invalid cid field, expected string");
+        };
+
+        #ok({
+            repo = repo;
+            collection = collection;
+            rkey = rkey;
+            cid = cid;
+        });
+    };
+
+    public func toListRecordsRequest(
+        json : Json.Json
+    ) : Result.Result<Repository.ListRecordsRequest, Text> {
+
+        // Extract required fields
+
+        let repoText = switch (Json.getAsText(json, "repo")) {
+            case (#ok(repo)) repo;
+            case (#err(#pathNotFound)) return #err("Missing required field: repo");
+            case (#err(#typeMismatch)) return #err("Invalid repo field, expected string");
+        };
+        let repo = switch (DID.Plc.fromText(repoText)) {
+            case (#ok(did)) did;
+            case (#err(e)) return #err("Invalid repo DID: " # e);
+        };
+
+        let collection = switch (Json.getAsText(json, "collection")) {
+            case (#ok(collection)) collection;
+            case (#err(#pathNotFound)) return #err("Missing required field: collection");
+            case (#err(#typeMismatch)) return #err("Invalid collection field, expected string");
+        };
+
+        // Extract optional fields
+
+        let limit = switch (Json.getAsInt(json, "limit")) {
+            case (#ok(limit)) {
+                if (limit < 1 or limit > 100) {
+                    return #err("Invalid limit: must be between 1 and 100");
+                };
+                ?Int.abs(limit);
+            };
+            case (#err(#pathNotFound)) null;
+            case (#err(#typeMismatch)) return #err("Invalid limit field, expected integer");
+        };
+
+        let cursor = switch (Json.getAsText(json, "cursor")) {
+            case (#ok(cursor)) ?cursor;
+            case (#err(#pathNotFound)) null;
+            case (#err(#typeMismatch)) return #err("Invalid cursor field, expected string");
+        };
+
+        let reverse = switch (Json.getAsBool(json, "reverse")) {
+            case (#ok(reverse)) ?reverse;
+            case (#err(#pathNotFound)) null;
+            case (#err(#typeMismatch)) return #err("Invalid reverse field, expected boolean");
+        };
+
+        #ok({
+            repo = repo;
+            collection = collection;
+            limit = limit;
+            cursor = cursor;
+            reverse = reverse;
+        });
+    };
+
+    public func fromGetRecordResponse(
+        response : Repository.GetRecordResponse
+    ) : Json.Json {
+
+        let atUri = AtUri.toText(response.uri);
+        let valueJson = fromDagCbor(response.value);
+        #object_([
+            ("uri", #string(atUri)),
+            (
+                "cid",
+                switch (response.cid) {
+                    case (?cid) #string(CID.toText(cid));
+                    case (null) #null_;
+                },
+            ),
+            ("value", valueJson),
+        ]);
+    };
+
+    public func fromCreateRecordResponse(
+        response : Repository.CreateRecordResponse
+    ) : Json.Json {
+
+        let atUri = AtUri.toText(response.uri);
+        let cidText = CID.toText(response.cid);
+
+        let validationStatusText = switch (response.validationStatus) {
+            case (#valid) "valid";
+            case (#unknown) "unknown";
+        };
+
+        #object_([
+            ("uri", #string(atUri)),
+            ("cid", #string(cidText)),
+            (
+                "commit",
+                switch (response.commit) {
+                    case (?commit) #object_([
+                        ("cid", #string(CID.toText(commit.cid))),
+                        ("rev", #string(TID.toText(commit.rev))),
+                    ]);
+                    case (null) #null_;
+                },
+            ),
+            ("validationStatus", #string(validationStatusText)),
+        ]);
+    };
+
+    public func fromDeleteRecordResponse(
+        response : Repository.DeleteRecordResponse
+    ) : Json.Json {
+
+        #object_([
+            (
+                "commit",
+                switch (response.commit) {
+                    case (?commit) #object_([
+                        ("cid", #string(CID.toText(commit.cid))),
+                        ("rev", #string(TID.toText(commit.rev))),
+                    ]);
+                    case (null) #null_;
+                },
+            ),
+        ]);
+    };
+
+    public func fromPutRecordResponse(
+        response : Repository.PutRecordResponse
+    ) : Json.Json {
+
+        let atUri = AtUri.toText(response.uri);
+        let cidText = CID.toText(response.cid);
+
+        #object_([
+            ("uri", #string(atUri)),
+            ("cid", #string(cidText)),
+            (
+                "commit",
+                switch (response.commit) {
+                    case (?commit) #object_([
+                        ("cid", #string(CID.toText(commit.cid))),
+                        ("rev", #string(TID.toText(commit.rev))),
+                    ]);
+                    case (null) #null_;
+                },
+            ),
+            (
+                "validationStatus",
+                switch (response.validationStatus) {
+                    case (?status) switch (status) {
+                        case (#valid) #string("valid");
+                        case (#unknown) #string("unknown");
+                    };
+                    case (null) #null_;
+                },
+            ),
+        ]);
+    };
+
+    public func fromListRecordsResponse(
+        response : Repository.ListRecordsResponse
+    ) : Json.Json {
+
+        let recordsJson = response.records |> Array.map<Repository.ListRecord, Json.Json>(
+            _,
+            func(record : Repository.ListRecord) : Json.Json {
+                let atUri = AtUri.toText(record.uri);
+                let cidText = CID.toText(record.cid);
+                let valueJson = fromDagCbor(record.value);
+
+                #object_([
+                    ("uri", #string(atUri)),
+                    ("cid", #string(cidText)),
+                    ("value", valueJson),
+                ]);
+            },
+        );
+
+        #object_([
+            (
+                "cursor",
+                switch (response.cursor) {
+                    case (?cursor) #string(cursor);
+                    case (null) #null_;
+                },
+            ),
+            ("records", #array(recordsJson)),
+        ]);
     };
 
     public func fromSignedPlcRequest(request : DIDModule.SignedPlcRequest) : Json.Json {

@@ -70,7 +70,6 @@ module {
             };
         };
 
-        // Add a key-value pair to the MST
         public func addCID(
             rootNodeCID : CID.CID,
             key : [Nat8],
@@ -136,6 +135,134 @@ module {
                 // Key needs to go in a subtree
                 // TODO
                 Debug.todo();
+            };
+        };
+
+        public func removeCID(
+            rootNodeCID : CID.CID,
+            key : [Nat8],
+        ) : Result.Result<MST.Node, Text> {
+            if (key.size() == 0) {
+                return #err("Key cannot be empty");
+            };
+
+            if (not isValidKey(key)) {
+                return #err("Invalid key");
+            };
+
+            let ?node = getNode(rootNodeCID) else return #err("Node not found: " # CID.toText(rootNodeCID));
+
+            let keyDepth = calculateDepth(key);
+
+            // Search through entries at this level
+            for (i in node.e.keys()) {
+                let entry = node.e[i];
+                let entryKey = reconstructKey(node.e, i);
+                let entryDepth = calculateDepth(entryKey);
+
+                // If we found exact key match and depths match
+                if (compareKeys(key, entryKey) == #equal and keyDepth == entryDepth) {
+                    // Remove this entry
+                    let entriesBuffer = Buffer.fromArray<MST.TreeEntry>(node.e);
+                    let _ = entriesBuffer.remove(i);
+                    let newEntries = Buffer.toArray(entriesBuffer);
+
+                    // Recompress the keys if any entries remain
+                    let compressedEntries = if (newEntries.size() > 0) {
+                        compressKeys(newEntries);
+                    } else {
+                        [];
+                    };
+
+                    return #ok({
+                        l = node.l;
+                        e = compressedEntries;
+                    });
+                };
+
+                // If key comes before this entry, check left subtree
+                if (compareKeys(key, entryKey) == #less) {
+                    if (i == 0) {
+                        // Check left subtree of node
+                        return switch (node.l) {
+                            case null #err("Key not found: " # debug_show (key));
+                            case (?leftCID) {
+                                let ?leftNode = getNode(leftCID) else return #err("Left node not found");
+                                // Recursively remove from left subtree
+                                switch (removeCID(leftCID, key)) {
+                                    case (#err(msg)) #err(msg);
+                                    case (#ok(updatedLeftNode)) {
+                                        // Update the left subtree reference
+                                        let newLeftCID = addNode(updatedLeftNode);
+                                        #ok({
+                                            l = ?newLeftCID;
+                                            e = node.e;
+                                        });
+                                    };
+                                };
+                            };
+                        };
+                    } else {
+                        // Check right subtree of previous entry
+                        return switch (node.e[i - 1].t) {
+                            case null #err("Key not found: " # debug_show (key));
+                            case (?rightCID) {
+                                let ?rightNode = getNode(rightCID) else return #err("Right node not found");
+                                // Recursively remove from right subtree
+                                switch (removeCID(rightCID, key)) {
+                                    case (#err(msg)) #err(msg);
+                                    case (#ok(updatedRightNode)) {
+                                        // Update the right subtree reference in the entry
+                                        let newRightCID = addNode(updatedRightNode);
+                                        let updatedEntry = {
+                                            node.e[i - 1] with
+                                            t = ?newRightCID;
+                                        };
+                                        let entriesBuffer = Buffer.fromArray<MST.TreeEntry>(node.e);
+                                        entriesBuffer.put(i - 1, updatedEntry);
+
+                                        #ok({
+                                            l = node.l;
+                                            e = Buffer.toArray(entriesBuffer);
+                                        });
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+            };
+
+            // Key is greater than all entries, check rightmost subtree
+            if (node.e.size() > 0) {
+                let lastIndex = node.e.size() - 1;
+                switch (node.e[lastIndex].t) {
+                    case null return #err("Key not found: " # debug_show (key));
+                    case (?rightCID) {
+                        let ?rightNode = getNode(rightCID) else return #err("Right node not found");
+                        // Recursively remove from rightmost subtree
+                        switch (removeCID(rightCID, key)) {
+                            case (#err(msg)) #err(msg);
+                            case (#ok(updatedRightNode)) {
+                                // Update the rightmost subtree reference
+                                let newRightCID = addNode(updatedRightNode);
+                                let updatedEntry = {
+                                    node.e[lastIndex] with
+                                    t = ?newRightCID;
+                                };
+                                let entriesBuffer = Buffer.fromArray<MST.TreeEntry>(node.e);
+                                entriesBuffer.put(lastIndex, updatedEntry);
+
+                                #ok({
+                                    l = node.l;
+                                    e = Buffer.toArray(entriesBuffer);
+                                });
+                            };
+                        };
+                    };
+                };
+            } else {
+                #err("Key not found: " # debug_show (key));
             };
         };
 

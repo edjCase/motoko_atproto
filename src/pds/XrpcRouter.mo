@@ -162,162 +162,102 @@ module {
         };
 
         func createRecord(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
-            // Parse request body
-            let requestBody = routeContext.httpContext.request.body;
-            let ?jsonText = Text.decodeUtf8(requestBody) else return routeContext.buildResponse(
-                #badRequest,
-                #error(#message("Invalid UTF-8 in request body")),
-            );
 
-            let parsedJson = switch (Json.parse(jsonText)) {
-                case (#ok(json)) json;
-                case (#err(e)) return routeContext.buildResponse(
-                    #badRequest,
-                    #error(#message("Invalid JSON: " # debug_show (e))),
-                );
-            };
-
-            // Extract fields from JSON
-            let createRecordRequest = switch (parseCreateRecordRequest(parsedJson)) {
+            let request = switch (parseRequestFromBody(routeContext, JsonSerializer.toCreateRecordRequest)) {
                 case (#ok(req)) req;
                 case (#err(e)) return routeContext.buildResponse(
                     #badRequest,
-                    #error(#message("Invalid request: " # e)),
+                    #error(#message(e)),
                 );
             };
-
-            let record = JsonSerializer.toDagCbor(createRecordRequest.record);
-
-            let recordCIDResult = await* repositoryHandler.createRecord(
-                createRecordRequest.repo,
-                createRecordRequest.collection,
-                createRecordRequest.rkey,
-                record,
-            );
-
-            switch (recordCIDResult) {
-                case (#ok({ uri; cid })) {
-                    routeContext.buildResponse(
-                        #ok,
-                        #json(
-                            #object_([
-                                ("uri", #string(AtUri.toText(atUri))),
-                                ("cid", #string(CID.toText(recordCID))),
-                            ])
-                        ),
-                    );
-                };
+            let response = switch (await* repositoryHandler.createRecord(request)) {
+                case (#ok(response)) response;
                 case (#err(e)) {
-                    routeContext.buildResponse(
-                        #internalServerError,
+                    return routeContext.buildResponse(
+                        #badRequest,
                         #error(#message("Failed to create record: " # e)),
                     );
                 };
             };
+            let responseJson = JsonSerializer.fromCreateRecordResponse(response);
+            routeContext.buildResponse(
+                #ok,
+                #json(responseJson),
+            );
         };
 
         func putRecord(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
-            // Parse request body
-            let requestBody = routeContext.httpContext.request.body;
-            let ?jsonText = Text.decodeUtf8(requestBody) else return routeContext.buildResponse(
-                #badRequest,
-                #error(#message("Invalid UTF-8 in request body")),
-            );
-
-            let parsedJson = switch (Json.parse(jsonText)) {
-                case (#ok(json)) json;
-                case (#err(e)) return routeContext.buildResponse(
-                    #badRequest,
-                    #error(#message("Invalid JSON: " # debug_show (e))),
-                );
-            };
-
-            // Extract fields from JSON
-            let putRecordRequest = switch (parsePutRecordRequest(parsedJson)) {
+            let request = switch (parseRequestFromBody(routeContext, JsonSerializer.toPutRecordRequest)) {
                 case (#ok(req)) req;
                 case (#err(e)) return routeContext.buildResponse(
                     #badRequest,
-                    #error(#message("Invalid request: " # e)),
+                    #error(#message(e)),
                 );
             };
-
-            let record = JsonSerializer.toDagCbor(putRecordRequest.record);
-
-            let recordCIDResult = await* repositoryHandler.putRecord(
-                putRecordRequest.repo,
-                putRecordRequest.collection,
-                putRecordRequest.rkey,
-                record,
-            );
-
-            switch (recordCIDResult) {
-                case (#ok({ uri; cid })) {
-                    routeContext.buildResponse(
-                        #ok,
-                        #json(
-                            #object_([
-                                ("uri", #string(AtUri.toText(uri))),
-                                ("cid", #string(CID.toText(cid))),
-                            ])
-                        ),
-                    );
-                };
+            let response = switch (await* repositoryHandler.putRecord(request)) {
+                case (#ok(response)) response;
                 case (#err(e)) {
-                    routeContext.buildResponse(
-                        #internalServerError,
-                        #error(#message("Failed to create record: " # e)),
+                    return routeContext.buildResponse(
+                        #notFound,
+                        #error(#message("Failed to put record: " # e)),
                     );
                 };
             };
+            let responseJson = JsonSerializer.fromPutRecordResponse(response);
+            routeContext.buildResponse(
+                #ok,
+                #json(responseJson),
+            );
         };
 
         func deleteRecord(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
-            // Delete record implementation
+            let request = switch (parseRequestFromBody(routeContext, JsonSerializer.toDeleteRecordRequest)) {
+                case (#ok(req)) req;
+                case (#err(e)) return routeContext.buildResponse(
+                    #badRequest,
+                    #error(#message(e)),
+                );
+            };
+            let response = switch (await* repositoryHandler.deleteRecord(request)) {
+                case (#ok(response)) response;
+                case (#err(e)) {
+                    return routeContext.buildResponse(
+                        #notFound,
+                        #error(#message("Failed to delete record: " # e)),
+                    );
+                };
+            };
+            let responseJson = JsonSerializer.fromDeleteRecordResponse(response);
             routeContext.buildResponse(
-                #notImplemented,
-                #error(#message("deleteRecord not implemented yet")),
+                #ok,
+                #json(responseJson),
             );
         };
 
         func getRecord(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
-            let ?repo = routeContext.getQueryParam("repo") else return routeContext.buildResponse(
-                #badRequest,
-                #error(#message("Missing 'repo' parameter")),
-            );
-            let repoDid = switch (DID.Plc.fromText(repo)) {
+
+            let request = switch (parseRequestFromBody(routeContext, JsonSerializer.toGetRecordRequest)) {
+                case (#ok(req)) req;
                 case (#err(e)) return routeContext.buildResponse(
                     #badRequest,
-                    #error(#message("Invalid repo DID '" # repo # "': " # e)),
+                    #error(#message(e)),
                 );
-                case (#ok(did)) did;
             };
-            let ?collection = routeContext.getQueryParam("collection") else return routeContext.buildResponse(
-                #badRequest,
-                #error(#message("Missing 'collection' parameter")),
-            );
-            let ?rkey = routeContext.getQueryParam("rkey") else return routeContext.buildResponse(
-                #badRequest,
-                #error(#message("Missing 'rkey' parameter")),
-            );
 
-            let ?{ cid; value } = repositoryHandler.getRecord(repoDid, collection, rkey) else return routeContext.buildResponse(
-                #notFound,
-                #error(#message("Record not found")),
-            );
-            let atUri = AtUri.toText({
-                repoId = repoDid;
-                collectionAndRecord = ?(collection, ?rkey);
-            });
-            let valueJson = JsonSerializer.fromDagCbor(value);
+            let response = switch (repositoryHandler.getRecord(request)) {
+                case (#ok(response)) response;
+                case (#err(e)) {
+                    return routeContext.buildResponse(
+                        #notFound,
+                        #error(#message("Failed to get record: " # e)),
+                    );
+                };
+            };
+
+            let responseJson = JsonSerializer.fromGetRecordResponse(response);
             routeContext.buildResponse(
                 #ok,
-                #json(
-                    #object_([
-                        ("uri", #string(atUri)),
-                        ("cid", #string(CID.toText(cid))),
-                        ("value", valueJson),
-                    ])
-                ),
+                #json(responseJson),
             );
         };
 
@@ -329,10 +269,23 @@ module {
             );
         };
 
-        private func parseCreateRecordRequest(json : Json.Json) : Result.Result<CreateRecordRequest, Text> {
-            // Parse JSON into CreateRecordRequest
-            // This is a simplified implementation
-            #err("JSON parsing not implemented");
+        func parseRequestFromBody<T>(
+            routeContext : RouteContext.RouteContext,
+            parser : Json.Json -> Result.Result<T, Text>,
+        ) : Result.Result<T, Text> {
+            let requestBody = routeContext.httpContext.request.body;
+            let ?jsonText = Text.decodeUtf8(requestBody) else return #err("Invalid UTF-8 in request body");
+
+            let parsedJson = switch (Json.parse(jsonText)) {
+                case (#ok(json)) json;
+                case (#err(e)) return #err("Invalid request JSON: " # debug_show (e));
+            };
+
+            // Extract fields from JSON
+            switch (parser(parsedJson)) {
+                case (#ok(req)) #ok(req);
+                case (#err(e)) return #err("Invalid request: " # e);
+            };
         };
     };
 };

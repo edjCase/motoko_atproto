@@ -113,7 +113,7 @@ module {
             request : Repository.CreateRecordRequest
         ) : async* Result.Result<Repository.CreateRecordResponse, Text> {
 
-            let ?_ = get(request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
+            let ?repo = PureMap.get(repositories, comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
 
             let rKey : Text = switch (request.rkey) {
                 case (?rkey) {
@@ -142,8 +142,6 @@ module {
                 case (#ok(status)) status;
                 case (#err(e)) return #err("Record validation failed: " # e);
             };
-
-            let ?repo = PureMap.get(repositories, comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
 
             let recordCID = CIDBuilder.fromRecord(rKey, request.record);
             let updatedRecords = PureMap.add(repo.records, compareCID, recordCID, request.record);
@@ -225,33 +223,320 @@ module {
             });
         };
 
-        public func getRecord(
-            repoId : DID.Plc.DID,
-            collectionId : Text,
-            recordKey : Text,
-        ) : ?{
-            cid : CID.CID;
-            value : DagCbor.Value;
-        } {
-            let ?repo = PureMap.get(repositories, comparePlcDID, repoId) else return null;
+        public func getRecord(request : Repository.GetRecordRequest) : Result.Result<Repository.GetRecordResponse, Text> {
+            let ?repo = PureMap.get(repositories, comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
 
-            let path = collectionId # "/" # recordKey;
+            let path = request.collection # "/" # request.rkey;
             let pathKey = MST.pathToKey(path);
 
             let mstHandler = MSTHandler.Handler(repo.nodes);
 
             // Get the current commit to find the MST root
-            let ?currentCommit = PureMap.get(repo.commits, TID.compare, repo.rev) else return null;
+            let ?currentCommit = PureMap.get(repo.commits, TID.compare, repo.rev) else return #err("No commits found in repository");
 
             // Get the root MST node from the commit's data field
-            let ?rootNode = mstHandler.getNode(currentCommit.data) else return null;
+            let ?rootNode = mstHandler.getNode(currentCommit.data) else return #err("Failed to get root node from MST");
 
-            let ?recordCID = mstHandler.getCID(rootNode, pathKey) else return null;
-            let ?value = PureMap.get(repo.records, compareCID, recordCID) else return null;
-            ?{
-                cid = recordCID;
+            let ?recordCID = mstHandler.getCID(rootNode, pathKey) else return #err("Record not found at path: " # path);
+            let ?value = PureMap.get(repo.records, compareCID, recordCID) else return #err("Record not found at path: " # path);
+            #ok({
+                cid = ?recordCID;
+                uri = {
+                    repoId = request.repo;
+                    collectionAndRecord = ?(request.collection, ?request.rkey);
+                };
                 value = value;
+            });
+        };
+
+        public func putRecord(request : Repository.PutRecordRequest) : async* Result.Result<Repository.PutRecordResponse, Text> {
+            let ?repo = PureMap.get(repositories, comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
+
+            if (Text.size(request.rkey) > 512) {
+                return #err("Record key exceeds maximum length of 512 characters");
             };
+
+            switch (request.swapCommit) {
+                case (?_) {
+                    // Handle swapCommit field
+                    Debug.todo();
+                };
+                case (null) ();
+            };
+
+            switch (request.swapRecord) {
+                case (?_) {
+                    // Handle swapRecord field
+                    Debug.todo();
+                };
+                case (null) ();
+            };
+
+            let validationResult : Result.Result<Repository.ValidationStatus, Text> = switch (request.validate) {
+                case (?true) LexiconValidator.validateRecord(request.record, request.collection, false);
+                case (?false) #ok(#unknown);
+                case (null) LexiconValidator.validateRecord(request.record, request.collection, true);
+            };
+            let validationStatus = switch (validationResult) {
+                case (#ok(status)) status;
+                case (#err(e)) return #err("Record validation failed: " # e);
+            };
+
+            let recordCID = CIDBuilder.fromRecord(request.rkey, request.record);
+            let updatedRecords = PureMap.add(repo.records, compareCID, recordCID, request.record);
+
+            // Create record path
+            let path = request.collection # "/" # request.rkey;
+            let pathKey = MST.pathToKey(path);
+
+            let mstHandler = MSTHandler.Handler(repo.nodes);
+
+            // Get current MST root from the latest commit
+            let ?currentCommit = PureMap.get<TID.TID, Commit>(
+                repo.commits,
+                TID.compare,
+                repo.rev,
+            ) else return #err("No commits found in repository");
+
+            let currentNodeCID = currentCommit.data;
+
+            // Update MST (this will replace existing record or add new one)
+            let newNode = switch (mstHandler.addCID(currentCommit.data, pathKey, recordCID)) {
+                case (#ok(mst)) mst;
+                case (#err(e)) return #err("Failed to update MST: " # debug_show (e));
+            };
+
+            let newNodeCID = CIDBuilder.fromMSTNode(newNode);
+            // Create new commit
+            let newRev = tidGenerator.next();
+
+            let signedCommit = switch (
+                await* createCommit(
+                    request.repo,
+                    newRev,
+                    newNodeCID,
+                    ?currentNodeCID,
+                )
+            ) {
+                case (#ok(commit)) commit;
+                case (#err(e)) return #err("Failed to create commit: " # e);
+            };
+
+            // Store new state
+            let commitCID = CIDBuilder.fromCommit(signedCommit);
+            let updatedCommits = PureMap.add<TID.TID, Commit>(
+                repo.commits,
+                TID.compare,
+                newRev,
+                signedCommit,
+            );
+
+            repositories := PureMap.add(
+                repositories,
+                comparePlcDID,
+                request.repo,
+                {
+                    repo with
+                    head = commitCID;
+                    rev = newRev;
+                    commits = updatedCommits;
+                    records = updatedRecords;
+                    nodes = mstHandler.getNodes();
+                },
+            );
+
+            #ok({
+                cid = recordCID;
+                commit = ?{
+                    cid = commitCID;
+                    rev = newRev;
+                };
+                uri = {
+                    repoId = request.repo;
+                    collectionAndRecord = ?(request.collection, ?request.rkey);
+                };
+                validationStatus = ?validationStatus;
+            });
+        };
+
+        public func deleteRecord(request : Repository.DeleteRecordRequest) : async* Result.Result<Repository.DeleteRecordResponse, Text> {
+            let ?repo = PureMap.get(repositories, comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
+
+            switch (request.swapCommit) {
+                case (?_) {
+                    // Handle swapCommit field
+                    Debug.todo();
+                };
+                case (null) ();
+            };
+
+            switch (request.swapRecord) {
+                case (?_) {
+                    // Handle swapRecord field
+                    Debug.todo();
+                };
+                case (null) ();
+            };
+
+            // Create record path
+            let path = request.collection # "/" # request.rkey;
+            let pathKey = MST.pathToKey(path);
+
+            let mstHandler = MSTHandler.Handler(repo.nodes);
+
+            // Get current MST root from the latest commit
+            let ?currentCommit = PureMap.get<TID.TID, Commit>(
+                repo.commits,
+                TID.compare,
+                repo.rev,
+            ) else return #err("No commits found in repository");
+
+            let currentNodeCID = currentCommit.data;
+
+            // Check if record exists before trying to delete
+            let ?rootNode = mstHandler.getNode(currentCommit.data) else return #err("Failed to get root node from MST");
+            let ?recordCID = mstHandler.getCID(rootNode, pathKey) else return #err("Record not found at path: " # path);
+
+            // Remove from MST
+            let newNode = switch (mstHandler.removeCID(currentCommit.data, pathKey)) {
+                case (#ok(mst)) mst;
+                case (#err(e)) return #err("Failed to remove from MST: " # debug_show (e));
+            };
+
+            let newNodeCID = CIDBuilder.fromMSTNode(newNode);
+            // Create new commit
+            let newRev = tidGenerator.next();
+
+            let signedCommit = switch (
+                await* createCommit(
+                    request.repo,
+                    newRev,
+                    newNodeCID,
+                    ?currentNodeCID,
+                )
+            ) {
+                case (#ok(commit)) commit;
+                case (#err(e)) return #err("Failed to create commit: " # e);
+            };
+
+            // Store new state
+            let commitCID = CIDBuilder.fromCommit(signedCommit);
+            let updatedCommits = PureMap.add<TID.TID, Commit>(
+                repo.commits,
+                TID.compare,
+                newRev,
+                signedCommit,
+            );
+
+            repositories := PureMap.add(
+                repositories,
+                comparePlcDID,
+                request.repo,
+                {
+                    repo with
+                    head = commitCID;
+                    rev = newRev;
+                    commits = updatedCommits;
+                    nodes = mstHandler.getNodes();
+                },
+            );
+
+            #ok({
+                commit = ?{
+                    cid = commitCID;
+                    rev = newRev;
+                };
+            });
+        };
+
+        public func listRecords(request : Repository.ListRecordsRequest) : Result.Result<Repository.ListRecordsResponse, Text> {
+            // let ?repo = PureMap.get(repositories, comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
+
+            // let mstHandler = MSTHandler.Handler(repo.nodes);
+
+            // // Get the current commit to find the MST root
+            // let ?currentCommit = PureMap.get(repo.commits, TID.compare, repo.rev) else return #err("No commits found in repository");
+
+            // // Get the root MST node from the commit's data field
+            // let ?rootNode = mstHandler.getNode(currentCommit.data) else return #err("Failed to get root node from MST");
+
+            // // Get all records in the collection
+            // let collectionPrefix = request.collection # "/";
+            // let allRecords = mstHandler.getAllRecordsWithPrefix(rootNode, collectionPrefix);
+
+            // // Convert to ListRecord format
+            // let listRecords = allRecords |> Array.mapFilter<(Text, CID.CID), Repository.ListRecord>(
+            //     _,
+            //     func((path, recordCID) : (Text, CID.CID)) : ?Repository.ListRecord {
+            //         // Extract rkey from path (remove collection prefix)
+            //         if (not Text.startsWith(path, #text(collectionPrefix))) {
+            //             return null;
+            //         };
+            //         let rkey = Text.stripStart(path, #text(collectionPrefix));
+
+            //         let ?value = PureMap.get(repo.records, compareCID, recordCID) else return null;
+
+            //         ?{
+            //             cid = recordCID;
+            //             uri = {
+            //                 repoId = request.repo;
+            //                 collectionAndRecord = ?(request.collection, ?rkey);
+            //             };
+            //             value = value;
+            //         };
+            //     },
+            // );
+
+            // // Apply reverse ordering if requested
+            // let orderedRecords = switch (request.reverse) {
+            //     case (?true) Array.reverse(listRecords);
+            //     case (_) listRecords;
+            // };
+
+            // // Apply pagination
+            // let limit = switch (request.limit) {
+            //     case (?l) l;
+            //     case (null) 50;
+            // };
+
+            // // Find start index based on cursor
+            // let startIndex = switch (request.cursor) {
+            //     case (?cursor) {
+            //         // Find the record after the cursor
+            //         var index = 0;
+            //         label findCursor for (record in orderedRecords.vals()) {
+            //             let recordUri = AtUri.toText(record.uri);
+            //             if (recordUri == cursor) {
+            //                 index += 1;
+            //                 break findCursor;
+            //             };
+            //             index += 1;
+            //         };
+            //         index;
+            //     };
+            //     case (null) 0;
+            // };
+
+            // // Get the slice of records
+            // let endIndex = Nat.min(startIndex + limit, orderedRecords.size());
+            // let resultRecords = if (startIndex >= orderedRecords.size()) {
+            //     [];
+            // } else {
+            //     Array.slice(orderedRecords, startIndex, endIndex);
+            // };
+
+            // // Generate next cursor
+            // let nextCursor = if (endIndex < orderedRecords.size()) {
+            //     ?AtUri.toText(resultRecords[resultRecords.size() - 1].uri);
+            // } else {
+            //     null;
+            // };
+
+            // #ok({
+            //     cursor = nextCursor;
+            //     records = resultRecords;
+            // });
+            #err("listRecords not implemented yet");
         };
 
         public func toStableData() : StableData {
