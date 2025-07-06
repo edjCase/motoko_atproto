@@ -74,27 +74,6 @@ module {
         };
     };
 
-    public func toDescribeRepoRequest(
-        json : Json.Json
-    ) : Result.Result<Repository.DescribeRepoRequest, Text> {
-
-        // Extract required fields
-
-        let repoText = switch (Json.getAsText(json, "repo")) {
-            case (#ok(repo)) repo;
-            case (#err(#pathNotFound)) return #err("Missing required field: repo");
-            case (#err(#typeMismatch)) return #err("Invalid repo field, expected string");
-        };
-        let repo = switch (DID.Plc.fromText(repoText)) {
-            case (#ok(did)) did;
-            case (#err(e)) return #err("Invalid repo DID: " # e);
-        };
-
-        #ok({
-            repo = repo;
-        });
-    };
-
     public func fromDescribeRepoResponse(
         response : Repository.DescribeRepoResponse
     ) : Json.Json {

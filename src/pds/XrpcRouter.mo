@@ -16,6 +16,7 @@ import DagCbor "mo:dag-cbor";
 import Blob "mo:new-base/Blob";
 import AtUri "Types/AtUri";
 import JsonSerializer "./JsonSerializer";
+import Nat "mo:new-base/Nat";
 
 module {
 
@@ -36,15 +37,15 @@ module {
             let nsid = routeContext.getRouteParam("nsid");
 
             switch (Text.toLowercase(nsid)) {
+                case ("_health") health(routeContext);
+                case ("com.atproto.repo.getrecord") getRecord(routeContext);
+                case ("com.atproto.repo.listrecords") listRecords(routeContext);
                 case ("com.atproto.repo.createrecord") await* createRecord(routeContext);
                 case ("com.atproto.repo.putrecord") await* putRecord(routeContext);
                 case ("com.atproto.repo.deleterecord") await* deleteRecord(routeContext);
                 case ("com.atproto.repo.describerepo") await* describeRepo(routeContext);
-                case ("_health") health(routeContext);
                 case ("com.atproto.server.describeserver") describeServer(routeContext);
-                case ("com.atproto.server.listrepos") listRepos(routeContext);
-                case ("com.atproto.repo.getrecord") getRecord(routeContext);
-                case ("com.atproto.repo.listrecords") listRecords(routeContext);
+                case ("com.atproto.sync.listrepos") listRepos(routeContext);
                 case (_) {
                     routeContext.buildResponse(
                         #badRequest,
@@ -87,12 +88,20 @@ module {
 
         func describeRepo(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
 
-            let request = switch (parseRequestFromBody(routeContext, JsonSerializer.toDescribeRepoRequest)) {
-                case (#ok(req)) req;
+            let ?repoText = routeContext.getQueryParam("repo") else return routeContext.buildResponse(
+                #badRequest,
+                #error(#message("Missing required query parameter: repo")),
+            );
+            let repo = switch (DID.Plc.fromText(repoText)) {
+                case (#ok(did)) did;
                 case (#err(e)) return routeContext.buildResponse(
                     #badRequest,
-                    #error(#message(e)),
+                    #error(#message("Invalid repo DID: " # e)),
                 );
+            };
+
+            let request : Repository.DescribeRepoRequest = {
+                repo = repo;
             };
             let response = switch (await* repositoryHandler.describe(request)) {
                 case (#ok(response)) response;
@@ -111,8 +120,20 @@ module {
         };
 
         func listRepos(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
+            let limit = switch (routeContext.getQueryParam("limit")) {
+                case (null) 100; // Default limit
+                case (?limitText) {
+                    switch (Nat.fromText(limitText)) {
+                        case (?limit) limit;
+                        case (null) return routeContext.buildResponse(
+                            #badRequest,
+                            #error(#message("Invalid limit parameter: " # limitText)),
+                        );
+                    };
+                };
+            };
             // TODO: pagination/cursor
-            let repos = repositoryHandler.getAll();
+            let repos = repositoryHandler.getAll(limit);
             let reposCandid = Array.map<Repository.Repository, Serde.Candid>(
                 repos,
                 func(repo : Repository.Repository) : Serde.Candid {

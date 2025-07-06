@@ -21,6 +21,7 @@ import Debug "mo:new-base/Debug";
 import ServerInfoHandler "./ServerInfoHandler";
 import Domain "mo:url-kit/Domain";
 import DIDModule "../DID";
+import IterTools "mo:itertools/Iter";
 
 module {
     public type StableData = {
@@ -49,8 +50,9 @@ module {
     ) {
         var repositories = stableData.repositories;
 
-        public func getAll() : [Repository.Repository] {
+        public func getAll(limit : Nat) : [Repository.Repository] {
             return PureMap.entries(repositories)
+            |> IterTools.take(_, limit)
             |> Iter.map(
                 _,
                 func((did, repo) : (DID.Plc.DID, RepositoryWithData)) : Repository.Repository {
