@@ -3,6 +3,7 @@ import CID "mo:cid";
 import TID "mo:tid";
 import DagCbor "mo:dag-cbor";
 import AtUri "./AtUri";
+import DIDModule "../DID"
 
 module {
 
@@ -33,6 +34,30 @@ module {
 
         /// Record validation status unknown (for unrecognized schemas)
         #unknown;
+    };
+
+    /// Request type for describing a repository
+    public type DescribeRepoRequest = {
+        /// The handle or DID of the repo
+        repo : DID.Plc.DID;
+    };
+
+    /// Response from a successful describe repo operation
+    public type DescribeRepoResponse = {
+        /// The handle for this account
+        handle : Text;
+
+        /// The DID for this account
+        did : DID.Plc.DID;
+
+        /// The complete DID document for this account
+        didDoc : DIDModule.DidDocument;
+
+        /// List of all the collections (NSIDs) for which this repo contains at least one record
+        collections : [Text];
+
+        /// Indicates if handle is currently valid (resolves bi-directionally)
+        handleIsCorrect : Bool;
     };
 
     /// Request type for creating a single new repository record

@@ -24,31 +24,12 @@ module {
         serverInfoHandler : ServerInfoHandler.Handler,
     ) {
 
-        public func routeGet<system>(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
-            route(routeContext);
+        public func routeGet<system>(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
+            await* routeAsync(routeContext);
         };
 
         public func routePost<system>(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
             await* routeAsync(routeContext);
-        };
-
-        func route(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
-            let nsid = routeContext.getRouteParam("nsid");
-
-            switch (Text.toLowercase(nsid)) {
-                case ("_health") health(routeContext);
-                case ("com.atproto.server.describeserver") describeServer(routeContext);
-                case ("com.atproto.repo.describerepo") describeRepo(routeContext);
-                case ("com.atproto.server.listrepos") listRepos(routeContext);
-                case ("com.atproto.repo.getrecord") getRecord(routeContext);
-                case ("com.atproto.repo.listrecords") listRecords(routeContext);
-                case (_) {
-                    routeContext.buildResponse(
-                        #badRequest,
-                        #error(#message("Unsupported NSID: " # nsid)),
-                    );
-                };
-            };
         };
 
         func routeAsync(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
@@ -58,7 +39,18 @@ module {
                 case ("com.atproto.repo.createrecord") await* createRecord(routeContext);
                 case ("com.atproto.repo.putrecord") await* putRecord(routeContext);
                 case ("com.atproto.repo.deleterecord") await* deleteRecord(routeContext);
-                case (_) route(routeContext); // Fall back to sync routes
+                case ("com.atproto.repo.describerepo") await* describeRepo(routeContext);
+                case ("_health") health(routeContext);
+                case ("com.atproto.server.describeserver") describeServer(routeContext);
+                case ("com.atproto.server.listrepos") listRepos(routeContext);
+                case ("com.atproto.repo.getrecord") getRecord(routeContext);
+                case ("com.atproto.repo.listrecords") listRecords(routeContext);
+                case (_) {
+                    routeContext.buildResponse(
+                        #badRequest,
+                        #error(#message("Unsupported NSID: " # nsid)),
+                    );
+                };
             };
         };
 
@@ -93,38 +85,29 @@ module {
             );
         };
 
-        func describeRepo(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
-            let ?repoId = routeContext.getQueryParam("repo") else return routeContext.buildResponse(
-                #badRequest,
-                #error(#message("Missing 'repo' query parameter")),
-            );
-            let repoDid = switch (DID.Plc.fromText(repoId)) {
+        func describeRepo(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
+
+            let request = switch (parseRequestFromBody(routeContext, JsonSerializer.toDescribeRepoRequest)) {
+                case (#ok(req)) req;
                 case (#err(e)) return routeContext.buildResponse(
                     #badRequest,
-                    #error(#message("Invalid repo DID '" # repoId # "': " # e)),
+                    #error(#message(e)),
                 );
-                case (#ok(did)) did;
             };
-            let ?repo = repositoryHandler.get(repoDid) else return routeContext.buildResponse(
-                #notFound,
-                #error(#message("Repository not found")),
-            );
-
-            var fields : [(Text, Serde.Candid)] = [
-                ("did", #Text(DID.Plc.toText(repo.did))),
-                ("head", #Text(CID.toText(repo.head))),
-                ("rev", #Nat64(TID.toNat64(repo.rev))),
-                ("active", #Bool(repo.active)),
-            ];
-
-            switch (repo.status) {
-                case (null) ();
-                case (?status) {
-                    fields := Array.concat(fields, [("status", #Text(status))]);
+            let response = switch (await* repositoryHandler.describe(request)) {
+                case (#ok(response)) response;
+                case (#err(e)) {
+                    return routeContext.buildResponse(
+                        #badRequest,
+                        #error(#message("Failed to describe repository: " # e)),
+                    );
                 };
             };
-
-            routeContext.buildResponse(#ok, #content(#Record(fields)));
+            let responseJson = JsonSerializer.fromDescribeRepoResponse(response);
+            routeContext.buildResponse(
+                #ok,
+                #json(responseJson),
+            );
         };
 
         func listRepos(routeContext : RouteContext.RouteContext) : Route.HttpResponse {

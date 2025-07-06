@@ -16,6 +16,7 @@ import Runtime "mo:new-base/Runtime";
 import Debug "mo:new-base/Debug";
 import CIDBuilder "../CIDBuilder";
 import PureMap "mo:new-base/pure/Map";
+import Set "mo:new-base/Set";
 
 module {
 
@@ -281,6 +282,19 @@ module {
 
         public func getNodes() : PureMap.Map<Text, MST.Node> {
             nodes;
+        };
+
+        public func getAllCollections() : [Text] {
+            let collectionSet = Set.empty<Text>();
+            label f1 for ((_, node) in PureMap.entries(nodes)) {
+                label f2 for (entry in node.e.vals()) {
+                    // TODO optimize
+                    let ?keyText = Text.decodeUtf8(Blob.fromArray(entry.k)) else continue f2;
+                    let ?collection = Text.split(keyText, #char('/')).next() else continue f2;
+                    Set.add(collectionSet, Text.compare, collection);
+                };
+            };
+            Array.fromIter(Set.values(collectionSet));
         };
     };
 

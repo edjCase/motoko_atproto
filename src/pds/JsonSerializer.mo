@@ -74,6 +74,80 @@ module {
         };
     };
 
+    public func toDescribeRepoRequest(
+        json : Json.Json
+    ) : Result.Result<Repository.DescribeRepoRequest, Text> {
+
+        // Extract required fields
+
+        let repoText = switch (Json.getAsText(json, "repo")) {
+            case (#ok(repo)) repo;
+            case (#err(#pathNotFound)) return #err("Missing required field: repo");
+            case (#err(#typeMismatch)) return #err("Invalid repo field, expected string");
+        };
+        let repo = switch (DID.Plc.fromText(repoText)) {
+            case (#ok(did)) did;
+            case (#err(e)) return #err("Invalid repo DID: " # e);
+        };
+
+        #ok({
+            repo = repo;
+        });
+    };
+
+    public func fromDescribeRepoResponse(
+        response : Repository.DescribeRepoResponse
+    ) : Json.Json {
+
+        let didText = DID.Plc.toText(response.did);
+        let didDocJson = fromDidDocument(response.didDoc);
+        let collectionsJson = response.collections |> Array.map<Text, Json.Json>(
+            _,
+            func(collection : Text) : Json.Json = #string(collection),
+        );
+
+        #object_([
+            ("handle", #string(response.handle)),
+            ("did", #string(didText)),
+            ("didDoc", didDocJson),
+            ("collections", #array(collectionsJson)),
+            ("handleIsCorrect", #bool(response.handleIsCorrect)),
+        ]);
+    };
+
+    public func fromDidDocument(didDoc : DIDModule.DidDocument) : Json.Json {
+
+        let verificationMethodsJson = didDoc.verificationMethod
+        |> Array.map<DIDModule.VerificationMethod, Json.Json>(
+            _,
+            func(vm : DIDModule.VerificationMethod) : Json.Json = #object_([
+                ("id", #string(vm.id)),
+                ("type", #string(vm.type_)),
+                ("controller", #string(DID.toText(vm.controller))),
+                (
+                    "publicKeyMultibase",
+                    switch (vm.publicKeyMultibase) {
+                        case (null) #null_;
+                        case (?publicKey) #string(DID.Key.toText(publicKey, #base58btc));
+                    },
+                ),
+            ]),
+        );
+
+        let textArrayToJson = func(texts : [Text]) : Json.Json {
+            #array(texts |> Array.map<Text, Json.Json>(_, func(text : Text) : Json.Json = #string(text)));
+        };
+
+        #object_([
+            ("id", #string(DID.toText(didDoc.id))),
+            ("context", textArrayToJson(didDoc.context)),
+            ("alsoKnownAs", textArrayToJson(didDoc.alsoKnownAs)),
+            ("verificationMethod", #array(verificationMethodsJson)),
+            ("authentication", textArrayToJson(didDoc.authentication)),
+            ("assertionMethod", textArrayToJson(didDoc.assertionMethod)),
+        ]);
+    };
+
     public func toPutRecordRequest(
         json : Json.Json
     ) : Result.Result<Repository.PutRecordRequest, Text> {

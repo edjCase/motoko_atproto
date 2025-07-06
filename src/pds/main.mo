@@ -34,19 +34,19 @@ actor {
   };
 
   var keyHandler = KeyHandler.Handler(keyHandlerStableData);
-  var repositoryHandler = RepositoryHandler.Handler(repositoryStableData, keyHandler, tidGenerator);
   var serverInfoHandler = ServerInfoHandler.Handler(serverInfoStableData);
+  var repositoryHandler = RepositoryHandler.Handler(repositoryStableData, keyHandler, tidGenerator, serverInfoHandler);
 
   system func preupgrade() {
     keyHandlerStableData := keyHandler.toStableData();
-    repositoryStableData := repositoryHandler.toStableData();
     serverInfoStableData := serverInfoHandler.toStableData();
+    repositoryStableData := repositoryHandler.toStableData();
   };
 
   system func postupgrade() {
     keyHandler := KeyHandler.Handler(keyHandlerStableData);
-    repositoryHandler := RepositoryHandler.Handler(repositoryStableData, keyHandler, tidGenerator);
     serverInfoHandler := ServerInfoHandler.Handler(serverInfoStableData);
+    repositoryHandler := RepositoryHandler.Handler(repositoryStableData, keyHandler, tidGenerator, serverInfoHandler);
   };
 
   let xrpcRouter = XrpcRouter.Router(repositoryHandler, serverInfoHandler);
@@ -56,7 +56,7 @@ actor {
     prefix = null;
     identityRequirement = null;
     routes = [
-      Router.getUpdate("/xrpc/{nsid}", xrpcRouter.routeGet),
+      Router.getAsyncUpdate("/xrpc/{nsid}", xrpcRouter.routeGet),
       Router.postAsyncUpdate("/xrpc/{nsid}", xrpcRouter.routePost),
       Router.getAsyncUpdate("/.well-known/did.json", wellKnownRouter.getDidDocument),
       Router.getUpdate("/.well-known/ic-domains", wellKnownRouter.getIcDomains),

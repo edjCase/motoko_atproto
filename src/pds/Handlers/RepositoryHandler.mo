@@ -18,6 +18,9 @@ import MSTHandler "../Handlers/MSTHandler";
 import Iter "mo:new-base/Iter";
 import LexiconValidator "../LexiconValidator";
 import Debug "mo:new-base/Debug";
+import ServerInfoHandler "./ServerInfoHandler";
+import Domain "mo:url-kit/Domain";
+import DIDModule "../DID";
 
 module {
     public type StableData = {
@@ -42,6 +45,7 @@ module {
         stableData : StableData,
         keyHandler : KeyHandler.Handler,
         tidGenerator : TID.Generator,
+        serverInfoHandler : ServerInfoHandler.Handler,
     ) {
         var repositories = stableData.repositories;
 
@@ -65,6 +69,40 @@ module {
                 repo with
                 did = id;
             };
+        };
+
+        public func describe(request : Repository.DescribeRepoRequest) : async* Result.Result<Repository.DescribeRepoResponse, Text> {
+            let ?repo = PureMap.get(repositories, comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
+
+            let mstHandler = MSTHandler.Handler(repo.nodes);
+
+            let collections = mstHandler.getAllCollections();
+
+            let ?serverInfo = serverInfoHandler.get() else return #err("Server not initialized");
+
+            let handle = Domain.toText(serverInfo.domain);
+
+            let verificationKey : DID.Key.DID = switch (await* keyHandler.getPublicKey(#verification)) {
+                case (#ok(did)) did;
+                case (#err(e)) return #err("Failed to get verification public key: " # e);
+            };
+            let webDid : DID.Web.DID = {
+                host = #domain(serverInfo.domain);
+                path = [];
+                port = null;
+            };
+
+            let didDoc = DIDModule.generateDIDDocument(request.repo, webDid, verificationKey);
+
+            let handleIsCorrect = true; // TODO?
+
+            #ok({
+                handle = handle;
+                did = request.repo;
+                didDoc = didDoc;
+                collections = collections;
+                handleIsCorrect = handleIsCorrect;
+            });
         };
 
         public func create(

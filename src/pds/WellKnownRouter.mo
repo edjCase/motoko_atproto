@@ -8,6 +8,7 @@ import Domain "mo:url-kit/Domain";
 import Json "mo:json";
 import Array "mo:new-base/Array";
 import DID "mo:did";
+import JsonSerializer "./JsonSerializer";
 
 module {
 
@@ -28,36 +29,7 @@ module {
                 port = null;
             };
             let didDoc = DIDModule.generateDIDDocument(info.plcDid, webDid, publicKey);
-
-            let verificationMethodsJson = didDoc.verificationMethod
-            |> Array.map<DIDModule.VerificationMethod, Json.Json>(
-                _,
-                func(vm : DIDModule.VerificationMethod) : Json.Json = #object_([
-                    ("id", #string(vm.id)),
-                    ("type", #string(vm.type_)),
-                    ("controller", #string(DID.toText(vm.controller))),
-                    (
-                        "publicKeyMultibase",
-                        switch (vm.publicKeyMultibase) {
-                            case (null) #null_;
-                            case (?publicKey) #string(DID.Key.toText(publicKey, #base58btc));
-                        },
-                    ),
-                ]),
-            );
-
-            let textArrayToJson = func(texts : [Text]) : Json.Json {
-                #array(texts |> Array.map<Text, Json.Json>(_, func(text : Text) : Json.Json = #string(text)));
-            };
-
-            let didDocJson : Json.Json = #object_([
-                ("id", #string(DID.toText(didDoc.id))),
-                ("context", textArrayToJson(didDoc.context)),
-                ("alsoKnownAs", textArrayToJson(didDoc.alsoKnownAs)),
-                ("verificationMethod", #array(verificationMethodsJson)),
-                ("authentication", textArrayToJson(didDoc.authentication)),
-                ("assertionMethod", textArrayToJson(didDoc.assertionMethod)),
-            ]);
+            let didDocJson = JsonSerializer.fromDidDocument(didDoc);
             routeContext.buildResponse(#ok, #json(didDocJson));
         };
 
