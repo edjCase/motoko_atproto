@@ -93,13 +93,13 @@ module {
                 records = PureMap.empty<CID.CID, DagCbor.Value>();
                 nodes = mstHandler.getNodes();
             };
-            let (newRepositories, idExists) = PureMap.insert(
+            let (newRepositories, isNewKey) = PureMap.insert(
                 repositories,
                 comparePlcDID,
                 id,
                 newRepo,
             );
-            if (idExists) {
+            if (not isNewKey) {
                 return #err("Repository with DID " # DID.Plc.toText(id) # " already exists");
             };
             repositories := newRepositories;

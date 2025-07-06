@@ -105,15 +105,15 @@ actor {
       return #err("Server is already initialized");
     };
 
-    serverInfoHandler.set(serverInfo);
-
     switch (await* repositoryHandler.create(serverInfo.plcDid)) {
-      case (#ok(_)) #ok;
+      case (#ok(_)) ();
       case (#err(e)) return #err("Failed to create repository: " # e);
     };
+    serverInfoHandler.set(serverInfo);
+    #ok;
   };
 
-  public func isInitialized() : async Bool {
+  public query func isInitialized() : async Bool {
     serverInfoHandler.get() != null;
   };
 

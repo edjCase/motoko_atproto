@@ -29,7 +29,7 @@ module {
                         // dfx_test_key: a default key ID that is used in deploying to a local version of IC (via IC SDK).
                         // test_key_1: a master test key ID that is used in mainnet.
                         // key_1: a master production key ID that is used in mainnet.
-                        name = "dfx_test_key"; // TODO based on environment
+                        name = "test_key_1"; // TODO based on environment
                     };
                     message_hash = messageHash;
                 });
@@ -52,7 +52,7 @@ module {
                         // dfx_test_key: a default key ID that is used in deploying to a local version of IC (via IC SDK).
                         // test_key_1: a master test key ID that is used in mainnet.
                         // key_1: a master production key ID that is used in mainnet.
-                        name = "dfx_test_key"; // TODO based on environment
+                        name = "test_key_1"; // TODO based on environment
                     };
                 });
                 #ok({
