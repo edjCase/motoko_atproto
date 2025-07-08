@@ -1,14 +1,12 @@
-import Text "mo:base/Text";
 import RouteContext "mo:liminal/RouteContext";
 import Route "mo:liminal/Route";
 import DIDModule "./DID";
 import KeyHandler "./Handlers/KeyHandler";
 import ServerInfoHandler "./Handlers/ServerInfoHandler";
 import Domain "mo:url-kit/Domain";
-import Json "mo:json";
-import Array "mo:new-base/Array";
 import DID "mo:did";
 import JsonSerializer "./JsonSerializer";
+import DIDDocument "./Types/DIDDocument";
 
 module {
 
@@ -29,7 +27,7 @@ module {
                 port = null;
             };
             let didDoc = DIDModule.generateDIDDocument(info.plcDid, webDid, publicKey);
-            let didDocJson = JsonSerializer.fromDidDocument(didDoc);
+            let didDocJson = DIDDocument.toJson(didDoc);
             routeContext.buildResponse(#ok, #json(didDocJson));
         };
 

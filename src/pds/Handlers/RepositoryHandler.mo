@@ -2,7 +2,6 @@ import Repository "../Types/Repository";
 import DID "mo:did";
 import CID "mo:cid";
 import TID "mo:tid";
-import Array "mo:new-base/Array";
 import PureMap "mo:new-base/pure/Map";
 import Commit "../Types/Commit";
 import DagCbor "mo:dag-cbor";
@@ -22,10 +21,24 @@ import ServerInfoHandler "./ServerInfoHandler";
 import Domain "mo:url-kit/Domain";
 import DIDModule "../DID";
 import IterTools "mo:itertools/Iter";
+import Nat "mo:new-base/Nat";
+import Array "mo:new-base/Array";
+import DescribeRepo "../Types/Lexicons/Com/Atproto/Repo/DescribeRepo";
+import CreateRecord "../Types/Lexicons/Com/Atproto/Repo/CreateRecord";
+import GetRecord "../Types/Lexicons/Com/Atproto/Repo/GetRecord";
+import PutRecord "../Types/Lexicons/Com/Atproto/Repo/PutRecord";
+import DeleteRecord "../Types/Lexicons/Com/Atproto/Repo/DeleteRecord";
+import ListRecords "../Types/Lexicons/Com/Atproto/Repo/ListRecords";
+import UploadBlob "../Types/Lexicons/Com/Atproto/Repo/UploadBlob";
+import RepoCommon "../Types/Lexicons/Com/Atproto/Repo/Common";
+import ListBlobs "../Types/Lexicons/Com/Atproto/Sync/ListBlobs";
+import BlobRef "../Types/BlobRef";
+import Time "mo:new-base/Time";
 
 module {
     public type StableData = {
         repositories : PureMap.Map<DID.Plc.DID, RepositoryWithData>;
+        blobs : PureMap.Map<CID.CID, BlobWithMetaData>;
     };
 
     type Commit = {
@@ -40,6 +53,13 @@ module {
         commits : PureMap.Map<TID.TID, Commit>;
         records : PureMap.Map<CID.CID, DagCbor.Value>;
         nodes : PureMap.Map<Text, MST.Node>;
+        blobs : PureMap.Map<CID.CID, BlobRef.BlobRef>;
+    };
+
+    public type BlobWithMetaData = {
+        data : Blob;
+        mimeType : Text;
+        createdAt : Time.Time;
     };
 
     public class Handler(
@@ -49,6 +69,7 @@ module {
         serverInfoHandler : ServerInfoHandler.Handler,
     ) {
         var repositories = stableData.repositories;
+        var blobs = stableData.blobs;
 
         public func getAll(limit : Nat) : [Repository.Repository] {
             return PureMap.entries(repositories)
@@ -73,7 +94,7 @@ module {
             };
         };
 
-        public func describe(request : Repository.DescribeRepoRequest) : async* Result.Result<Repository.DescribeRepoResponse, Text> {
+        public func describe(request : DescribeRepo.Request) : async* Result.Result<DescribeRepo.Response, Text> {
             let ?repo = PureMap.get(repositories, comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
 
             let mstHandler = MSTHandler.Handler(repo.nodes);
@@ -132,6 +153,7 @@ module {
                 commits = PureMap.singleton<TID.TID, Commit>(rev, signedCommit);
                 records = PureMap.empty<CID.CID, DagCbor.Value>();
                 nodes = mstHandler.getNodes();
+                blobs = PureMap.empty<CID.CID, BlobRef.BlobRef>();
             };
             let (newRepositories, isNewKey) = PureMap.insert(
                 repositories,
@@ -150,8 +172,8 @@ module {
         };
 
         public func createRecord(
-            request : Repository.CreateRecordRequest
-        ) : async* Result.Result<Repository.CreateRecordResponse, Text> {
+            request : CreateRecord.Request
+        ) : async* Result.Result<CreateRecord.Response, Text> {
 
             let ?repo = PureMap.get(repositories, comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
 
@@ -173,7 +195,7 @@ module {
                 case (null) ();
             };
 
-            let validationResult : Result.Result<Repository.ValidationStatus, Text> = switch (request.validate) {
+            let validationResult : Result.Result<RepoCommon.ValidationStatus, Text> = switch (request.validate) {
                 case (?true) LexiconValidator.validateRecord(request.record, request.collection, false);
                 case (?false) #ok(#unknown);
                 case (null) LexiconValidator.validateRecord(request.record, request.collection, true);
@@ -263,7 +285,7 @@ module {
             });
         };
 
-        public func getRecord(request : Repository.GetRecordRequest) : Result.Result<Repository.GetRecordResponse, Text> {
+        public func getRecord(request : GetRecord.Request) : Result.Result<GetRecord.Response, Text> {
             let ?repo = PureMap.get(repositories, comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
 
             let path = request.collection # "/" # request.rkey;
@@ -289,7 +311,7 @@ module {
             });
         };
 
-        public func putRecord(request : Repository.PutRecordRequest) : async* Result.Result<Repository.PutRecordResponse, Text> {
+        public func putRecord(request : PutRecord.Request) : async* Result.Result<PutRecord.Response, Text> {
             let ?repo = PureMap.get(repositories, comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
 
             if (Text.size(request.rkey) > 512) {
@@ -312,7 +334,7 @@ module {
                 case (null) ();
             };
 
-            let validationResult : Result.Result<Repository.ValidationStatus, Text> = switch (request.validate) {
+            let validationResult : Result.Result<RepoCommon.ValidationStatus, Text> = switch (request.validate) {
                 case (?true) LexiconValidator.validateRecord(request.record, request.collection, false);
                 case (?false) #ok(#unknown);
                 case (null) LexiconValidator.validateRecord(request.record, request.collection, true);
@@ -399,7 +421,7 @@ module {
             });
         };
 
-        public func deleteRecord(request : Repository.DeleteRecordRequest) : async* Result.Result<Repository.DeleteRecordResponse, Text> {
+        public func deleteRecord(request : DeleteRecord.Request) : async* Result.Result<DeleteRecord.Response, Text> {
             let ?repo = PureMap.get(repositories, comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
 
             switch (request.swapCommit) {
@@ -435,7 +457,7 @@ module {
 
             // Check if record exists before trying to delete
             let ?rootNode = mstHandler.getNode(currentCommit.data) else return #err("Failed to get root node from MST");
-            let ?recordCID = mstHandler.getCID(rootNode, pathKey) else return #err("Record not found at path: " # path);
+            let ?_ = mstHandler.getCID(rootNode, pathKey) else return #err("Record not found at path: " # path);
 
             // Remove from MST
             let newNode = switch (mstHandler.removeCID(currentCommit.data, pathKey)) {
@@ -489,7 +511,7 @@ module {
             });
         };
 
-        public func listRecords(request : Repository.ListRecordsRequest) : Result.Result<Repository.ListRecordsResponse, Text> {
+        public func listRecords(_ : ListRecords.Request) : Result.Result<ListRecords.Response, Text> {
             // let ?repo = PureMap.get(repositories, comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
 
             // let mstHandler = MSTHandler.Handler(repo.nodes);
@@ -579,9 +601,95 @@ module {
             #err("listRecords not implemented yet");
         };
 
+        public func uploadBlob(request : UploadBlob.Request) : Result.Result<UploadBlob.Response, Text> {
+            // Generate CID for the blob
+            let blobCID = CIDBuilder.fromBlob(request.data);
+
+            let blobWithMetaData : BlobWithMetaData = {
+                data = request.data;
+                mimeType = request.mimeType;
+                createdAt = Time.now();
+            };
+
+            // TODO clear blob if it isn't referenced within a time window
+            blobs := PureMap.add(
+                stableData.blobs,
+                compareCID,
+                blobCID,
+                blobWithMetaData,
+            );
+
+            #ok({
+                blob = {
+                    ref = blobCID;
+                    mimeType = request.mimeType;
+                    size = Blob.size(request.data);
+                };
+            });
+        };
+
+        // Sync methods
+
+        public func listBlobs(request : ListBlobs.Request) : Result.Result<ListBlobs.Response, Text> {
+            let ?repo = PureMap.get(repositories, comparePlcDID, request.did) else return #err("Repository not found: " # DID.Plc.toText(request.did));
+
+            // Get all blob CIDs from the repository
+            let allBlobCIDs = PureMap.keys(repo.blobs) |> Iter.toArray(_);
+
+            // TODO: Filter by 'since' parameter - would need to track which blobs were added in which commits
+            // For now, returning all blobs regardless of 'since' parameter
+
+            // Apply limit
+            let limit = switch (request.limit) {
+                case (?l) l;
+                case (null) 500;
+            };
+
+            // Find start index based on cursor
+            let startIndex = switch (request.cursor) {
+                case (?cursor) {
+                    // Find the blob CID after the cursor
+                    var index = 0;
+                    label findCursor for (cid in allBlobCIDs.vals()) {
+                        let cidText = CID.toText(cid);
+                        if (cidText == cursor) {
+                            index += 1;
+                            break findCursor;
+                        };
+                        index += 1;
+                    };
+                    index;
+                };
+                case (null) 0;
+            };
+
+            // Get the slice of blob CIDs
+            let endIndex = Nat.min(startIndex + limit, allBlobCIDs.size());
+            let resultCIDs = if (startIndex >= allBlobCIDs.size()) {
+                [];
+            } else {
+                Array.sliceToArray(allBlobCIDs, startIndex, endIndex);
+            };
+
+            // Generate next cursor
+            let nextCursor = if (endIndex < allBlobCIDs.size()) {
+                ?CID.toText(resultCIDs[resultCIDs.size() - 1]);
+            } else {
+                null;
+            };
+
+            #ok({
+                cursor = nextCursor;
+                cids = resultCIDs;
+            });
+        };
+
+        // Stable data
+
         public func toStableData() : StableData {
             return {
                 repositories = repositories;
+                blobs = blobs;
             };
         };
 

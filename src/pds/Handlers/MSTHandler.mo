@@ -157,7 +157,6 @@ module {
 
             // Search through entries at this level
             for (i in node.e.keys()) {
-                let entry = node.e[i];
                 let entryKey = reconstructKey(node.e, i);
                 let entryDepth = calculateDepth(entryKey);
 
@@ -188,7 +187,7 @@ module {
                         return switch (node.l) {
                             case null #err("Key not found: " # debug_show (key));
                             case (?leftCID) {
-                                let ?leftNode = getNode(leftCID) else return #err("Left node not found");
+                                let ?_ = getNode(leftCID) else return #err("Left node not found");
                                 // Recursively remove from left subtree
                                 switch (removeCID(leftCID, key)) {
                                     case (#err(msg)) #err(msg);
@@ -208,7 +207,7 @@ module {
                         return switch (node.e[i - 1].t) {
                             case null #err("Key not found: " # debug_show (key));
                             case (?rightCID) {
-                                let ?rightNode = getNode(rightCID) else return #err("Right node not found");
+                                let ?_ = getNode(rightCID) else return #err("Right node not found");
                                 // Recursively remove from right subtree
                                 switch (removeCID(rightCID, key)) {
                                     case (#err(msg)) #err(msg);
@@ -236,11 +235,11 @@ module {
 
             // Key is greater than all entries, check rightmost subtree
             if (node.e.size() > 0) {
-                let lastIndex = node.e.size() - 1;
+                let lastIndex : Nat = node.e.size() - 1;
                 switch (node.e[lastIndex].t) {
                     case null return #err("Key not found: " # debug_show (key));
                     case (?rightCID) {
-                        let ?rightNode = getNode(rightCID) else return #err("Right node not found");
+                        let ?_ = getNode(rightCID) else return #err("Right node not found");
                         // Recursively remove from rightmost subtree
                         switch (removeCID(rightCID, key)) {
                             case (#err(msg)) #err(msg);

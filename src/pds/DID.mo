@@ -10,6 +10,8 @@ import TextX "mo:xtended-text/TextX";
 import KeyHandler "Handlers/KeyHandler";
 import Array "mo:new-base/Array";
 import AtUri "./Types/AtUri";
+import DIDDocument "Types/DIDDocument";
+import Json "mo:json";
 
 module {
 
@@ -42,28 +44,12 @@ module {
         endpoint : Text;
     };
 
-    public type DidDocument = {
-        id : DID.DID;
-        context : [Text];
-        alsoKnownAs : [Text];
-        verificationMethod : [VerificationMethod];
-        authentication : [Text];
-        assertionMethod : [Text];
-    };
-
-    public type VerificationMethod = {
-        id : Text;
-        type_ : Text;
-        controller : DID.DID;
-        publicKeyMultibase : ?DID.Key.DID;
-    };
-
     // Generate the AT Protocol DID Document
     public func generateDIDDocument(
         plcDid : PlcDID.DID,
         webDid : DID.Web.DID,
         verificationPublicKey : DID.Key.DID,
-    ) : DidDocument {
+    ) : DIDDocument.DIDDocument {
 
         let webDidText : Text = DID.Web.toText(webDid);
         {
@@ -152,6 +138,50 @@ module {
             request = signedPlcRequest;
             did = did;
         });
+    };
+
+    public func requestToJson(request : SignedPlcRequest) : Json.Json {
+        func toTextArray(arr : [Text]) : [Json.Json] {
+            arr |> Array.map(_, func(item : Text) : Json.Json = #string(item));
+        };
+
+        let verificationMethodsJsonObj : Json.Json = #object_(
+            request.verificationMethods
+            |> Array.map<(Text, Text), (Text, Json.Json)>(
+                _,
+                func(pair : (Text, Text)) : (Text, Json.Json) = (pair.0, #string(pair.1)),
+            )
+        );
+
+        let servicesJsonObj : Json.Json = #object_(
+            request.services
+            |> Array.map<PlcService, (Text, Json.Json)>(
+                _,
+                func(service : PlcService) : (Text, Json.Json) = (
+                    service.name,
+                    #object_([
+                        ("type", #string(service.type_)),
+                        ("endpoint", #string(service.endpoint)),
+                    ]),
+                ),
+            )
+        );
+
+        #object_([
+            ("type", #string(request.type_)),
+            ("rotationKeys", #array(request.rotationKeys |> toTextArray(_))),
+            ("verificationMethods", verificationMethodsJsonObj),
+            ("alsoKnownAs", #array(request.alsoKnownAs |> toTextArray(_))),
+            ("services", servicesJsonObj),
+            (
+                "prev",
+                switch (request.prev) {
+                    case (?prev) #string(prev);
+                    case (null) #null_;
+                },
+            ),
+            ("sig", #string(BaseX.toBase64(request.signature.vals(), #url({ includePadding = false })))),
+        ]);
     };
 
     private func requestToCborMap(request : PlcRequest) : Result.Result<[(Text, DagCbor.Value)], Text> {

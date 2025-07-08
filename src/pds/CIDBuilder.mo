@@ -12,6 +12,16 @@ import MST "Types/MST";
 import Nat8 "mo:new-base/Nat8";
 
 module {
+
+    public func fromBlob(blob : Blob) : CID.CID {
+        let hash = Sha256.fromBlob(#sha256, blob);
+        #v1({
+            codec = #raw;
+            hashAlgorithm = #sha2_256;
+            hash = hash;
+        });
+    };
+
     public func fromRecord(key : Text, value : DagCbor.Value) : CID.CID {
         let cborMap = [
             ("key", #text(key)),

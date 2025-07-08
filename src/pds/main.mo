@@ -14,17 +14,19 @@ import ServerInfoHandler "Handlers/ServerInfoHandler";
 import KeyHandler "Handlers/KeyHandler";
 import ServerInfo "Types/ServerInfo";
 import DIDModule "./DID";
-import JsonSerializer "./JsonSerializer";
 import DID "mo:did";
 import TID "mo:tid";
+import CID "mo:cid";
 import PureMap "mo:new-base/pure/Map";
 import Json "mo:json";
+import UploadBlob "Types/Lexicons/Com/Atproto/Repo/UploadBlob";
 
 actor {
   let tidGenerator = TID.Generator();
 
   stable var repositoryStableData : RepositoryHandler.StableData = {
     repositories = PureMap.empty<DID.Plc.DID, RepositoryHandler.RepositoryWithData>();
+    blobs = PureMap.empty<CID.CID, RepositoryHandler.BlobWithMetaData>();
   };
   stable var serverInfoStableData : ServerInfoHandler.StableData = {
     info = null;
@@ -129,8 +131,18 @@ actor {
     };
 
     // Convert to JSON
-    let json = JsonSerializer.fromSignedPlcRequest(requestInfo.request);
+    let json = DIDModule.requestToJson(requestInfo.request);
     #ok((DID.Plc.toText(requestInfo.did), Json.stringify(json, null)));
   };
 
+  public func uploadBlob(mimeType : Text, blob : Blob) : async Result.Result<UploadBlob.Response, Text> {
+    let result = repositoryHandler.uploadBlob({
+      mimeType = mimeType;
+      data = blob;
+    });
+    switch (result) {
+      case (#ok(ref)) #ok(ref);
+      case (#err(e)) #err("Failed to add blob: " # e);
+    };
+  };
 };
