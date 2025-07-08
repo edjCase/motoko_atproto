@@ -5,7 +5,7 @@ import KeyHandler "./Handlers/KeyHandler";
 import ServerInfoHandler "./Handlers/ServerInfoHandler";
 import Domain "mo:url-kit/Domain";
 import DID "mo:did";
-import JsonSerializer "./JsonSerializer";
+import JsonDagCborMapper "./JsonDagCborMapper";
 import DIDDocument "./Types/DIDDocument";
 
 module {

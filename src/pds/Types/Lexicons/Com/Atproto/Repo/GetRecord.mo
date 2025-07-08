@@ -5,7 +5,7 @@ import DagCbor "mo:dag-cbor";
 import AtUri "../../../../AtUri";
 import Json "mo:json";
 import Result "mo:new-base/Result";
-import JsonSerializer "../../../../../JsonSerializer";
+import JsonDagCborMapper "../../../../../JsonDagCborMapper";
 
 module {
 
@@ -39,7 +39,7 @@ module {
     public func toJson(response : Response) : Json.Json {
 
         let atUri = AtUri.toText(response.uri);
-        let valueJson = JsonSerializer.fromDagCbor(response.value);
+        let valueJson = JsonDagCborMapper.fromDagCbor(response.value);
         #object_([
             ("uri", #string(atUri)),
             (

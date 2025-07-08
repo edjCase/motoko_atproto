@@ -6,7 +6,7 @@ import AtUri "../../../../AtUri";
 import Json "mo:json";
 import Result "mo:new-base/Result";
 import Int "mo:new-base/Int";
-import JsonSerializer "../../../../../JsonSerializer";
+import JsonDagCborMapper "../../../../../JsonDagCborMapper";
 import Array "mo:new-base/Array";
 
 module {
@@ -57,7 +57,7 @@ module {
             func(record : ListRecord) : Json.Json {
                 let atUri = AtUri.toText(record.uri);
                 let cidText = CID.toText(record.cid);
-                let valueJson = JsonSerializer.fromDagCbor(record.value);
+                let valueJson = JsonDagCborMapper.fromDagCbor(record.value);
 
                 #object_([
                     ("uri", #string(atUri)),

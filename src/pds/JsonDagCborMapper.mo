@@ -1,16 +1,9 @@
 import Text "mo:base/Text";
-import Result "mo:base/Result";
 import Array "mo:new-base/Array";
 import Json "mo:json";
 import BaseX "mo:base-x-encoder";
-import DIDModule "./DID";
 import DagCbor "mo:dag-cbor";
 import CID "mo:cid";
-import Repository "Types/Repository";
-import DID "mo:did";
-import TID "mo:tid";
-import Int "mo:new-base/Int";
-import AtUri "Types/AtUri";
 
 module {
 

@@ -6,7 +6,7 @@ import AtUri "../../../../AtUri";
 import Json "mo:json";
 import Result "mo:new-base/Result";
 import Common "./Common";
-import JsonSerializer "../../../../../JsonSerializer";
+import JsonDagCborMapper "../../../../../JsonDagCborMapper";
 
 module {
 
@@ -114,7 +114,7 @@ module {
             case (null) return #err("Missing required field: record");
         };
 
-        let recordDagCbor = JsonSerializer.toDagCbor(recordJson);
+        let recordDagCbor = JsonDagCborMapper.toDagCbor(recordJson);
 
         // Extract optional fields
 
