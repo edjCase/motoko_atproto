@@ -3,6 +3,7 @@ import Array "mo:new-base/Array";
 import Repository "./Types/Repository";
 import RepositoryHandler "Handlers/RepositoryHandler";
 import ServerInfoHandler "Handlers/ServerInfoHandler";
+import AccountHandler "Handlers/AccountHandler";
 import RouteContext "mo:liminal/RouteContext";
 import Route "mo:liminal/Route";
 import Serde "mo:serde";
@@ -22,12 +23,15 @@ import ListRecords "./Types/Lexicons/Com/Atproto/Repo/ListRecords";
 import UploadBlob "./Types/Lexicons/Com/Atproto/Repo/UploadBlob";
 import RepoCommon "./Types/Lexicons/Com/Atproto/Repo/Common";
 import ListBlobs "./Types/Lexicons/Com/Atproto/Sync/ListBlobs";
+import CreateSession "./Types/Lexicons/Com/Atproto/Server/CreateSession";
+import CreateAccount "./Types/Lexicons/Com/Atproto/Server/CreateAccount";
 
 module {
 
     public class Router(
         repositoryHandler : RepositoryHandler.Handler,
         serverInfoHandler : ServerInfoHandler.Handler,
+        accountHandler : AccountHandler.Handler,
     ) {
 
         public func routeGet<system>(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
@@ -53,8 +57,11 @@ module {
                 case ("com.atproto.repo.listrecords") listRecords(routeContext);
                 case ("com.atproto.repo.putrecord") await* putRecord(routeContext);
                 case ("com.atproto.repo.uploadblob") uploadBlob(routeContext);
+                case ("com.atproto.server.createaccount") createAccount(routeContext);
+                case ("com.atproto.server.createsession") await* createSession(routeContext);
+                case ("com.atproto.server.getsession") getSession(routeContext);
                 case ("com.atproto.server.describeserver") describeServer(routeContext);
-                case ("com.atproto.sync.listBlobs") listBlobs(routeContext);
+                case ("com.atproto.sync.listblobs") listBlobs(routeContext);
                 case ("com.atproto.sync.listrepos") listRepos(routeContext);
                 case (_) {
                     routeContext.buildResponse(
@@ -403,6 +410,62 @@ module {
                 #json(responseJson),
             );
         };
+
+        func createAccount(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
+            let request = switch (parseRequestFromBody(routeContext, CreateAccount.fromJson)) {
+                case (#ok(req)) req;
+                case (#err(e)) return routeContext.buildResponse(
+                    #badRequest,
+                    #error(#message(e)),
+                );
+            };
+
+            let response = switch (accountHandler.createAccount(request)) {
+                case (#ok(response)) response;
+                case (#err(e)) return routeContext.buildResponse(
+                    #badRequest,
+                    #error(#message("Failed to create account: " # e)),
+                );
+            };
+            let responseJson = CreateAccount.toJson(response);
+            routeContext.buildResponse(
+                #ok,
+                #json(responseJson),
+            );
+        };
+
+        func createSession(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
+            let request = switch (parseRequestFromBody(routeContext, CreateSession.fromJson)) {
+                case (#ok(req)) req;
+                case (#err(e)) return routeContext.buildResponse(
+                    #badRequest,
+                    #error(#message(e)),
+                );
+            };
+
+            let response = switch (await* accountHandler.createSession(request)) {
+                case (#ok(response)) response;
+                case (#err(e)) return routeContext.buildResponse(
+                    #badRequest,
+                    #error(#message("Failed to create session: " # e)),
+                );
+            };
+            let responseJson = CreateSession.toJson(response);
+            routeContext.buildResponse(
+                #ok,
+                #json(responseJson),
+            );
+        };
+
+        func getSession(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
+            // TODO: Implement getSession
+            routeContext.buildResponse(
+                #notImplemented,
+                #error(#message("getSession not implemented yet")),
+            );
+        };
+
+        // Helper functions
 
         func getNatOrnull(optText : ?Text) : Result.Result<?Nat, ()> {
             switch (optText) {

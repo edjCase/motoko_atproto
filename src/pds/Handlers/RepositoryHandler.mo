@@ -87,7 +87,7 @@ module {
         };
 
         public func get(id : DID.Plc.DID) : ?Repository.Repository {
-            let ?repo = PureMap.get(repositories, comparePlcDID, id) else return null;
+            let ?repo = PureMap.get(repositories, DIDModule.comparePlcDID, id) else return null;
             ?{
                 repo with
                 did = id;
@@ -95,7 +95,7 @@ module {
         };
 
         public func describe(request : DescribeRepo.Request) : async* Result.Result<DescribeRepo.Response, Text> {
-            let ?repo = PureMap.get(repositories, comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
+            let ?repo = PureMap.get(repositories, DIDModule.comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
 
             let mstHandler = MSTHandler.Handler(repo.nodes);
 
@@ -157,7 +157,7 @@ module {
             };
             let (newRepositories, isNewKey) = PureMap.insert(
                 repositories,
-                comparePlcDID,
+                DIDModule.comparePlcDID,
                 id,
                 newRepo,
             );
@@ -175,7 +175,7 @@ module {
             request : CreateRecord.Request
         ) : async* Result.Result<CreateRecord.Response, Text> {
 
-            let ?repo = PureMap.get(repositories, comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
+            let ?repo = PureMap.get(repositories, DIDModule.comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
 
             let rKey : Text = switch (request.rkey) {
                 case (?rkey) {
@@ -259,7 +259,7 @@ module {
 
             repositories := PureMap.add(
                 repositories,
-                comparePlcDID,
+                DIDModule.comparePlcDID,
                 request.repo,
                 {
                     repo with
@@ -286,7 +286,7 @@ module {
         };
 
         public func getRecord(request : GetRecord.Request) : Result.Result<GetRecord.Response, Text> {
-            let ?repo = PureMap.get(repositories, comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
+            let ?repo = PureMap.get(repositories, DIDModule.comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
 
             let path = request.collection # "/" # request.rkey;
             let pathKey = MST.pathToKey(path);
@@ -312,7 +312,7 @@ module {
         };
 
         public func putRecord(request : PutRecord.Request) : async* Result.Result<PutRecord.Response, Text> {
-            let ?repo = PureMap.get(repositories, comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
+            let ?repo = PureMap.get(repositories, DIDModule.comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
 
             if (Text.size(request.rkey) > 512) {
                 return #err("Record key exceeds maximum length of 512 characters");
@@ -395,7 +395,7 @@ module {
 
             repositories := PureMap.add(
                 repositories,
-                comparePlcDID,
+                DIDModule.comparePlcDID,
                 request.repo,
                 {
                     repo with
@@ -422,7 +422,7 @@ module {
         };
 
         public func deleteRecord(request : DeleteRecord.Request) : async* Result.Result<DeleteRecord.Response, Text> {
-            let ?repo = PureMap.get(repositories, comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
+            let ?repo = PureMap.get(repositories, DIDModule.comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
 
             switch (request.swapCommit) {
                 case (?_) {
@@ -492,7 +492,7 @@ module {
 
             repositories := PureMap.add(
                 repositories,
-                comparePlcDID,
+                DIDModule.comparePlcDID,
                 request.repo,
                 {
                     repo with
@@ -512,7 +512,7 @@ module {
         };
 
         public func listRecords(_ : ListRecords.Request) : Result.Result<ListRecords.Response, Text> {
-            // let ?repo = PureMap.get(repositories, comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
+            // let ?repo = PureMap.get(repositories, DIDModule.comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
 
             // let mstHandler = MSTHandler.Handler(repo.nodes);
 
@@ -631,7 +631,7 @@ module {
         // Sync methods
 
         public func listBlobs(request : ListBlobs.Request) : Result.Result<ListBlobs.Response, Text> {
-            let ?repo = PureMap.get(repositories, comparePlcDID, request.did) else return #err("Repository not found: " # DID.Plc.toText(request.did));
+            let ?repo = PureMap.get(repositories, DIDModule.comparePlcDID, request.did) else return #err("Repository not found: " # DID.Plc.toText(request.did));
 
             // Get all blob CIDs from the repository
             let allBlobCIDs = PureMap.keys(repo.blobs) |> Iter.toArray(_);
@@ -739,11 +739,6 @@ module {
             let hash1 = CID.getHash(cid1);
             let hash2 = CID.getHash(cid2);
             Blob.compare(hash1, hash2);
-        };
-
-        func comparePlcDID(did1 : DID.Plc.DID, did2 : DID.Plc.DID) : Order.Order {
-            if (did1 == did2) return #equal;
-            Text.compare(did1.identifier, did2.identifier);
         };
     };
 };

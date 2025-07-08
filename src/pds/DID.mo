@@ -12,6 +12,7 @@ import Array "mo:new-base/Array";
 import AtUri "./Types/AtUri";
 import DIDDocument "Types/DIDDocument";
 import Json "mo:json";
+import Order "mo:new-base/Order";
 
 module {
 
@@ -42,6 +43,11 @@ module {
         name : Text;
         type_ : Text;
         endpoint : Text;
+    };
+
+    public func comparePlcDID(did1 : DID.Plc.DID, did2 : DID.Plc.DID) : Order.Order {
+        if (did1 == did2) return #equal;
+        Text.compare(did1.identifier, did2.identifier);
     };
 
     // Generate the AT Protocol DID Document
