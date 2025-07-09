@@ -12,6 +12,7 @@ import Router "mo:liminal/Router";
 import RepositoryHandler "Handlers/RepositoryHandler";
 import ServerInfoHandler "Handlers/ServerInfoHandler";
 import KeyHandler "Handlers/KeyHandler";
+import AccountHandler "Handlers/AccountHandler";
 import ServerInfo "Types/ServerInfo";
 import DIDModule "./DID";
 import DID "mo:did";
@@ -34,24 +35,31 @@ actor {
   stable var keyHandlerStableData : KeyHandler.StableData = {
     verificationDerivationPath = ["\00"]; // TODO: configure properly
   };
+  stable var accountStableData : AccountHandler.StableData = {
+    accounts = PureMap.empty<DID.Plc.DID, AccountHandler.Account>();
+    sessions = PureMap.empty<Text, AccountHandler.Session>();
+  };
 
   var keyHandler = KeyHandler.Handler(keyHandlerStableData);
   var serverInfoHandler = ServerInfoHandler.Handler(serverInfoStableData);
   var repositoryHandler = RepositoryHandler.Handler(repositoryStableData, keyHandler, tidGenerator, serverInfoHandler);
+  var accountHandler = AccountHandler.Handler(accountStableData, keyHandler, serverInfoHandler);
 
   system func preupgrade() {
     keyHandlerStableData := keyHandler.toStableData();
     serverInfoStableData := serverInfoHandler.toStableData();
     repositoryStableData := repositoryHandler.toStableData();
+    accountStableData := accountHandler.toStableData();
   };
 
   system func postupgrade() {
     keyHandler := KeyHandler.Handler(keyHandlerStableData);
     serverInfoHandler := ServerInfoHandler.Handler(serverInfoStableData);
     repositoryHandler := RepositoryHandler.Handler(repositoryStableData, keyHandler, tidGenerator, serverInfoHandler);
+    accountHandler := AccountHandler.Handler(accountStableData, keyHandler, serverInfoHandler);
   };
 
-  let xrpcRouter = XrpcRouter.Router(repositoryHandler, serverInfoHandler);
+  let xrpcRouter = XrpcRouter.Router(repositoryHandler, serverInfoHandler, accountHandler);
   let wellKnownRouter = WellKnownRouter.Router(serverInfoHandler, keyHandler);
 
   let routerConfig : RouterMiddleware.Config = {

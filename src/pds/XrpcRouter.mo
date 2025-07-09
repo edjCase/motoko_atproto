@@ -57,7 +57,7 @@ module {
                 case ("com.atproto.repo.listrecords") listRecords(routeContext);
                 case ("com.atproto.repo.putrecord") await* putRecord(routeContext);
                 case ("com.atproto.repo.uploadblob") uploadBlob(routeContext);
-                case ("com.atproto.server.createaccount") createAccount(routeContext);
+                case ("com.atproto.server.createaccount") await* createAccount(routeContext);
                 case ("com.atproto.server.createsession") await* createSession(routeContext);
                 case ("com.atproto.server.getsession") getSession(routeContext);
                 case ("com.atproto.server.describeserver") describeServer(routeContext);
@@ -411,7 +411,7 @@ module {
             );
         };
 
-        func createAccount(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
+        func createAccount(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
             let request = switch (parseRequestFromBody(routeContext, CreateAccount.fromJson)) {
                 case (#ok(req)) req;
                 case (#err(e)) return routeContext.buildResponse(
@@ -420,7 +420,7 @@ module {
                 );
             };
 
-            let response = switch (accountHandler.createAccount(request)) {
+            let response = switch (await* accountHandler.create(request)) {
                 case (#ok(response)) response;
                 case (#err(e)) return routeContext.buildResponse(
                     #badRequest,

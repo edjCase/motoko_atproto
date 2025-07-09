@@ -14,21 +14,23 @@ import Blob "mo:base/Blob";
 import DIDDocument "../Types/DIDDocument";
 import IterTools "mo:itertools/Iter";
 import BaseX "mo:base-x-encoder";
+import KeyHandler "./KeyHandler";
+import ServerInfoHandler "./ServerInfoHandler";
+import Text "mo:new-base/Text";
 
 module {
 
     public type StableData = {
         accounts : PureMap.Map<DID.Plc.DID, Account>;
-        sessions : PureMap.Map<JWT.Token, Session>;
+        sessions : PureMap.Map<Text, Session>;
     };
 
     public type Session = {
         did : DID.Plc.DID;
-        sessionId : Text;
         createdAt : Time.Time;
         lastActiveAt : Time.Time;
-        refreshTokenHash : Text; // SHA256 hash of current refresh token
-        refreshTokenFamily : Text; // For token rotation detection
+        refreshTokenHash : Blob; // SHA256 hash of current refresh token
+        refreshTokenId : Text; // For token rotation detection
         refreshExpiresAt : Time.Time;
         refreshCount : Nat; // Number of times this session has been refreshed
         lastRefreshAt : ?Time.Time; // Optional - null for new sessions
@@ -44,13 +46,28 @@ module {
         handle : Text;
         email : ?Text;
         passwordHash : Blob;
+        salt : Blob;
     };
 
-    public class Handler(stableData : StableData) {
+    type CreateSessionResponse = {
+        accessJwt : Text;
+        refreshJwt : Text;
+        handle : Text;
+        did : DID.Plc.DID;
+        didDoc : ?DIDDocument.DIDDocument;
+    };
+
+    public class Handler(
+        stableData : StableData,
+        keyHandler : KeyHandler.Handler,
+        serverInfoHandler : ServerInfoHandler.Handler,
+    ) {
+        var sessions = stableData.sessions;
+        var accounts = stableData.accounts;
 
         public func create(
             request : CreateAccount.Request
-        ) : Result.Result<CreateAccount.Response, Text> {
+        ) : async* Result.Result<CreateAccount.Response, Text> {
 
             // Validate request
             if (TextX.isEmptyOrWhitespace(request.handle)) return #err("Handle cannot be empty");
@@ -70,10 +87,6 @@ module {
                 return #err("Phone verification is not supported yet");
             };
 
-            if (request.password == null) {
-                return #err("Passwordless account creation is not supported yet");
-            };
-
             if (request.recoveryKey != null) {
                 // TODO
                 return #err("Recovery keys are not supported yet");
@@ -83,115 +96,206 @@ module {
                 // TODO
                 return #err("PLC operations are not supported yet");
             };
+            let password = switch (request.password) {
+                case (?pwd) pwd;
+                case (null) return #err("Passwordless account creation is not supported yet");
+            };
+            let did : DID.Plc.DID = switch (request.did) {
+                case (?did) did;
+                case (null) {
+                    // TODO generate new DID
+                    return #err("DID generation is not implemented yet, did must be provided");
+                };
+            };
 
             // Check if account already exists
-            let null = PureMap.get(stableData.accounts, DIDModule.comparePlcDID, request.did) else return #err("Account already exists");
+            let null = PureMap.get<DID.Plc.DID, Account>(accounts, DIDModule.comparePlcDID, did) else return #err("Account already exists");
 
-            let salt = await* Random.randomBlob();
+            let salt = await Random.blob();
 
             let passwordHash = PBKDF2.pbkdf2_sha512(
-                #text(request.password),
+                #text(password),
                 #blob(salt),
                 4096,
                 64,
             );
+
             // Create new account
             let newAccount : Account = {
-                did = request.did;
                 handle = request.handle;
                 email = request.email;
                 passwordHash = Blob.fromArray(passwordHash);
+                salt = salt;
             };
 
             // Store the account in stable data
-            let updatedAccounts = PureMap.add(stableData.accounts, request.did, newAccount);
-            stableData.accounts := updatedAccounts;
+            let updatedAccounts = PureMap.add(accounts, DIDModule.comparePlcDID, did, newAccount);
+            accounts := updatedAccounts;
 
-            // Return response
-            #ok({});
+            await* createSessionInternal(
+                did,
+                newAccount,
+            );
         };
 
         public func createSession(
             request : CreateSession.Request
         ) : async* Result.Result<CreateSession.Response, Text> {
+            if (request.authFactorToken != null) {
+                // TODO
+                return #err("Authentication factor tokens are not supported yet");
+            };
+
+            if (request.allowTakendown != null) {
+                // TODO
+                return #err("Account takedown requests are not supported yet");
+            };
 
             // Try parse the identifier as a DID, then email/handle
             let ?(did, account) = getAccountFromIdentifier(request.identifier) else return #err("Account not found for identifier: " # request.identifier);
 
+            // Validate password
+            let passwordHash = Blob.fromArray(
+                PBKDF2.pbkdf2_sha512(
+                    #text(request.password),
+                    #blob(account.salt),
+                    4096,
+                    64,
+                )
+            );
+            if (passwordHash != account.passwordHash) {
+                return #err("Invalid password");
+            };
+
+            Result.chain<CreateSessionResponse, CreateSession.Response, Text>(
+                await* createSessionInternal(did, account),
+                func(res : CreateSessionResponse) : Result.Result<CreateSession.Response, Text> {
+                    #ok({
+                        res with
+                        email = account.email;
+                        emailConfirmed = null; // TODO: Implement email confirmation
+                        emailAuthFactor = null; // TODO: Implement email authentication factor
+                        active = null; // TODO: Implement active flag
+                        status = null; // TODO: Implement status description
+                    });
+                },
+            );
+        };
+
+        public func toStableData() : StableData {
+            {
+                accounts = accounts;
+                sessions = sessions;
+            };
+        };
+
+        private func createSessionInternal(
+            did : DID.Plc.DID,
+            account : Account,
+        ) : async* Result.Result<CreateSessionResponse, Text> {
+            let ?serverInfo = serverInfoHandler.get() else return #err("Server not initialized");
+            let webDID = {
+                host = #domain(serverInfo.domain);
+                path = [];
+                port = null;
+            };
             // Generate session identifiers
             let randomBytes = await Random.blob();
             let (bytesHalf1, bytesHalf2) = IterTools.splitAt(randomBytes.vals(), randomBytes.size() / 2);
 
             let sessionId = "sess_" # BaseX.toBase64(bytesHalf1, #url({ includePadding = false }));
-            let refreshTokenFamily = "family_" # BaseX.toBase64(bytesHalf2, #url({ includePadding = false }));
+            let refreshTokenId = BaseX.toBase64(bytesHalf2, #url({ includePadding = false }));
 
             let now = Time.now();
-            let refreshExpiresAt = now + (90 * 24 * 60 * 60 * 1_000_000_000); // 90 days in nanoseconds
+            let issueTime = now / 1_000_000_000; // Convert to seconds from nanoseconds
+            let accessExpiresAt = now + (60 * 60); // 1 hour in seconds
+            let refreshExpiresAt = now + (90 * 24 * 60 * 60); // 90 days in seconds
 
             // Generate access JWT (short-lived, 1 hour)
-            let accessPayload : JWT.Token = {
+            let accessPayload : JWT.UnsignedToken = {
                 header = [
                     ("typ", #string("at+jwt")),
-                    ("alg", #string("")), // TODO
+                    ("alg", #string("ES256K")),
                 ];
                 payload = [
                     ("scope", #string("com.atproto.refresh")),
                     ("sub", #string(DID.Plc.toText(did))),
-                    ("aud", #string(bluskyOrOtherPlatformDid)),
-                    ("iat", #number(#int(timeInMillis ?))),
-                    ("exp", #number(#int(expiresAtMillis ?))),
+                    ("aud", #string(DID.Web.toText(webDID))),
+                    ("iat", #number(#int(issueTime))),
+                    ("exp", #number(#int(accessExpiresAt))),
                 ];
             };
-            let accessJwt = switch (JWT.sign(accessPayload, signingKey)) {
-                case (#ok(token)) token;
-                case (#err(msg)) return #err("Failed to create access token: " # msg);
+            let accessTokenMessage = JWT.toBlobUnsigned(accessPayload);
+            let accessTokenSignature = switch (await* keyHandler.sign(#verification, accessTokenMessage)) {
+                case (#ok(sig)) sig;
+                case (#err(err)) return #err("Failed to sign access token: " # err);
             };
+
+            let accessJwt = JWT.toText({
+                accessPayload with
+                signature = {
+                    algorithm = "ES256K";
+                    value = accessTokenSignature;
+                    message = accessTokenMessage;
+                };
+            });
 
             // Generate refresh JWT (long-lived)
-            let refreshPayload : JWT.Token = {
+            let refreshPayload : JWT.UnsignedToken = {
                 header = [
                     ("typ", #string("refresh+jwt")),
-                    ("alg", #string("")), // TODO
+                    ("alg", #string("ES256K")),
                 ];
                 payload = [
                     ("scope", #string("com.atproto.refresh")),
                     ("sub", #string(DID.Plc.toText(did))),
-                    ("aud", #string(bluskyOrOtherPlatformDid)),
-                    ("jti", #string(???)),
-                    ("iat", #number(#int(timeInMillis ?))),
-                    ("exp", #number(#int(refreshExpiresAtMillis ?))),
+                    ("aud", #string(DID.Web.toText(webDID))),
+                    ("jti", #string(refreshTokenId)),
+                    ("iat", #number(#int(issueTime))),
+                    ("exp", #number(#int(refreshExpiresAt))),
                 ];
             };
-            let refreshJwt = switch (JWT.sign(refreshPayload, signingKey)) {
-                case (#ok(token)) token;
-                case (#err(msg)) return #err("Failed to create refresh token: " # msg);
+            let refreshTokenMessage = JWT.toBlobUnsigned(refreshPayload);
+            let refreshTokenSignature = switch (
+                await* keyHandler.sign(#verification, refreshTokenMessage)
+            ) {
+                case (#ok(sig)) sig;
+                case (#err(err)) return #err("Failed to sign refresh token: " # err);
             };
 
-            let refreshTokenHash = SHA256.hash(refreshToken);
+            let refreshJwt = JWT.toText({
+                refreshPayload with
+                signature = {
+                    algorithm = "ES256K";
+                    value = refreshTokenSignature;
+                    message = refreshTokenMessage;
+                };
+            });
+
+            let refreshTokenHash = SHA256.fromBlob(#sha256, Text.encodeUtf8(refreshJwt));
             // Create new session
             let newSession : Session = {
                 did = did;
-                sessionId = sessionId;
                 createdAt = now;
                 lastActiveAt = now;
                 refreshTokenHash = refreshTokenHash;
-                refreshTokenFamily = refreshTokenFamily;
+                refreshTokenId = refreshTokenId;
                 refreshExpiresAt = refreshExpiresAt;
                 refreshCount = 0;
                 lastRefreshAt = null;
-                revoked = false;
-                revokedAt = null;
-                revokedReason = null;
+                revoked = null;
+            };
+
+            let verificationPublicKey = switch (await* keyHandler.getPublicKey(#verification)) {
+                case (#ok(pubKey)) pubKey;
+                case (#err(err)) return #err("Failed to get verification public key: " # err);
             };
 
             // Get DID document
-            let didDoc = switch (DID.resolve(did)) {
-                case (#ok(doc)) doc;
-                case (#err(_)) return #err("Failed to resolve DID document");
-            };
+            let didDoc = DIDModule.generateDIDDocument(did, webDID, verificationPublicKey);
 
             // Store the session in stable data (using sessionId as key, not token)
-            stableData.sessions := PureMap.add(stableData.sessions, sessionId, newSession);
+            sessions := PureMap.add(sessions, Text.compare, sessionId, newSession);
 
             // Return response
             #ok({
@@ -200,11 +304,6 @@ module {
                 handle = account.handle;
                 did = did;
                 didDoc = ?didDoc;
-                email = account.email;
-                emailConfirmed = null; // TODO: Implement email confirmation
-                emailAuthFactor = null; // TODO: Implement email authentication factor
-                active = null; // TODO: Implement active flag
-                status = null; // TODO: Implement status description
             });
         };
 
@@ -212,14 +311,14 @@ module {
             switch (DID.Plc.fromText(identifier)) {
                 case (#ok(did)) {
                     let ?account = PureMap.get(
-                        stableData.accounts,
+                        accounts,
                         DIDModule.comparePlcDID,
                         did,
                     ) else return null;
                     ?(did, account);
                 };
                 case (#err(_)) {
-                    label f for ((did, acc) in PureMap.entries(stableData.accounts)) {
+                    label f for ((did, acc) in PureMap.entries(accounts)) {
                         if (acc.handle == identifier or acc.email == ?identifier) {
                             return ?(did, acc);
                         };

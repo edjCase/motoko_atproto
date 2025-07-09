@@ -17,7 +17,7 @@ did = "1.1.1"
 json = "1.2.1"
 xtended-text = "1.0.0"
 tid = "0.0.5"
-jwt = "1.0.1"
+jwt = "1.1.0"
 pbkdf2-sha512 = "1.0.0"
 
 [dev-dependencies]
