@@ -1,4 +1,3 @@
-// Updated src/pds/main.mo
 import Text "mo:base/Text";
 import Result "mo:base/Result";
 import XrpcRouter "./XrpcRouter";
@@ -21,6 +20,7 @@ import CID "mo:cid";
 import PureMap "mo:new-base/pure/Map";
 import Json "mo:json";
 import UploadBlob "Types/Lexicons/Com/Atproto/Repo/UploadBlob";
+import CreateAccount "Types/Lexicons/Com/Atproto/Server/CreateAccount"
 
 actor {
   let tidGenerator = TID.Generator();
@@ -143,14 +143,11 @@ actor {
     #ok((DID.Plc.toText(requestInfo.did), Json.stringify(json, null)));
   };
 
-  public func uploadBlob(mimeType : Text, blob : Blob) : async Result.Result<UploadBlob.Response, Text> {
-    let result = repositoryHandler.uploadBlob({
-      mimeType = mimeType;
-      data = blob;
-    });
-    switch (result) {
-      case (#ok(ref)) #ok(ref);
-      case (#err(e)) #err("Failed to add blob: " # e);
-    };
+  public func uploadBlob(request : UploadBlob.Request) : async Result.Result<UploadBlob.Response, Text> {
+    repositoryHandler.uploadBlob(request);
+  };
+
+  public func createAccount(request : CreateAccount.Request) : async Result.Result<CreateAccount.Response, Text> {
+    await* accountHandler.create(request);
   };
 };

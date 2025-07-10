@@ -130,7 +130,8 @@ module {
 
             // Store the account in stable data
             let updatedAccounts = PureMap.add(accounts, DIDModule.comparePlcDID, did, newAccount);
-            accounts := updatedAccounts;
+
+            accounts := updatedAccounts; // TODO how to best handle async failure
 
             await* createSessionInternal(
                 did,
@@ -226,7 +227,8 @@ module {
                 ];
             };
             let accessTokenMessage = JWT.toBlobUnsigned(accessPayload);
-            let accessTokenSignature = switch (await* keyHandler.sign(#verification, accessTokenMessage)) {
+            let accessTokenMessageHash = SHA256.fromBlob(#sha256, accessTokenMessage);
+            let accessTokenSignature = switch (await* keyHandler.sign(#verification, accessTokenMessageHash)) {
                 case (#ok(sig)) sig;
                 case (#err(err)) return #err("Failed to sign access token: " # err);
             };
@@ -256,8 +258,9 @@ module {
                 ];
             };
             let refreshTokenMessage = JWT.toBlobUnsigned(refreshPayload);
+            let refreshTokenMessageHash = SHA256.fromBlob(#sha256, refreshTokenMessage);
             let refreshTokenSignature = switch (
-                await* keyHandler.sign(#verification, refreshTokenMessage)
+                await* keyHandler.sign(#rotation, refreshTokenMessageHash)
             ) {
                 case (#ok(sig)) sig;
                 case (#err(err)) return #err("Failed to sign refresh token: " # err);

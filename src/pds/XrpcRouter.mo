@@ -352,15 +352,15 @@ module {
         };
 
         func listBlobs(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
-            let ?repoText = routeContext.getQueryParam("repo") else return routeContext.buildResponse(
+            let ?didText = routeContext.getQueryParam("did") else return routeContext.buildResponse(
                 #badRequest,
-                #error(#message("Missing required query parameter: repo")),
+                #error(#message("Missing required query parameter: did")),
             );
-            let repo = switch (DID.Plc.fromText(repoText)) {
+            let did = switch (DID.Plc.fromText(didText)) {
                 case (#ok(did)) did;
                 case (#err(e)) return routeContext.buildResponse(
                     #badRequest,
-                    #error(#message("Invalid repo DID: " # e)),
+                    #error(#message("Invalid did: " # e)),
                 );
             };
 
@@ -385,13 +385,13 @@ module {
                 };
             };
 
-            let cursorText = routeContext.getQueryParam("cursor");
+            let cursorTextOrNull = routeContext.getQueryParam("cursor");
 
             let request : ListBlobs.Request = {
-                did = repo;
+                did = did;
                 since = sinceOrNull;
                 limit = limitOrNull;
-                cursor = cursorText;
+                cursor = cursorTextOrNull;
             };
 
             let response = switch (repositoryHandler.listBlobs(request)) {
