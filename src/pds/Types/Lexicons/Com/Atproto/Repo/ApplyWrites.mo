@@ -1,5 +1,6 @@
 import DID "mo:did";
 import CID "mo:cid";
+import TID "mo:tid";
 import DagCbor "mo:dag-cbor";
 import AtUri "../../../../AtUri";
 import Json "mo:json";
@@ -7,6 +8,9 @@ import Result "mo:new-base/Result";
 import Array "mo:base/Array";
 import JsonDagCborMapper "../../../../../JsonDagCborMapper";
 import Common "./Common";
+import List "mo:new-base/List";
+import Iter "mo:new-base/Iter";
+import Nat "mo:new-base/Nat";
 
 module {
 
@@ -70,10 +74,10 @@ module {
     };
 
     public func toJson(response : Response) : Json.Json {
-        let commitJson = switch (response.commit) {
+        let commitJson : Json.Json = switch (response.commit) {
             case (?commit) #object_([
                 ("cid", #string(CID.toText(commit.cid))),
-                ("rev", #string(commit.rev)),
+                ("rev", #string(TID.toText(commit.rev))),
             ]);
             case (null) #null_;
         };
@@ -143,7 +147,13 @@ module {
             case (#err(#typeMismatch)) return #err("Invalid writes field, expected array");
         };
 
-        // TODO: Parse writes array - complex union type parsing needed
+        let writesList = List.empty<WriteOperation>();
+        for ((i, writeJson) in Iter.enumerate(writesArray.vals())) {
+            switch (fromJsonWriteOperation(writeJson)) {
+                case (#ok(op)) List.add(writesList, op);
+                case (#err(e)) return #err("Invalid write operation " # Nat.toText(i) # ": " # e);
+            };
+        };
 
         let swapCommit = switch (Json.getAsText(json, "swapCommit")) {
             case (#ok(s)) switch (CID.fromText(s)) {
@@ -157,9 +167,76 @@ module {
         #ok({
             repo = repo;
             validate = validate;
-            writes = []; // TODO: Implement write operation parsing
+            writes = List.toArray(writesList);
             swapCommit = swapCommit;
         });
     };
+
+    func fromJsonWriteOperation(item : Json.Json) : Result.Result<WriteOperation, Text> {
+        let opType = switch (Json.getAsText(item, "$type")) {
+            case (#ok(t)) t;
+            case (#err(#pathNotFound)) return #err("Missing required field: $type");
+            case (#err(#typeMismatch)) return #err("Invalid $type field, expected string");
+        };
+
+        switch (opType) {
+            case ("create") {
+                let collection = switch (Json.getAsText(item, "collection")) {
+                    case (#ok(c)) c;
+                    case (#err(#pathNotFound)) return #err("Missing required field: collection");
+                    case (#err(#typeMismatch)) return #err("Invalid collection field, expected string");
+                };
+
+                let rkey = switch (Json.getAsText(item, "rkey")) {
+                    case (#ok(r)) ?r;
+                    case (#err(#pathNotFound)) null;
+                    case (#err(#typeMismatch)) return #err("Invalid rkey field, expected string");
+                };
+
+                let value = switch (Json.get(item, "value")) {
+                    case (?v) JsonDagCborMapper.toDagCbor(v);
+                    case (null) return #err("Missing required field: value");
+                };
+
+                #ok(#create({ collection = collection; rkey = rkey; value = value }));
+            };
+            case ("update") {
+                let collection = switch (Json.getAsText(item, "collection")) {
+                    case (#ok(c)) c;
+                    case (#err(#pathNotFound)) return #err("Missing required field: collection");
+                    case (#err(#typeMismatch)) return #err("Invalid collection field, expected string");
+                };
+
+                let rkey = switch (Json.getAsText(item, "rkey")) {
+                    case (#ok(r)) r;
+                    case (#err(#pathNotFound)) return #err("Missing required field: rkey");
+                    case (#err(#typeMismatch)) return #err("Invalid rkey field, expected string");
+                };
+
+                let value = switch (Json.get(item, "value")) {
+                    case (?v) JsonDagCborMapper.toDagCbor(v);
+                    case (null) return #err("Missing required field: value");
+                };
+
+                #ok(#update({ collection = collection; rkey = rkey; value = value }));
+            };
+            case ("delete") {
+                let collection = switch (Json.getAsText(item, "collection")) {
+                    case (#ok(c)) c;
+                    case (#err(#pathNotFound)) return #err("Missing required field: collection");
+                    case (#err(#typeMismatch)) return #err("Invalid collection field, expected string");
+                };
+
+                let rkey = switch (Json.getAsText(item, "rkey")) {
+                    case (#ok(r)) r;
+                    case (#err(#pathNotFound)) return #err("Missing required field: rkey");
+                    case (#err(#typeMismatch)) return #err("Invalid rkey field, expected string");
+                };
+
+                #ok(#delete({ collection = collection; rkey = rkey }));
+            };
+            case (_) return #err("Unknown write operation type: " # opType);
+        };
+    }
 
 };

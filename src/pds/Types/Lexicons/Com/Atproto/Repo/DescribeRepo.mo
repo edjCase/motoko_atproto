@@ -1,12 +1,7 @@
 import DID "mo:did";
-import CID "mo:cid";
-import TID "mo:tid";
-import DagCbor "mo:dag-cbor";
-import AtUri "../../../../AtUri";
 import DIDDocument "../../../../DIDDocument";
 import Json "mo:json";
 import Array "mo:new-base/Array";
-import Result "mo:new-base/Result";
 
 module {
 

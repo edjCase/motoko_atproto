@@ -34,6 +34,8 @@ import RepoCommon "../Types/Lexicons/Com/Atproto/Repo/Common";
 import ListBlobs "../Types/Lexicons/Com/Atproto/Sync/ListBlobs";
 import BlobRef "../Types/BlobRef";
 import Time "mo:new-base/Time";
+import ApplyWrites "../Types/Lexicons/Com/Atproto/Repo/ApplyWrites";
+import List "mo:new-base/List";
 
 module {
     public type StableData = {
@@ -508,6 +510,191 @@ module {
                     cid = commitCID;
                     rev = newRev;
                 };
+            });
+        };
+
+        public func applyWrites(request : ApplyWrites.Request) : async* Result.Result<ApplyWrites.Response, Text> {
+            let ?repo = PureMap.get(repositories, DIDModule.comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
+
+            // Check swap commit if provided
+            switch (request.swapCommit) {
+                case (?expectedCommit) {
+                    // TODO
+                    return #err("Swap commit not implemented yet");
+                };
+                case (null) ();
+            };
+
+            var updatedRecords = repo.records;
+            var updatedBlobs = repo.blobs;
+            let mstHandler = MSTHandler.Handler(repo.nodes);
+            var currentNodeCID = repo.head;
+
+            // Get current MST root from the latest commit
+            let ?currentCommit = PureMap.get<TID.TID, Commit>(
+                repo.commits,
+                TID.compare,
+                repo.rev,
+            ) else return #err("No commits found in repository");
+
+            // Process all write operations and collect results
+            let results = List.empty<ApplyWrites.WriteResult>();
+
+            for (writeOp in request.writes.vals()) {
+                let result = switch (writeOp) {
+                    case (#create(createOp)) {
+                        let rKey : Text = switch (createOp.rkey) {
+                            case (?rkey) {
+                                if (Text.size(rkey) > 512) {
+                                    return #err("Record key exceeds maximum length of 512 characters");
+                                };
+                                rkey;
+                            };
+                            case (null) TID.toText(tidGenerator.next());
+                        };
+
+                        // Validate record
+                        let validationResult : Result.Result<RepoCommon.ValidationStatus, Text> = switch (request.validate) {
+                            case (?true) LexiconValidator.validateRecord(createOp.value, createOp.collection, false);
+                            case (?false) #ok(#unknown);
+                            case (null) LexiconValidator.validateRecord(createOp.value, createOp.collection, true);
+                        };
+                        let validationStatus = switch (validationResult) {
+                            case (#ok(status)) status;
+                            case (#err(e)) return #err("Record validation failed: " # e);
+                        };
+
+                        let recordCID = CIDBuilder.fromRecord(rKey, createOp.value);
+                        updatedRecords := PureMap.add(updatedRecords, compareCID, recordCID, createOp.value);
+
+                        // Create record path for MST
+                        let path = createOp.collection # "/" # rKey;
+                        let pathKey = MST.pathToKey(path);
+
+                        // Add to MST
+                        let newNode = switch (mstHandler.addCID(currentCommit.data, pathKey, recordCID)) {
+                            case (#ok(mst)) mst;
+                            case (#err(e)) return #err("Failed to add to MST: " # debug_show (e));
+                        };
+
+                        currentNodeCID := CIDBuilder.fromMSTNode(newNode);
+
+                        #create({
+                            uri = {
+                                repoId = request.repo;
+                                collectionAndRecord = ?(createOp.collection, ?rKey);
+                            };
+                            cid = recordCID;
+                            validationStatus = validationStatus;
+                        });
+                    };
+                    case (#update(updateOp)) {
+                        if (Text.size(updateOp.rkey) > 512) {
+                            return #err("Record key exceeds maximum length of 512 characters");
+                        };
+
+                        // Validate record
+                        let validationResult : Result.Result<RepoCommon.ValidationStatus, Text> = switch (request.validate) {
+                            case (?true) LexiconValidator.validateRecord(updateOp.value, updateOp.collection, false);
+                            case (?false) #ok(#unknown);
+                            case (null) LexiconValidator.validateRecord(updateOp.value, updateOp.collection, true);
+                        };
+                        let validationStatus = switch (validationResult) {
+                            case (#ok(status)) status;
+                            case (#err(e)) return #err("Record validation failed: " # e);
+                        };
+
+                        let recordCID = CIDBuilder.fromRecord(updateOp.rkey, updateOp.value);
+                        updatedRecords := PureMap.add(updatedRecords, compareCID, recordCID, updateOp.value);
+
+                        // Create record path for MST
+                        let path = updateOp.collection # "/" # updateOp.rkey;
+                        let pathKey = MST.pathToKey(path);
+
+                        // Update MST (this will replace existing record)
+                        let newNode = switch (mstHandler.addCID(currentNodeCID, pathKey, recordCID)) {
+                            case (#ok(mst)) mst;
+                            case (#err(e)) return #err("Failed to update MST: " # debug_show (e));
+                        };
+
+                        currentNodeCID := CIDBuilder.fromMSTNode(newNode);
+
+                        #update({
+                            uri = {
+                                repoId = request.repo;
+                                collectionAndRecord = ?(updateOp.collection, ?updateOp.rkey);
+                            };
+                            cid = recordCID;
+                            validationStatus = validationStatus;
+                        });
+                    };
+                    case (#delete(deleteOp)) {
+                        // Create record path for MST
+                        let path = deleteOp.collection # "/" # deleteOp.rkey;
+                        let pathKey = MST.pathToKey(path);
+
+                        // Check if record exists before trying to delete
+                        let ?rootNode = mstHandler.getNode(currentNodeCID) else return #err("Failed to get root node from MST");
+                        let ?_ = mstHandler.getCID(rootNode, pathKey) else return #err("Record not found at path: " # path);
+
+                        // Remove from MST
+                        let newNode = switch (mstHandler.removeCID(currentNodeCID, pathKey)) {
+                            case (#ok(mst)) mst;
+                            case (#err(e)) return #err("Failed to remove from MST: " # debug_show (e));
+                        };
+
+                        currentNodeCID := CIDBuilder.fromMSTNode(newNode);
+
+                        #delete({});
+                    };
+                };
+                List.add(results, result);
+            };
+
+            // Create single commit for all operations
+            let newRev = tidGenerator.next();
+            let signedCommit = switch (
+                await* createCommit(
+                    request.repo,
+                    newRev,
+                    currentNodeCID,
+                    ?currentCommit.data,
+                )
+            ) {
+                case (#ok(commit)) commit;
+                case (#err(e)) return #err("Failed to create commit: " # e);
+            };
+
+            // Store new state
+            let commitCID = CIDBuilder.fromCommit(signedCommit);
+            let updatedCommits = PureMap.add<TID.TID, Commit>(
+                repo.commits,
+                TID.compare,
+                newRev,
+                signedCommit,
+            );
+
+            repositories := PureMap.add(
+                repositories,
+                DIDModule.comparePlcDID,
+                request.repo,
+                {
+                    repo with
+                    head = commitCID;
+                    rev = newRev;
+                    commits = updatedCommits;
+                    records = updatedRecords;
+                    nodes = mstHandler.getNodes();
+                    blobs = updatedBlobs;
+                },
+            );
+
+            #ok({
+                commit = ?{
+                    cid = commitCID;
+                    rev = newRev;
+                };
+                results = List.toArray(results);
             });
         };
 

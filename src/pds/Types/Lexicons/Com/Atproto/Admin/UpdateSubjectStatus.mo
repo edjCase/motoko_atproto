@@ -61,14 +61,14 @@ module {
                     case (_) return #err("Subject must have either 'did' or 'uri' field");
                 };
 
+                let atUri = switch (AtUri.fromText(uri)) {
+                    case (?atUri) atUri;
+                    case (null) return #err("Invalid uri, not valid AT-URI format");
+                };
+
                 let cidText = switch (Json.getAsText(json, "cid")) {
                     case (#ok(cid)) cid;
                     case (_) return #err("StrongRef subject must have 'cid' field");
-                };
-
-                let atUri = switch (AtUri.fromText(uri)) {
-                    case (#ok(atUri)) atUri;
-                    case (#err(e)) return #err("Invalid AT-URI: " # e);
                 };
 
                 let cid = switch (CID.fromText(cidText)) {

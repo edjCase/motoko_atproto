@@ -25,6 +25,7 @@ import RepoCommon "./Types/Lexicons/Com/Atproto/Repo/Common";
 import ListBlobs "./Types/Lexicons/Com/Atproto/Sync/ListBlobs";
 import CreateSession "./Types/Lexicons/Com/Atproto/Server/CreateSession";
 import CreateAccount "./Types/Lexicons/Com/Atproto/Server/CreateAccount";
+import ApplyWrites "./Types/Lexicons/Com/Atproto/Repo/ApplyWrites";
 
 module {
 
@@ -80,10 +81,26 @@ module {
         };
 
         func applyWrites(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
-            // TODO: Implement applyWrites
+            let request = switch (parseRequestFromBody(routeContext, ApplyWrites.fromJson)) {
+                case (#ok(req)) req;
+                case (#err(e)) return routeContext.buildResponse(
+                    #badRequest,
+                    #error(#message(e)),
+                );
+            };
+
+            let response = switch (await* repositoryHandler.applyWrites(request)) {
+                case (#ok(response)) response;
+                case (#err(e)) return routeContext.buildResponse(
+                    #badRequest, // TODO
+                    #error(#message("Failed to apply writes: " # e)),
+                );
+            };
+
+            let responseJson = ApplyWrites.toJson(response);
             routeContext.buildResponse(
-                #internalServerError,
-                #error(#message("applyWrites not implemented yet")),
+                #ok,
+                #json(responseJson),
             );
         };
 
