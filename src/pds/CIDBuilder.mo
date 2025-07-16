@@ -51,28 +51,28 @@ module {
 
     public func fromMSTNode(node : MST.Node) : CID.CID {
         // Convert left CID
-        let leftCbor : DagCbor.Value = switch (node.l) {
-            case null #null_;
+        let leftCbor : DagCbor.Value = switch (node.leftSubtreeCID) {
+            case (null) #null_;
             case (?cid) #text(CID.toText(cid));
         };
 
         // Convert entries array
-        let entriesCbor = node.e
+        let entriesCbor = node.entries
         |> Array.map<MST.TreeEntry, DagCbor.Value>(
             _,
             func(entry : MST.TreeEntry) : DagCbor.Value {
-                let keyCbor = entry.k
+                let keyCbor = entry.keySuffix
                 |> Array.map<Nat8, DagCbor.Value>(_, func(byte : Nat8) : DagCbor.Value = #int(Nat8.toNat(byte)));
 
-                let rightCbor : DagCbor.Value = switch (entry.t) {
-                    case null #null_;
+                let rightCbor : DagCbor.Value = switch (entry.subtreeCID) {
+                    case (null) #null_;
                     case (?cid) #text(CID.toText(cid));
                 };
 
                 #map([
-                    ("p", #int(entry.p)),
+                    ("p", #int(entry.prefixLength)),
                     ("k", #array(keyCbor)),
-                    ("v", #text(CID.toText(entry.v))),
+                    ("v", #text(CID.toText(entry.valueCID))),
                     ("t", rightCbor),
                 ]);
             },
@@ -102,7 +102,7 @@ module {
     };
 
     func fromDagCbor(cbor : DagCbor.Value) : CID.CID {
-        let bytes = switch (DagCbor.encode(cbor)) {
+        let bytes = switch (DagCbor.toBytes(cbor)) {
             case (#ok(blob)) blob;
             case (#err(e)) Runtime.trap("Failed to encode commit to CBOR: " # debug_show (e));
         };

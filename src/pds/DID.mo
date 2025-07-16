@@ -114,7 +114,7 @@ module {
             case (#err(err)) return #err(err);
         };
 
-        let messageDagCborBytes : [Nat8] = switch (DagCbor.encode(#map(requestCborMap))) {
+        let messageDagCborBytes : [Nat8] = switch (DagCbor.toBytes(#map(requestCborMap))) {
             case (#ok(blob)) blob;
             case (#err(err)) return #err("Failed to encode request to CBOR: " # debug_show (err));
         };
@@ -235,7 +235,7 @@ module {
     };
 
     private func generateDidFromCbor(signedCbor : DagCbor.Value) : Result.Result<DID.Plc.DID, Text> {
-        let signedDagCborBytes : [Nat8] = switch (DagCbor.encode(signedCbor)) {
+        let signedDagCborBytes : [Nat8] = switch (DagCbor.toBytes(signedCbor)) {
             case (#ok(blob)) blob;
             case (#err(err)) return #err("Failed to encode signed request to CBOR: " # debug_show (err));
         };

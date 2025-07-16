@@ -30,12 +30,14 @@ import PutRecord "../Types/Lexicons/Com/Atproto/Repo/PutRecord";
 import DeleteRecord "../Types/Lexicons/Com/Atproto/Repo/DeleteRecord";
 import ListRecords "../Types/Lexicons/Com/Atproto/Repo/ListRecords";
 import UploadBlob "../Types/Lexicons/Com/Atproto/Repo/UploadBlob";
+import ImportRepo "../Types/Lexicons/Com/Atproto/Repo/ImportRepo";
 import RepoCommon "../Types/Lexicons/Com/Atproto/Repo/Common";
 import ListBlobs "../Types/Lexicons/Com/Atproto/Sync/ListBlobs";
 import BlobRef "../Types/BlobRef";
 import Time "mo:new-base/Time";
 import ApplyWrites "../Types/Lexicons/Com/Atproto/Repo/ApplyWrites";
 import List "mo:new-base/List";
+import Runtime "mo:new-base/Runtime";
 
 module {
     public type StableData = {
@@ -137,8 +139,8 @@ module {
             let mstHandler = MSTHandler.Handler(PureMap.empty<Text, MST.Node>());
             // First node is empty
             let newMST : MST.Node = {
-                l = null;
-                e = [];
+                leftSubtreeCID = null;
+                entries = [];
             };
             let rev = tidGenerator.next();
             let newMSTCID = mstHandler.addNode(newMST);
@@ -518,7 +520,7 @@ module {
 
             // Check swap commit if provided
             switch (request.swapCommit) {
-                case (?expectedCommit) {
+                case (?_) {
                     // TODO
                     return #err("Swap commit not implemented yet");
                 };
@@ -698,94 +700,85 @@ module {
             });
         };
 
-        public func listRecords(_ : ListRecords.Request) : Result.Result<ListRecords.Response, Text> {
-            // let ?repo = PureMap.get(repositories, DIDModule.comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
+        public func listRecords(request : ListRecords.Request) : Result.Result<ListRecords.Response, Text> {
+            let ?repo = PureMap.get(repositories, DIDModule.comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
 
-            // let mstHandler = MSTHandler.Handler(repo.nodes);
+            let mstHandler = MSTHandler.Handler(repo.nodes);
 
-            // // Get the current commit to find the MST root
-            // let ?currentCommit = PureMap.get(repo.commits, TID.compare, repo.rev) else return #err("No commits found in repository");
+            // TODO optimize for reverse/limit/cursor
+            let collectionRecords = mstHandler.getCollectionRecords(request.collection);
 
-            // // Get the root MST node from the commit's data field
-            // let ?rootNode = mstHandler.getNode(currentCommit.data) else return #err("Failed to get root node from MST");
+            // Convert to ListRecord format
+            let records = collectionRecords
+            |> Array.map<(key : Text, CID.CID), ListRecords.ListRecord>(
+                _,
+                func((key, cid) : (key : Text, CID.CID)) : ListRecords.ListRecord {
+                    let ?value : ?DagCbor.Value = PureMap.get(repo.records, compareCID, cid) else Runtime.trap("Record not found: " # CID.toText(cid));
+                    {
+                        uri = {
+                            repoId = request.repo;
+                            collectionAndRecord = ?(request.collection, ?key);
+                        };
+                        cid = cid;
+                        value = value;
+                    };
+                },
+            );
 
-            // // Get all records in the collection
-            // let collectionPrefix = request.collection # "/";
-            // let allRecords = mstHandler.getAllRecordsWithPrefix(rootNode, collectionPrefix);
+            // Apply reverse ordering if requested
+            let orderedRecords = switch (request.reverse) {
+                case (?true) Array.reverse(records);
+                case (_) records;
+            };
 
-            // // Convert to ListRecord format
-            // let listRecords = allRecords |> Array.mapFilter<(Text, CID.CID), Repository.ListRecord>(
-            //     _,
-            //     func((path, recordCID) : (Text, CID.CID)) : ?Repository.ListRecord {
-            //         // Extract rkey from path (remove collection prefix)
-            //         if (not Text.startsWith(path, #text(collectionPrefix))) {
-            //             return null;
-            //         };
-            //         let rkey = Text.stripStart(path, #text(collectionPrefix));
+            // Apply pagination
+            let limit = switch (request.limit) {
+                case (?l) l;
+                case (null) 50;
+            };
 
-            //         let ?value = PureMap.get(repo.records, compareCID, recordCID) else return null;
+            // Find start index based on cursor
+            let startIndex = switch (request.cursor) {
+                case (?cursor) {
+                    // Find the record after the cursor
+                    var index = 0;
+                    label findCursor for (record in orderedRecords.vals()) {
+                        let recordUri = AtUri.toText(record.uri);
+                        if (recordUri == cursor) {
+                            index += 1;
+                            break findCursor;
+                        };
+                        index += 1;
+                    };
+                    index;
+                };
+                case (null) 0;
+            };
 
-            //         ?{
-            //             cid = recordCID;
-            //             uri = {
-            //                 repoId = request.repo;
-            //                 collectionAndRecord = ?(request.collection, ?rkey);
-            //             };
-            //             value = value;
-            //         };
-            //     },
-            // );
+            // Get the slice of records
+            let endIndex = Nat.min(startIndex + limit, orderedRecords.size());
+            let resultRecords = if (startIndex >= orderedRecords.size()) {
+                [];
+            } else {
+                Array.sliceToArray(orderedRecords, startIndex, endIndex);
+            };
 
-            // // Apply reverse ordering if requested
-            // let orderedRecords = switch (request.reverse) {
-            //     case (?true) Array.reverse(listRecords);
-            //     case (_) listRecords;
-            // };
+            // Generate next cursor
+            let nextCursor = if (endIndex < orderedRecords.size()) {
+                ?AtUri.toText(resultRecords[resultRecords.size() - 1].uri);
+            } else {
+                null;
+            };
 
-            // // Apply pagination
-            // let limit = switch (request.limit) {
-            //     case (?l) l;
-            //     case (null) 50;
-            // };
+            #ok({
+                cursor = nextCursor;
+                records = resultRecords;
+            });
+        };
 
-            // // Find start index based on cursor
-            // let startIndex = switch (request.cursor) {
-            //     case (?cursor) {
-            //         // Find the record after the cursor
-            //         var index = 0;
-            //         label findCursor for (record in orderedRecords.vals()) {
-            //             let recordUri = AtUri.toText(record.uri);
-            //             if (recordUri == cursor) {
-            //                 index += 1;
-            //                 break findCursor;
-            //             };
-            //             index += 1;
-            //         };
-            //         index;
-            //     };
-            //     case (null) 0;
-            // };
-
-            // // Get the slice of records
-            // let endIndex = Nat.min(startIndex + limit, orderedRecords.size());
-            // let resultRecords = if (startIndex >= orderedRecords.size()) {
-            //     [];
-            // } else {
-            //     Array.slice(orderedRecords, startIndex, endIndex);
-            // };
-
-            // // Generate next cursor
-            // let nextCursor = if (endIndex < orderedRecords.size()) {
-            //     ?AtUri.toText(resultRecords[resultRecords.size() - 1].uri);
-            // } else {
-            //     null;
-            // };
-
-            // #ok({
-            //     cursor = nextCursor;
-            //     records = resultRecords;
-            // });
-            #err("listRecords not implemented yet");
+        public func importRepo(request : ImportRepo.Request) : async* Result.Result<(), Text> {
+            // This function is not implemented yet
+            return #err("importRepo not implemented yet");
         };
 
         public func uploadBlob(request : UploadBlob.Request) : Result.Result<UploadBlob.Response, Text> {
