@@ -1,13 +1,13 @@
 module {
-    // com.atproto.sync.defs
-    // Shared definitions for sync namespace
+  // com.atproto.sync.defs
+  // Shared definitions for sync namespace
 
-    public type HostStatus = {
-        #active;
-        #idle;
-        #offline;
-        #throttled;
-        #banned;
-    };
+  public type HostStatus = {
+    #active;
+    #idle;
+    #offline;
+    #throttled;
+    #banned;
+  };
 
 };

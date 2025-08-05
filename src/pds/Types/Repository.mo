@@ -7,14 +7,14 @@ import DIDModule "../DID"
 
 module {
 
-    public type RepositoryWithoutDID = {
-        head : CID.CID; // CID of current commit
-        rev : TID.TID; // TID timestamp
-        active : Bool;
-        status : ?Text; // Optional status if not active
-    };
+  public type RepositoryWithoutDID = {
+    head : CID.CID; // CID of current commit
+    rev : TID.TID; // TID timestamp
+    active : Bool;
+    status : ?Text; // Optional status if not active
+  };
 
-    public type Repository = RepositoryWithoutDID and {
-        did : DID.Plc.DID;
-    };
+  public type Repository = RepositoryWithoutDID and {
+    did : DID.Plc.DID;
+  };
 };
