@@ -7,8 +7,8 @@ keywords = ["at", "protocol", "atproto", "ipld"]
 license = "MIT"
 
 [dependencies]
-base = "0.15.1"
-liminal = "0.2.1"
+core = "0.6.0"
+liminal = "1.0.0"
 base-x-encoder = "2.0.0"
 dag-cbor = "2.0.2"
 cid = "1.0.2"
@@ -18,7 +18,7 @@ xtended-text = "2.0.0"
 tid = "1.0.0"
 jwt = "2.0.1"
 pbkdf2-sha512 = "1.0.0"
-car = "1.0.0"
+car = "1.0.1"
 dag-pb = "0.0.3"
 
 [dev-dependencies]

@@ -1,4 +1,4 @@
-import Result "mo:new-base/Result";
+import Result "mo:core/Result";
 
 module {
 

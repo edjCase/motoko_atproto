@@ -4,13 +4,13 @@ import TID "mo:tid";
 import DagCbor "mo:dag-cbor";
 import AtUri "../../../../AtUri";
 import Json "mo:json";
-import Result "mo:new-base/Result";
+import Result "mo:core/Result";
 import Array "mo:base/Array";
 import JsonDagCborMapper "../../../../../JsonDagCborMapper";
 import Common "./Common";
-import List "mo:new-base/List";
-import Iter "mo:new-base/Iter";
-import Nat "mo:new-base/Nat";
+import List "mo:core/List";
+import Iter "mo:core/Iter";
+import Nat "mo:core/Nat";
 
 module {
 

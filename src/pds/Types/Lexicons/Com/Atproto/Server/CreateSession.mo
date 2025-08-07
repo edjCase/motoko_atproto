@@ -1,6 +1,6 @@
 import DID "mo:did";
 import Json "mo:json";
-import Result "mo:new-base/Result";
+import Result "mo:core/Result";
 import DIDDocument "../../../../DIDDocument";
 
 module {

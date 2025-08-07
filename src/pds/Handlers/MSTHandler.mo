@@ -1,23 +1,24 @@
-import Result "mo:new-base/Result";
+import Result "mo:core/Result";
 import CID "mo:cid";
-import Blob "mo:new-base/Blob";
+import Blob "mo:core/Blob";
 import Buffer "mo:base/Buffer";
-import Text "mo:new-base/Text";
+import Text "mo:core/Text";
 import Sha256 "mo:sha2/Sha256";
-import Array "mo:new-base/Array";
+import Array "mo:core/Array";
 import MST "../Types/MST";
-import Order "mo:new-base/Order";
-import Iter "mo:new-base/Iter";
-import Nat "mo:new-base/Nat";
-import Nat8 "mo:new-base/Nat8";
+import Order "mo:core/Order";
+import Iter "mo:core/Iter";
+import Nat "mo:core/Nat";
+import Nat8 "mo:core/Nat8";
 import IterTools "mo:itertools/Iter";
-import Char "mo:new-base/Char";
-import Debug "mo:new-base/Debug";
+import Char "mo:core/Char";
+import Debug "mo:core/Debug";
 import CIDBuilder "../CIDBuilder";
-import PureMap "mo:new-base/pure/Map";
-import Set "mo:new-base/Set";
-import Runtime "mo:new-base/Runtime";
+import PureMap "mo:core/pure/Map";
+import Set "mo:core/Set";
+import Runtime "mo:core/Runtime";
 import DagCbor "mo:dag-cbor";
+import DagPb "mo:dag-pb";
 
 module {
 
@@ -411,7 +412,7 @@ module {
   ) : Result.Result<(), Text> {
     // Check if node already loaded
     switch (mstHandler.getNode(nodeCID)) {
-      case (?node) return #ok;
+      case (?_) return #ok;
       case (null) ();
     };
 
@@ -421,11 +422,11 @@ module {
     };
 
     let nodeCodec = switch (nodeCID) {
-      case (#v0(cidV0)) #dag_pb;
+      case (#v0(_)) #dagPb;
       case (#v1(cidV1)) cidV1.codec;
     };
     let node : MST.Node = switch (nodeCodec) {
-      case (#dag_cbor) switch (DagCbor.fromBytes(blockData.vals())) {
+      case (#dagCbor) switch (DagCbor.fromBytes(blockData.vals())) {
         case (#ok(value)) {
           switch (parseMSTNodeFromCbor(value)) {
             case (#ok(n)) n;
@@ -433,6 +434,15 @@ module {
           };
         };
         case (#err(e)) return #err("Failed to decode MST node CBOR: " # debug_show (e));
+      };
+      case (#dagPb) switch (DagPb.fromBytes(blockData.vals())) {
+        case (#ok(value)) {
+          switch (parseMSTNodeFromPb(value)) {
+            case (#ok(n)) n;
+            case (#err(e)) return #err("Failed to parse MST node: " # e);
+          };
+        };
+        case (#err(e)) return #err("Failed to decode MST node Protobuf: " # debug_show (e));
       };
       case (codec) return #err(debug_show (codec) # " codec not supported for MST nodes");
     };
@@ -498,6 +508,10 @@ module {
       };
       case (_) #err("MST node must be a CBOR map");
     };
+  };
+
+  private func parseMSTNodeFromPb(value : DagPb.Node) : Result.Result<MST.Node, Text> {
+    Runtime.trap("MST Protobuf parsing not implemented yet: " # debug_show (value));
   };
 
   private func parseTreeEntryFromCbor(value : DagCbor.Value) : Result.Result<MST.TreeEntry, Text> {

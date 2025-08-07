@@ -8,11 +8,11 @@ import DID "mo:did";
 import BaseX "mo:base-x-encoder";
 import TextX "mo:xtended-text/TextX";
 import KeyHandler "Handlers/KeyHandler";
-import Array "mo:new-base/Array";
+import Array "mo:core/Array";
 import AtUri "./Types/AtUri";
 import DIDDocument "Types/DIDDocument";
 import Json "mo:json";
-import Order "mo:new-base/Order";
+import Order "mo:core/Order";
 
 module {
 

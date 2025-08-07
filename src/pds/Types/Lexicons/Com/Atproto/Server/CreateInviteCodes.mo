@@ -1,4 +1,4 @@
-import Result "mo:new-base/Result";
+import Result "mo:core/Result";
 import Json "mo:json";
 import Array "mo:base/Array";
 

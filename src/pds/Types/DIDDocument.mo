@@ -1,6 +1,6 @@
 import DID "mo:did";
 import Json "mo:json";
-import Array "mo:new-base/Array";
+import Array "mo:core/Array";
 import Text "mo:base/Text";
 
 module {

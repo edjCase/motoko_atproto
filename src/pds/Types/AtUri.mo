@@ -1,4 +1,4 @@
-import Text "mo:new-base/Text";
+import Text "mo:core/Text";
 import TextX "mo:xtended-text/TextX";
 import DID "mo:did";
 

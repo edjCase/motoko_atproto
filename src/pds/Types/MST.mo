@@ -1,7 +1,7 @@
-import Blob "mo:new-base/Blob";
+import Blob "mo:core/Blob";
 import CID "mo:cid";
-import Nat "mo:new-base/Nat";
-import Text "mo:new-base/Text";
+import Nat "mo:core/Nat";
+import Text "mo:core/Text";
 
 module {
   public type Node = {

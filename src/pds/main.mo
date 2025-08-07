@@ -17,7 +17,7 @@ import DIDModule "./DID";
 import DID "mo:did";
 import TID "mo:tid";
 import CID "mo:cid";
-import PureMap "mo:new-base/pure/Map";
+import PureMap "mo:core/pure/Map";
 import Json "mo:json";
 import UploadBlob "Types/Lexicons/Com/Atproto/Repo/UploadBlob";
 import CreateAccount "Types/Lexicons/Com/Atproto/Server/CreateAccount"

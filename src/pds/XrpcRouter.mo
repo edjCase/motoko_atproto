@@ -1,5 +1,5 @@
 import Text "mo:base/Text";
-import Array "mo:new-base/Array";
+import Array "mo:core/Array";
 import Repository "./Types/Repository";
 import RepositoryHandler "Handlers/RepositoryHandler";
 import ServerInfoHandler "Handlers/ServerInfoHandler";
@@ -13,7 +13,7 @@ import CID "mo:cid";
 import TID "mo:tid";
 import Json "mo:json";
 import Result "mo:base/Result";
-import Nat "mo:new-base/Nat";
+import Nat "mo:core/Nat";
 import DescribeRepo "./Types/Lexicons/Com/Atproto/Repo/DescribeRepo";
 import CreateRecord "./Types/Lexicons/Com/Atproto/Repo/CreateRecord";
 import GetRecord "./Types/Lexicons/Com/Atproto/Repo/GetRecord";

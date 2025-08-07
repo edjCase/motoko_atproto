@@ -1,6 +1,6 @@
 import DagCbor "mo:dag-cbor";
 import Json "mo:json";
-import Result "mo:new-base/Result";
+import Result "mo:core/Result";
 import Array "mo:base/Array";
 import JsonDagCborMapper "../../../../../JsonDagCborMapper";
 

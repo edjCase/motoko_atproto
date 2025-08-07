@@ -2,7 +2,7 @@ import Repository "../Types/Repository";
 import DID "mo:did";
 import CID "mo:cid";
 import TID "mo:tid";
-import PureMap "mo:new-base/pure/Map";
+import PureMap "mo:core/pure/Map";
 import Commit "../Types/Commit";
 import DagCbor "mo:dag-cbor";
 import MST "../Types/MST";
@@ -10,19 +10,19 @@ import CIDBuilder "../CIDBuilder";
 import AtUri "../Types/AtUri";
 import Result "mo:base/Result";
 import KeyHandler "../Handlers/KeyHandler";
-import Text "mo:new-base/Text";
-import Order "mo:new-base/Order";
-import Blob "mo:new-base/Blob";
+import Text "mo:core/Text";
+import Order "mo:core/Order";
+import Blob "mo:core/Blob";
 import MSTHandler "../Handlers/MSTHandler";
-import Iter "mo:new-base/Iter";
+import Iter "mo:core/Iter";
 import LexiconValidator "../LexiconValidator";
-import Debug "mo:new-base/Debug";
+import Debug "mo:core/Debug";
 import ServerInfoHandler "./ServerInfoHandler";
 import Domain "mo:url-kit/Domain";
 import DIDModule "../DID";
 import IterTools "mo:itertools/Iter";
-import Nat "mo:new-base/Nat";
-import Array "mo:new-base/Array";
+import Nat "mo:core/Nat";
+import Array "mo:core/Array";
 import DescribeRepo "../Types/Lexicons/Com/Atproto/Repo/DescribeRepo";
 import CreateRecord "../Types/Lexicons/Com/Atproto/Repo/CreateRecord";
 import GetRecord "../Types/Lexicons/Com/Atproto/Repo/GetRecord";
@@ -34,10 +34,11 @@ import ImportRepo "../Types/Lexicons/Com/Atproto/Repo/ImportRepo";
 import RepoCommon "../Types/Lexicons/Com/Atproto/Repo/Common";
 import ListBlobs "../Types/Lexicons/Com/Atproto/Sync/ListBlobs";
 import BlobRef "../Types/BlobRef";
-import Time "mo:new-base/Time";
+import Time "mo:core/Time";
 import ApplyWrites "../Types/Lexicons/Com/Atproto/Repo/ApplyWrites";
-import List "mo:new-base/List";
-import Runtime "mo:new-base/Runtime";
+import List "mo:core/List";
+import Runtime "mo:core/Runtime";
+import Int "mo:core/Int";
 
 module {
   public type StableData = {
@@ -797,7 +798,7 @@ module {
       };
 
       // Decode the commit
-      let latestCommit = switch (DagCbor.decode(latestCommitData)) {
+      let latestCommit = switch (DagCbor.fromBytes(latestCommitData.vals())) {
         case (#ok(commitValue)) {
           switch (parseCommitFromCbor(commitValue)) {
             case (#ok(commit)) commit;
@@ -808,15 +809,14 @@ module {
       };
 
       // Reconstruct repository state
-      let mstHandler = MSTHandler.Handler(PureMap.empty<Text, MST.Node>());
       var allRecords = PureMap.empty<CID.CID, DagCbor.Value>();
       var allCommits = PureMap.empty<TID.TID, Commit>();
       var allBlobs = PureMap.empty<CID.CID, BlobRef.BlobRef>();
 
       // Reconstruct MST from the data CID in latest commit
-      switch (mstHandler.reconstructMSTFromBlocks(latestCommit.data, blockMap)) {
+      let mstHandler = switch (MSTHandler.fromBlockMap(latestCommitCID, blockMap)) {
         case (#err(e)) return #err("Failed to reconstruct MST: " # e);
-        case (#ok()) ();
+        case (#ok(mstHandler)) mstHandler;
       };
 
       // Extract all records referenced by the MST
@@ -834,13 +834,14 @@ module {
             allCommits := PureMap.add(allCommits, TID.compare, commit.rev, commit);
 
             switch (commit.prev) {
-              case null currentCommitOpt := null;
+              case (null) currentCommitOpt := null;
               case (?prevCID) {
                 let ?prevData = PureMap.get(blockMap, compareCID, prevCID) else {
                   currentCommitOpt := null;
+                  break w;
                 };
 
-                switch (DagCbor.decode(prevData)) {
+                switch (DagCbor.fromBytes(prevData.vals())) {
                   case (#ok(prevValue)) {
                     switch (parseCommitFromCbor(prevValue)) {
                       case (#ok(prevCommit)) currentCommitOpt := ?prevCommit;
@@ -991,11 +992,8 @@ module {
                 };
               };
               case ("version", #int(v)) version := ?Int.abs(v);
-              case ("data", cid) {
-                switch (CID.fromText(cid)) {
-                  case (#ok(c)) data := ?c;
-                  case (#err(_)) return #err("Invalid data CID in commit");
-                };
+              case ("data", #cid(cid)) {
+                data := ?cid;
               };
               case ("rev", #text(revText)) {
                 switch (TID.fromText(revText)) {
@@ -1003,11 +1001,8 @@ module {
                   case (#err(_)) return #err("Invalid rev in commit");
                 };
               };
-              case ("prev", cid) {
-                switch (CID.fromText(cid)) {
-                  case (#ok(c)) prev := ?c;
-                  case (#err(_)) return #err("Invalid prev CID in commit");
-                };
+              case ("prev", #cid(cid)) {
+                prev := ?cid;
               };
               case ("sig", #bytes(sigBytes)) sig := ?Blob.fromArray(sigBytes);
               case _ ();

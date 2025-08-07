@@ -1,13 +1,13 @@
-import PureMap "mo:new-base/pure/Map";
+import PureMap "mo:core/pure/Map";
 import DID "mo:did";
-import Result "mo:new-base/Result";
+import Result "mo:core/Result";
 import CreateSession "../Types/Lexicons/Com/Atproto/Server/CreateSession";
 import CreateAccount "../Types/Lexicons/Com/Atproto/Server/CreateAccount";
 import JWT "mo:jwt";
 import PBKDF2 "mo:pbkdf2-sha512";
 import DIDModule "../DID";
-import Time "mo:new-base/Time";
-import Random "mo:new-base/Random";
+import Time "mo:core/Time";
+import Random "mo:core/Random";
 import SHA256 "mo:sha2/Sha256";
 import TextX "mo:xtended-text/TextX";
 import Blob "mo:base/Blob";
@@ -16,7 +16,7 @@ import IterTools "mo:itertools/Iter";
 import BaseX "mo:base-x-encoder";
 import KeyHandler "./KeyHandler";
 import ServerInfoHandler "./ServerInfoHandler";
-import Text "mo:new-base/Text";
+import Text "mo:core/Text";
 
 module {
 

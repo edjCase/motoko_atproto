@@ -5,7 +5,7 @@ import DagCbor "mo:dag-cbor";
 import AtUri "../../../../AtUri";
 import Json "mo:json";
 import Common "./Common";
-import Result "mo:new-base/Result";
+import Result "mo:core/Result";
 import JsonDagCborMapper "../../../../../JsonDagCborMapper";
 
 module {

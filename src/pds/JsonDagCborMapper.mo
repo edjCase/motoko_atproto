@@ -1,5 +1,5 @@
 import Text "mo:base/Text";
-import Array "mo:new-base/Array";
+import Array "mo:core/Array";
 import Json "mo:json";
 import BaseX "mo:base-x-encoder";
 import DagCbor "mo:dag-cbor";

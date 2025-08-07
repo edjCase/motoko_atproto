@@ -1,8 +1,8 @@
-import Result "mo:new-base/Result";
+import Result "mo:core/Result";
 import DID "mo:did";
-import Blob "mo:new-base/Blob";
-import Text "mo:new-base/Text";
-import Error "mo:new-base/Error";
+import Blob "mo:core/Blob";
+import Text "mo:core/Text";
+import Error "mo:core/Error";
 import { ic } "mo:ic";
 
 module {

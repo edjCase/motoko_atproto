@@ -5,11 +5,11 @@ import TID "mo:tid";
 import DagCbor "mo:dag-cbor";
 import Sha256 "mo:sha2/Sha256";
 import BaseX "mo:base-x-encoder";
-import Text "mo:new-base/Text";
-import Array "mo:new-base/Array";
-import Runtime "mo:new-base/Runtime";
+import Text "mo:core/Text";
+import Array "mo:core/Array";
+import Runtime "mo:core/Runtime";
 import MST "Types/MST";
-import Nat8 "mo:new-base/Nat8";
+import Nat8 "mo:core/Nat8";
 
 module {
 
