@@ -1,7 +1,9 @@
 import PureMap "mo:core/pure/Map";
+import Array "mo:base/Array";
 import DID "mo:did";
 import Result "mo:core/Result";
 import CreateSession "../Types/Lexicons/Com/Atproto/Server/CreateSession";
+import GetSession "../Types/Lexicons/Com/Atproto/Server/GetSession";
 import CreateAccount "../Types/Lexicons/Com/Atproto/Server/CreateAccount";
 import JWT "mo:jwt";
 import PBKDF2 "mo:pbkdf2-sha512";
@@ -20,6 +22,9 @@ import Text "mo:core/Text";
 import DIDDirectoryHandler "./DIDDirectoryHandler";
 import Domain "mo:url-kit/Domain";
 import Runtime "mo:core/Runtime";
+import Json "mo:json";
+import ECDSA "mo:ecdsa";
+import Debug "mo:core/Debug";
 
 module {
 
@@ -198,6 +203,90 @@ module {
           });
         },
       );
+    };
+
+    public func getSession(
+      accessToken : Text
+    ) : async* Result.Result<GetSession.Response, Text> {
+      // Parse and validate the JWT token
+      let token = switch (JWT.parse(accessToken)) {
+        case (#ok(token)) token;
+        case (#err(e)) return #err("Invalid access token format: " # debug_show (e));
+      };
+
+      let verificationPublicKey = switch (await* keyHandler.getPublicKey(#verification)) {
+        case (#ok(pubKey)) pubKey;
+        case (#err(err)) return #err("Failed to get verification public key: " # err);
+      };
+
+      let jwtKey = switch (verificationPublicKey.keyType) {
+        case (#secp256k1) {
+          switch (ECDSA.publicKeyFromBytes(verificationPublicKey.publicKey.vals(), #raw({ curve = ECDSA.secp256k1Curve() }))) {
+            case (#ok(key)) #ecdsa(key);
+            case (#err(e)) return #err("Failed to parse secp256k1 key bytes: " # e);
+          };
+        };
+        case (#ed25519) Debug.todo();
+        case (#p256) Debug.todo();
+      };
+
+      // Verify the token signature
+      let validationOptions : JWT.ValidationOptions = {
+        expiration = true; // Check token expiration
+        notBefore = true; // Check token validity start time
+        issuer = #skip; // Skip issuer validation
+        audience = #skip; // Skip audience validation
+        signature = #key(jwtKey); // Validate signature
+      };
+
+      switch (JWT.validate(token, validationOptions)) {
+        case (#ok) ();
+        case (#err(e)) return #err("Access token is invalid: " # e);
+      };
+
+      // Extract DID from token payload
+      let ?("sub", #string(didText)) = Array.find<(Text, Json.Json)>(token.payload, func((key, _)) = key == "sub") else return #err("Missing 'sub' claim in token");
+
+      let did = switch (DID.Plc.fromText(didText)) {
+        case (#ok(did)) did;
+        case (#err(e)) return #err("Invalid DID in token: " # e);
+      };
+
+      // Check if account exists
+      let ?account = PureMap.get(accounts, DIDModule.comparePlcDID, did) else return #err("Account not found");
+
+      // Check token expiration
+      let expTime = switch (JWT.getPayloadValue(token, "exp")) {
+        case (?#number(#int(expTime))) expTime;
+        case (exp) return #err("Invalid 'exp' claim in token: " # debug_show (exp));
+      };
+
+      let currentTime = Time.now() / 1_000_000_000; // Convert to seconds
+
+      if (currentTime >= expTime) {
+        return #err("Access token has expired");
+      };
+
+      // Get server info for handle formatting
+      let ?serverInfo = serverInfoHandler.get() else return #err("Server not initialized");
+
+      let webDID = {
+        host = #domain(serverInfo.domain);
+        path = [];
+        port = null;
+      };
+      let didDoc = DIDModule.generateDIDDocument(did, webDID, verificationPublicKey);
+
+      #ok({
+        handle = account.handle # "." # Domain.toText(serverInfo.domain);
+        did = DID.Plc.toText(did);
+        email = account.email;
+        emailConfirmed = null; // TODO: Implement email confirmation
+        emailAuthFactor = null; // TODO: Implement email authentication factor
+        didDoc = ?didDoc;
+        active = ?true; // TODO: Implement proper active status
+        status = null; // TODO: Implement status based on account state
+      });
     };
 
     public func toStableData() : StableData {

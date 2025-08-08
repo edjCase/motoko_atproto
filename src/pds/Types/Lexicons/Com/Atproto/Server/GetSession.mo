@@ -1,6 +1,7 @@
 import DagCbor "mo:dag-cbor";
 import Json "mo:json";
 import JsonDagCborMapper "../../../../../JsonDagCborMapper";
+import DIDDocument "../../../../../Types/DIDDocument";
 
 module {
 
@@ -16,7 +17,7 @@ module {
     email : ?Text;
     emailConfirmed : ?Bool;
     emailAuthFactor : ?Bool;
-    didDoc : ?DagCbor.Value;
+    didDoc : ?DIDDocument.DIDDocument;
     active : ?Bool;
     status : ?Status;
   };
@@ -38,7 +39,7 @@ module {
     };
 
     let didDocJson = switch (response.didDoc) {
-      case (?didDoc) JsonDagCborMapper.fromDagCbor(didDoc);
+      case (?didDoc) DIDDocument.toJson(didDoc);
       case (null) #null_;
     };
 

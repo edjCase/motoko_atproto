@@ -1,17 +1,8 @@
-import Result "mo:base/Result";
-import Blob "mo:base/Blob";
 import Text "mo:base/Text";
-import DagCbor "mo:dag-cbor";
-import Sha256 "mo:sha2/Sha256";
 import PlcDID "mo:did/Plc";
 import DID "mo:did";
-import BaseX "mo:base-x-encoder";
-import TextX "mo:xtended-text/TextX";
-import KeyHandler "Handlers/KeyHandler";
-import Array "mo:core/Array";
 import AtUri "./Types/AtUri";
 import DIDDocument "Types/DIDDocument";
-import Json "mo:json";
 import Order "mo:core/Order";
 
 module {

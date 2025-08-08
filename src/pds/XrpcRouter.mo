@@ -24,6 +24,7 @@ import UploadBlob "./Types/Lexicons/Com/Atproto/Repo/UploadBlob";
 import RepoCommon "./Types/Lexicons/Com/Atproto/Repo/Common";
 import ListBlobs "./Types/Lexicons/Com/Atproto/Sync/ListBlobs";
 import CreateSession "./Types/Lexicons/Com/Atproto/Server/CreateSession";
+import GetSession "./Types/Lexicons/Com/Atproto/Server/GetSession";
 import CreateAccount "./Types/Lexicons/Com/Atproto/Server/CreateAccount";
 import ApplyWrites "./Types/Lexicons/Com/Atproto/Repo/ApplyWrites";
 
@@ -60,7 +61,7 @@ module {
         case ("com.atproto.repo.uploadblob") uploadBlob(routeContext);
         case ("com.atproto.server.createaccount") await* createAccount(routeContext);
         case ("com.atproto.server.createsession") await* createSession(routeContext);
-        case ("com.atproto.server.getsession") getSession(routeContext);
+        case ("com.atproto.server.getsession") await* getSession(routeContext);
         case ("com.atproto.server.describeserver") describeServer(routeContext);
         case ("com.atproto.sync.listblobs") listBlobs(routeContext);
         case ("com.atproto.sync.listrepos") listRepos(routeContext);
@@ -474,11 +475,41 @@ module {
       );
     };
 
-    func getSession(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
-      // TODO: Implement getSession
+    func getSession(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
+      // Extract Authorization header
+      let ?authHeader = routeContext.getHeader("Authorization") else return routeContext.buildResponse(
+        #unauthorized,
+        #error(#message("Missing Authorization header")),
+      );
+
+      // Check if it's a Bearer token
+      let bearerPrefix = "Bearer ";
+      if (not Text.startsWith(authHeader, #text(bearerPrefix))) {
+        return routeContext.buildResponse(
+          #unauthorized,
+          #error(#message("Authorization header must use Bearer token")),
+        );
+      };
+
+      // Extract the token
+      let ?accessToken = Text.stripStart(authHeader, #text(bearerPrefix)) else return routeContext.buildResponse(
+        #unauthorized,
+        #error(#message("Invalid Authorization header format")),
+      );
+
+      // Get session info from the account handler
+      let response = switch (await* accountHandler.getSession(accessToken)) {
+        case (#ok(response)) response;
+        case (#err(e)) return routeContext.buildResponse(
+          #unauthorized,
+          #error(#message("Failed to get session: " # e)),
+        );
+      };
+
+      let responseJson = GetSession.toJson(response);
       routeContext.buildResponse(
-        #notImplemented,
-        #error(#message("getSession not implemented yet")),
+        #ok,
+        #json(responseJson),
       );
     };
 

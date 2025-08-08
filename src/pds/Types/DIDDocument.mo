@@ -53,4 +53,8 @@ module {
       ("assertionMethod", textArrayToJson(didDoc.assertionMethod)),
     ]);
   };
+
+  public func toDagCbor() {
+
+  };
 };

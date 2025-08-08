@@ -3,7 +3,7 @@ name = "atproto"
 version = "0.0.1"
 description = ""
 repository = "https://github.com/edjcase/motoko_atproto"
-keywords = ["at", "protocol", "atproto", "ipld"]
+keywords = [ "at", "protocol", "atproto", "ipld" ]
 license = "MIT"
 
 [dependencies]
@@ -21,6 +21,7 @@ pbkdf2-sha512 = "1.0.0"
 car = "1.0.1"
 dag-pb = "0.0.3"
 ic = "3.2.0"
+ecdsa = "7.0.2"
 
 [dev-dependencies]
 test = "2.1.1"
