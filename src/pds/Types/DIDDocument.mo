@@ -46,7 +46,7 @@ module {
 
     #object_([
       ("id", #string(DID.toText(didDoc.id))),
-      ("context", textArrayToJson(didDoc.context)),
+      ("@context", textArrayToJson(didDoc.context)),
       ("alsoKnownAs", textArrayToJson(didDoc.alsoKnownAs)),
       ("verificationMethod", #array(verificationMethodsJson)),
       ("authentication", textArrayToJson(didDoc.authentication)),

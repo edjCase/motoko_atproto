@@ -1,7 +1,7 @@
 export const idlFactory = ({ IDL }) => {
   const PlcService = IDL.Record({
     'endpoint' : IDL.Text,
-    'name' : IDL.Text,
+    'id' : IDL.Text,
     'type' : IDL.Text,
   });
   const BuildPlcRequest = IDL.Record({

@@ -1,95 +1,79 @@
 type StreamingToken = blob;
-type StreamingStrategy = variant {Callback: CallbackStreamingStrategy;};
-type StreamingCallbackResponse = 
- record {
-   body: blob;
-   token: opt StreamingToken;
- };
-type StreamingCallback = func (StreamingToken) ->
-                          (StreamingCallbackResponse) query;
-type ServerInfo = 
- record {
-   contactEmailAddress: opt text;
-   domain: Domain;
-   plcDid: DID;
- };
-type Result_1 = 
- variant {
-   err: text;
-   ok: record {
-         text;
-         text;
-       };
- };
-type Result = 
- variant {
-   err: text;
-   ok;
- };
-type RawUpdateHttpResponse = 
- record {
-   body: blob;
-   headers: vec Header;
-   status_code: nat16;
-   streaming_strategy: opt StreamingStrategy;
- };
-type RawUpdateHttpRequest = 
- record {
-   body: blob;
-   headers: vec Header;
-   method: text;
-   url: text;
- };
-type RawQueryHttpResponse = 
- record {
-   body: blob;
-   headers: vec Header;
-   status_code: nat16;
-   streaming_strategy: opt StreamingStrategy;
-   upgrade: opt bool;
- };
-type RawQueryHttpRequest = 
- record {
-   body: blob;
-   certificate_version: opt nat16;
-   headers: vec Header;
-   method: text;
-   url: text;
- };
-type PlcService = 
- record {
-   endpoint: text;
-   name: text;
-   "type": text;
- };
-type Header = 
- record {
-   text;
-   text;
- };
-type Domain = 
- record {
-   name: text;
-   subdomains: vec text;
-   suffix: text;
- };
-type DID = record {identifier: text;};
-type CallbackStreamingStrategy = 
- record {
-   callback: StreamingCallback;
-   token: StreamingToken;
- };
-type BuildPlcRequest = 
- record {
-   alsoKnownAs: vec text;
-   services: vec PlcService;
- };
+type StreamingStrategy = variant { Callback : CallbackStreamingStrategy };
+type StreamingCallbackResponse = record {
+  body : blob;
+  token : opt StreamingToken
+};
+type StreamingCallback = func(StreamingToken) -> (StreamingCallbackResponse) query;
+type ServerInfo = record {
+  contactEmailAddress : opt text;
+  domain : Domain;
+  plcDid : DID
+};
+type Result_1 = variant {
+  err : text;
+  ok : record {
+    text;
+    text
+  }
+};
+type Result = variant {
+  err : text;
+  ok
+};
+type RawUpdateHttpResponse = record {
+  body : blob;
+  headers : vec Header;
+  status_code : nat16;
+  streaming_strategy : opt StreamingStrategy
+};
+type RawUpdateHttpRequest = record {
+  body : blob;
+  headers : vec Header;
+  method : text;
+  url : text
+};
+type RawQueryHttpResponse = record {
+  body : blob;
+  headers : vec Header;
+  status_code : nat16;
+  streaming_strategy : opt StreamingStrategy;
+  upgrade : opt bool
+};
+type RawQueryHttpRequest = record {
+  body : blob;
+  certificate_version : opt nat16;
+  headers : vec Header;
+  method : text;
+  url : text
+};
+type PlcService = record {
+  endpoint : text;
+  id : text;
+  "type" : text
+};
+type Header = record {
+  text;
+  text
+};
+type Domain = record {
+  name : text;
+  subdomains : vec text;
+  suffix : text
+};
+type DID = record { identifier : text };
+type CallbackStreamingStrategy = record {
+  callback : StreamingCallback;
+  token : StreamingToken
+};
+type BuildPlcRequest = record {
+  alsoKnownAs : vec text;
+  services : vec PlcService
+};
 service : {
-  buildPlcRequest: (request: BuildPlcRequest) -> (Result_1);
-  http_request: (request: RawQueryHttpRequest) ->
-   (RawQueryHttpResponse) query;
-  http_request_update: (request: RawUpdateHttpRequest) ->
-   (RawUpdateHttpResponse);
-  initialize: (serverInfo: ServerInfo) -> (Result);
-  isInitialized: () -> (bool);
+  buildPlcRequest : (request : BuildPlcRequest) -> (Result_1);
+  http_request : (request : RawQueryHttpRequest) -> (RawQueryHttpResponse) query;
+  http_request_update : (request : RawUpdateHttpRequest) -> (RawUpdateHttpResponse);
+  initialize : (serverInfo : ServerInfo) -> (Result);
+  isInitialized : () -> (bool)
 }

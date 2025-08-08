@@ -2,6 +2,7 @@ import DID "mo:did";
 import Json "mo:json";
 import Result "mo:core/Result";
 import DIDDocument "../../../../DIDDocument";
+import DynamicArray "mo:xtended-collections/DynamicArray";
 
 module {
 
@@ -57,48 +58,44 @@ module {
 
     let didText = DID.Plc.toText(response.did);
 
-    let didDocJson = switch (response.didDoc) {
-      case (?didDoc) DIDDocument.toJson(didDoc);
-      case (null) #null_;
+    let fields = DynamicArray.DynamicArray<(Text, Json.Json)>(10);
+
+    fields.add(("accessJwt", #string(response.accessJwt)));
+    fields.add(("refreshJwt", #string(response.refreshJwt)));
+    fields.add(("did", #string(didText)));
+    fields.add(("handle", #string(response.handle)));
+
+    switch (response.didDoc) {
+      case (?didDoc) fields.add(("didDoc", DIDDocument.toJson(didDoc)));
+      case (null) ();
     };
 
-    let emailJson = switch (response.email) {
-      case (?email) #string(email);
-      case (null) #null_;
+    switch (response.email) {
+      case (?email) fields.add(("email", #string(email)));
+      case (null) ();
     };
 
-    let emailConfirmedJson = switch (response.emailConfirmed) {
-      case (?confirmed) #bool(confirmed);
-      case (null) #null_;
+    switch (response.emailConfirmed) {
+      case (?confirmed) fields.add(("emailConfirmed", #bool(confirmed)));
+      case (null) ();
     };
 
-    let emailAuthFactorJson = switch (response.emailAuthFactor) {
-      case (?authFactor) #bool(authFactor);
-      case (null) #null_;
+    switch (response.emailAuthFactor) {
+      case (?authFactor) fields.add(("emailAuthFactor", #bool(authFactor)));
+      case (null) ();
     };
 
-    let activeJson = switch (response.active) {
-      case (?active) #bool(active);
-      case (null) #null_;
+    switch (response.active) {
+      case (?active) fields.add(("active", #bool(active)));
+      case (null) ();
     };
 
-    let statusJson = switch (response.status) {
-      case (?status) #string(status);
-      case (null) #null_;
+    switch (response.status) {
+      case (?status) fields.add(("status", #string(status)));
+      case (null) ();
     };
 
-    #object_([
-      ("accessJwt", #string(response.accessJwt)),
-      ("refreshJwt", #string(response.refreshJwt)),
-      ("handle", #string(response.handle)),
-      ("did", #string(didText)),
-      ("didDoc", didDocJson),
-      ("email", emailJson),
-      ("emailConfirmed", emailConfirmedJson),
-      ("emailAuthFactor", emailAuthFactorJson),
-      ("active", activeJson),
-      ("status", statusJson),
-    ]);
+    #object_(DynamicArray.toArray(fields));
   };
 
   public func fromJson(json : Json.Json) : Result.Result<Request, Text> {

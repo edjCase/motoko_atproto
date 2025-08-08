@@ -94,74 +94,68 @@ module {
   };
 
   public func accountViewToJson(accountView : AccountView) : Json.Json {
-    let emailJson = switch (accountView.email) {
-      case (?email) #string(email);
-      case (null) #null_;
+
+    let fields = DynamicArray.DynamicArray<(Text, Json.Json)>(15);
+
+    fields.add(("did", #string(accountView.did)));
+    fields.add(("handle", #string(accountView.handle)));
+    fields.add(("indexedAt", #string(accountView.indexedAt)));
+
+    switch (accountView.email) {
+      case (?email) fields.add(("email", #string(email)));
+      case (null) ();
     };
 
-    let relatedRecordsJson = switch (accountView.relatedRecords) {
+    switch (accountView.relatedRecords) {
       case (?records) {
         let recordsArray = records |> Array.map<DagCbor.Value, Json.Json>(_, JsonDagCborMapper.fromDagCbor);
-        #array(recordsArray);
+        fields.add(("relatedRecords", #array(recordsArray)));
       };
-      case (null) #null_;
+      case (null) ();
     };
 
-    let invitedByJson = switch (accountView.invitedBy) {
-      case (?inviteCode) ServerDefs.inviteCodeToJson(inviteCode);
-      case (null) #null_;
+    switch (accountView.invitedBy) {
+      case (?inviteCode) fields.add(("invitedBy", ServerDefs.inviteCodeToJson(inviteCode)));
+      case (null) ();
     };
 
-    let invitesJson = switch (accountView.invites) {
+    switch (accountView.invites) {
       case (?invites) {
         let invitesArray = invites |> Array.map<ServerDefs.InviteCode, Json.Json>(_, ServerDefs.inviteCodeToJson);
-        #array(invitesArray);
+        fields.add(("invites", #array(invitesArray)));
       };
-      case (null) #null_;
+      case (null) ();
     };
 
-    let invitesDisabledJson = switch (accountView.invitesDisabled) {
-      case (?disabled) #bool(disabled);
-      case (null) #null_;
+    switch (accountView.invitesDisabled) {
+      case (?disabled) fields.add(("invitesDisabled", #bool(disabled)));
+      case (null) ();
     };
 
-    let emailConfirmedAtJson = switch (accountView.emailConfirmedAt) {
-      case (?confirmedAt) #string(confirmedAt);
-      case (null) #null_;
+    switch (accountView.emailConfirmedAt) {
+      case (?confirmedAt) fields.add(("emailConfirmedAt", #string(confirmedAt)));
+      case (null) ();
     };
 
-    let inviteNoteJson = switch (accountView.inviteNote) {
-      case (?note) #string(note);
-      case (null) #null_;
+    switch (accountView.inviteNote) {
+      case (?note) fields.add(("inviteNote", #string(note)));
+      case (null) ();
     };
 
-    let deactivatedAtJson = switch (accountView.deactivatedAt) {
-      case (?deactivatedAt) #string(deactivatedAt);
-      case (null) #null_;
+    switch (accountView.deactivatedAt) {
+      case (?deactivatedAt) fields.add(("deactivatedAt", #string(deactivatedAt)));
+      case (null) ();
     };
 
-    let threatSignaturesJson = switch (accountView.threatSignatures) {
+    switch (accountView.threatSignatures) {
       case (?signatures) {
         let signaturesArray = signatures |> Array.map<ThreatSignature, Json.Json>(_, threatSignatureToJson);
-        #array(signaturesArray);
+        fields.add(("threatSignatures", #array(signaturesArray)));
       };
-      case (null) #null_;
+      case (null) ();
     };
 
-    #object_([
-      ("did", #string(accountView.did)),
-      ("handle", #string(accountView.handle)),
-      ("email", emailJson),
-      ("relatedRecords", relatedRecordsJson),
-      ("indexedAt", #string(accountView.indexedAt)),
-      ("invitedBy", invitedByJson),
-      ("invites", invitesJson),
-      ("invitesDisabled", invitesDisabledJson),
-      ("emailConfirmedAt", emailConfirmedAtJson),
-      ("inviteNote", inviteNoteJson),
-      ("deactivatedAt", deactivatedAtJson),
-      ("threatSignatures", threatSignaturesJson),
-    ]);
+    #object_(DynamicArray.toArray(fields));
   };
 
   public func repoRefToJson(repoRef : RepoRef) : Json.Json {

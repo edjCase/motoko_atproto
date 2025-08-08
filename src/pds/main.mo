@@ -12,6 +12,7 @@ import RepositoryHandler "Handlers/RepositoryHandler";
 import ServerInfoHandler "Handlers/ServerInfoHandler";
 import KeyHandler "Handlers/KeyHandler";
 import AccountHandler "Handlers/AccountHandler";
+import DIDDirectoryHandler "Handlers/DIDDirectoryHandler";
 import ServerInfo "Types/ServerInfo";
 import DIDModule "./DID";
 import DID "mo:did";
@@ -20,10 +21,13 @@ import CID "mo:cid";
 import PureMap "mo:core/pure/Map";
 import Json "mo:json";
 import UploadBlob "Types/Lexicons/Com/Atproto/Repo/UploadBlob";
-import CreateAccount "Types/Lexicons/Com/Atproto/Server/CreateAccount"
+import CreateAccount "Types/Lexicons/Com/Atproto/Server/CreateAccount";
+import HttpContext "mo:liminal/HttpContext";
+import App "mo:liminal/App";
+import Runtime "mo:core/Runtime";
 
 actor {
-  let tidGenerator = TID.Generator();
+  transient let tidGenerator = TID.Generator();
 
   stable var repositoryStableData : RepositoryHandler.StableData = {
     repositories = PureMap.empty<DID.Plc.DID, RepositoryHandler.RepositoryWithData>();
@@ -40,10 +44,13 @@ actor {
     sessions = PureMap.empty<Text, AccountHandler.Session>();
   };
 
-  var keyHandler = KeyHandler.Handler(keyHandlerStableData);
-  var serverInfoHandler = ServerInfoHandler.Handler(serverInfoStableData);
-  var repositoryHandler = RepositoryHandler.Handler(repositoryStableData, keyHandler, tidGenerator, serverInfoHandler);
-  var accountHandler = AccountHandler.Handler(accountStableData, keyHandler, serverInfoHandler);
+  transient var keyHandler = KeyHandler.Handler(keyHandlerStableData);
+  transient var didDirectoryHandler = DIDDirectoryHandler.Handler(keyHandler);
+  transient var serverInfoHandler = ServerInfoHandler.Handler(serverInfoStableData);
+  transient var repositoryHandler = RepositoryHandler.Handler(repositoryStableData, keyHandler, tidGenerator, serverInfoHandler);
+  transient var accountHandler = AccountHandler.Handler(accountStableData, keyHandler, serverInfoHandler, didDirectoryHandler);
+  transient var xrpcRouter = XrpcRouter.Router(repositoryHandler, serverInfoHandler, accountHandler);
+  transient var wellKnownRouter = WellKnownRouter.Router(serverInfoHandler, keyHandler);
 
   system func preupgrade() {
     keyHandlerStableData := keyHandler.toStableData();
@@ -54,15 +61,15 @@ actor {
 
   system func postupgrade() {
     keyHandler := KeyHandler.Handler(keyHandlerStableData);
+    didDirectoryHandler := DIDDirectoryHandler.Handler(keyHandler);
     serverInfoHandler := ServerInfoHandler.Handler(serverInfoStableData);
     repositoryHandler := RepositoryHandler.Handler(repositoryStableData, keyHandler, tidGenerator, serverInfoHandler);
-    accountHandler := AccountHandler.Handler(accountStableData, keyHandler, serverInfoHandler);
+    accountHandler := AccountHandler.Handler(accountStableData, keyHandler, serverInfoHandler, didDirectoryHandler);
+    xrpcRouter := XrpcRouter.Router(repositoryHandler, serverInfoHandler, accountHandler);
+    wellKnownRouter := WellKnownRouter.Router(serverInfoHandler, keyHandler);
   };
 
-  let xrpcRouter = XrpcRouter.Router(repositoryHandler, serverInfoHandler, accountHandler);
-  let wellKnownRouter = WellKnownRouter.Router(serverInfoHandler, keyHandler);
-
-  let routerConfig : RouterMiddleware.Config = {
+  transient let routerConfig : RouterMiddleware.Config = {
     prefix = null;
     identityRequirement = null;
     routes = [
@@ -74,7 +81,7 @@ actor {
   };
 
   // Http App
-  let app = Liminal.App({
+  transient let app = Liminal.App({
     middleware = [
       CompressionMiddleware.default(),
       CORSMiddleware.new({
@@ -127,9 +134,9 @@ actor {
     serverInfoHandler.get() != null;
   };
 
-  public func buildPlcRequest(request : DIDModule.BuildPlcRequest) : async Result.Result<(Text, Text), Text> {
+  public func buildPlcRequest(request : DIDDirectoryHandler.CreatePlcRequest) : async Result.Result<(Text, Text), Text> {
     let requestInfo = switch (
-      await* DIDModule.buildPlcRequest(
+      await* DIDDirectoryHandler.buildPlcRequest(
         request,
         keyHandler,
       )
@@ -139,7 +146,7 @@ actor {
     };
 
     // Convert to JSON
-    let json = DIDModule.requestToJson(requestInfo.request);
+    let json = DIDDirectoryHandler.requestToJson(requestInfo.request);
     #ok((DID.Plc.toText(requestInfo.did), Json.stringify(json, null)));
   };
 

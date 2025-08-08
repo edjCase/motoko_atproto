@@ -1,0 +1,18 @@
+{
+  "@context": [
+    "https://www.w3.org/ns/did/v1",
+    "https://w3id.org/security/multikey/v1",
+    "https://w3id.org/security/suites/secp256k1-2019/v1"
+  ],
+  "alsoKnownAs": [],
+  "id": "did:plc:gw6v67mk7ajwwkdyjux3bkv2",
+  "service": [],
+  "verificationMethod": [
+    {
+      "controller": "did:plc:gw6v67mk7ajwwkdyjux3bkv2",
+      "id": "did:plc:gw6v67mk7ajwwkdyjux3bkv2#atproto",
+      "publicKeyMultibase": "zQ3shmDWGJuBzHGu8xKSKnHxiuQHFukyHr22Xc3tv4QB6sPxZ",
+      "type": "Multikey"
+    }
+  ]
+}

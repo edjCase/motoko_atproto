@@ -17,6 +17,9 @@ import BaseX "mo:base-x-encoder";
 import KeyHandler "./KeyHandler";
 import ServerInfoHandler "./ServerInfoHandler";
 import Text "mo:core/Text";
+import DIDDirectoryHandler "./DIDDirectoryHandler";
+import Domain "mo:url-kit/Domain";
+import Runtime "mo:core/Runtime";
 
 module {
 
@@ -61,6 +64,7 @@ module {
     stableData : StableData,
     keyHandler : KeyHandler.Handler,
     serverInfoHandler : ServerInfoHandler.Handler,
+    didDirectoryHandler : DIDDirectoryHandler.Handler,
   ) {
     var sessions = stableData.sessions;
     var accounts = stableData.accounts;
@@ -103,8 +107,22 @@ module {
       let did : DID.Plc.DID = switch (request.did) {
         case (?did) did;
         case (null) {
-          // TODO generate new DID
-          return #err("DID generation is not implemented yet, did must be provided");
+          let ?serverInfo = serverInfoHandler.get() else Runtime.trap("Server is not intiialized");
+          let handle = request.handle # "." # Domain.toText(serverInfo.domain);
+          let createRequest : DIDDirectoryHandler.CreatePlcRequest = {
+            // TODO?
+            alsoKnownAs = ["at://" # handle];
+            // TODO?
+            services = [{
+              id = "atproto_pds";
+              type_ = "AtprotoPersonalDataServer";
+              endpoint = "https://" # Domain.toText(serverInfo.domain);
+            }];
+          };
+          switch (await* didDirectoryHandler.create(createRequest)) {
+            case (#ok(did)) did;
+            case (#err(err)) return #err("Failed to create DID: " # err);
+          };
         };
       };
 
@@ -142,15 +160,14 @@ module {
     public func createSession(
       request : CreateSession.Request
     ) : async* Result.Result<CreateSession.Response, Text> {
-      if (request.authFactorToken != null) {
+      if (not TextX.isNullOrEmptyOrWhitespace(request.authFactorToken)) {
         // TODO
         return #err("Authentication factor tokens are not supported yet");
       };
 
-      if (request.allowTakendown != null) {
-        // TODO
-        return #err("Account takedown requests are not supported yet");
-      };
+      // TODO no accounts can be taken down right now, so this is irrelevant right now
+      // if (request.allowTakendown != null) {
+      // };
 
       // Try parse the identifier as a DID, then email/handle
       let ?(did, account) = getAccountFromIdentifier(request.identifier) else return #err("Account not found for identifier: " # request.identifier);
@@ -304,7 +321,7 @@ module {
       #ok({
         accessJwt = accessJwt;
         refreshJwt = refreshJwt;
-        handle = account.handle;
+        handle = account.handle # "." # Domain.toText(serverInfo.domain);
         did = did;
         didDoc = ?didDoc;
       });
@@ -322,8 +339,26 @@ module {
         };
         case (#err(_)) {
           label f for ((did, acc) in PureMap.entries(accounts)) {
-            if (acc.handle == identifier or acc.email == ?identifier) {
+            if (TextX.equalIgnoreCase(acc.handle, identifier)) {
               return ?(did, acc);
+            };
+            switch (acc.email) {
+              case (null) ();
+              case (?email) {
+                if (TextX.equalIgnoreCase(email, identifier)) {
+                  return ?(did, acc);
+                };
+              };
+            };
+            let ?serverInfo = serverInfoHandler.get() else Runtime.trap("Server not intialized");
+            let domainText = "." # Domain.toText(serverInfo.domain);
+            switch (Text.stripEnd(identifier, #text(domainText))) {
+              case (null) ();
+              case (?strippedId) {
+                if (acc.handle == strippedId) {
+                  return ?(did, acc);
+                };
+              };
             };
           };
           null;
