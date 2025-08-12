@@ -48,10 +48,10 @@ module {
         "neg",
         Option.getMapped<Bool, Json.Json>(label_.neg, func(x) = #bool(x), #null_),
       ),
-      ("cts", #string(DateTimeComponents.fromTime(label_.cts).toText())),
+      ("cts", #string(DateTimeComponents.toText(DateTimeComponents.fromTime(label_.cts)))),
       (
         "exp",
-        Option.getMapped<Nat, Json.Json>(label_.exp, func(x) = #string(DateTimeComponents.fromTime(x).toText()), #null_),
+        Option.getMapped<Nat, Json.Json>(label_.exp, func(x) = #string(DateTimeComponents.toText(DateTimeComponents.fromTime(x))), #null_),
       ),
       (
         "sig",
