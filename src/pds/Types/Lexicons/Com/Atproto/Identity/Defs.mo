@@ -2,7 +2,6 @@ import DID "mo:did";
 import DagCbor "mo:dag-cbor";
 import Json "mo:json";
 import JsonDagCborMapper "../../../../../JsonDagCborMapper";
-import Array "mo:base/Array";
 
 module {
 

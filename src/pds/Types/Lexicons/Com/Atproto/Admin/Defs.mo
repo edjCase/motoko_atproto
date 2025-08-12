@@ -3,6 +3,7 @@ import Json "mo:json";
 import Array "mo:base/Array";
 import JsonDagCborMapper "../../../../../JsonDagCborMapper";
 import ServerDefs "../Server/Defs";
+import DynamicArray "mo:xtended-collections/DynamicArray";
 
 module {
 
