@@ -14,7 +14,7 @@ import SHA256 "mo:sha2/Sha256";
 import TextX "mo:xtended-text/TextX";
 import Blob "mo:base/Blob";
 import DIDDocument "../Types/DIDDocument";
-import IterTools "mo:itertools/Iter";
+import IterX "mo:xtended-iter/IterX";
 import BaseX "mo:base-x-encoder";
 import KeyHandler "./KeyHandler";
 import ServerInfoHandler "./ServerInfoHandler";
@@ -25,11 +25,12 @@ import Runtime "mo:core/Runtime";
 import Json "mo:json";
 import ECDSA "mo:ecdsa";
 import Debug "mo:core/Debug";
+import Iter "mo:core/Iter";
 
 module {
 
   public type StableData = {
-    accounts : PureMap.Map<DID.Plc.DID, Account>;
+    accounts : PureMap.Map<DID.Plc.DID, AccountData>;
     sessions : PureMap.Map<Text, Session>;
   };
 
@@ -50,11 +51,15 @@ module {
     reason : Text; // Reason for revocation
   };
 
-  public type Account = {
+  public type AccountData = {
     handle : Text;
     email : ?Text;
     passwordHash : Blob;
     salt : Blob;
+  };
+
+  public type Account = AccountData and {
+    id : DID.Plc.DID;
   };
 
   type CreateSessionResponse = {
@@ -73,6 +78,27 @@ module {
   ) {
     var sessions = stableData.sessions;
     var accounts = stableData.accounts;
+    var handleMap = PureMap.entries(accounts)
+    |> Iter.map<(DID.Plc.DID, AccountData), (Text, DID.Plc.DID)>(
+      _,
+      func((did, account) : (DID.Plc.DID, AccountData)) : (Text, DID.Plc.DID) {
+        (account.handle, did);
+      },
+    )
+    |> PureMap.fromIter(_, Text.compare); // TODO case sensitivity? TODO lazy load?
+
+    public func get(id : DID.Plc.DID) : Result.Result<Account, Text> {
+      let ?account = PureMap.get(accounts, DIDModule.comparePlcDID, id) else return #err("Account not found with id: " # DID.Plc.toText(id));
+      #ok({
+        account with
+        id = id;
+      });
+    };
+
+    public func getByHandle(handle : Text) : Result.Result<Account, Text> {
+      let ?accountId = PureMap.get(handleMap, Text.compare, handle) else return #err("Account not found with handle: " # handle);
+      get(accountId);
+    };
 
     public func create(
       request : CreateAccount.Request
@@ -132,7 +158,7 @@ module {
       };
 
       // Check if account already exists
-      let null = PureMap.get<DID.Plc.DID, Account>(accounts, DIDModule.comparePlcDID, did) else return #err("Account already exists");
+      let null = PureMap.get<DID.Plc.DID, AccountData>(accounts, DIDModule.comparePlcDID, did) else return #err("Account already exists");
 
       let salt = await Random.blob();
 
@@ -144,7 +170,7 @@ module {
       );
 
       // Create new account
-      let newAccount : Account = {
+      let newAccount : AccountData = {
         handle = request.handle;
         email = request.email;
         passwordHash = Blob.fromArray(passwordHash);
@@ -298,7 +324,7 @@ module {
 
     private func createSessionInternal(
       did : DID.Plc.DID,
-      account : Account,
+      account : AccountData,
     ) : async* Result.Result<CreateSessionResponse, Text> {
       let ?serverInfo = serverInfoHandler.get() else return #err("Server not initialized");
       let webDID = {
@@ -308,7 +334,7 @@ module {
       };
       // Generate session identifiers
       let randomBytes = await Random.blob();
-      let (bytesHalf1, bytesHalf2) = IterTools.splitAt(randomBytes.vals(), randomBytes.size() / 2);
+      let (bytesHalf1, bytesHalf2) = IterX.splitAt(randomBytes.vals(), randomBytes.size() / 2);
 
       let sessionId = "sess_" # BaseX.toBase64(bytesHalf1, #url({ includePadding = false }));
       let refreshTokenId = BaseX.toBase64(bytesHalf2, #url({ includePadding = false }));
@@ -416,7 +442,7 @@ module {
       });
     };
 
-    func getAccountFromIdentifier(identifier : Text) : ?(DID.Plc.DID, Account) {
+    func getAccountFromIdentifier(identifier : Text) : ?(DID.Plc.DID, AccountData) {
       switch (DID.Plc.fromText(identifier)) {
         case (#ok(did)) {
           let ?account = PureMap.get(

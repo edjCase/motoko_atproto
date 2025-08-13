@@ -40,7 +40,7 @@ actor {
     verificationDerivationPath = ["\00"]; // TODO: configure properly
   };
   stable var accountStableData : AccountHandler.StableData = {
-    accounts = PureMap.empty<DID.Plc.DID, AccountHandler.Account>();
+    accounts = PureMap.empty<DID.Plc.DID, AccountHandler.AccountData>();
     sessions = PureMap.empty<Text, AccountHandler.Session>();
   };
 

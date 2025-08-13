@@ -20,7 +20,7 @@ import Debug "mo:core/Debug";
 import ServerInfoHandler "./ServerInfoHandler";
 import Domain "mo:url-kit/Domain";
 import DIDModule "../DID";
-import IterTools "mo:itertools/Iter";
+import IterX "mo:xtended-iter/IterX";
 import Nat "mo:core/Nat";
 import Array "mo:core/Array";
 import DescribeRepo "../Types/Lexicons/Com/Atproto/Repo/DescribeRepo";
@@ -78,7 +78,7 @@ module {
 
     public func getAll(limit : Nat) : [Repository.Repository] {
       return PureMap.entries(repositories)
-      |> IterTools.take(_, limit)
+      |> Iter.take(_, limit)
       |> Iter.map(
         _,
         func((did, repo) : (DID.Plc.DID, RepositoryWithData)) : Repository.Repository {

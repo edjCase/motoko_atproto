@@ -3,7 +3,8 @@ import AtUri "../../../../AtUri";
 import DID "mo:did";
 import CID "mo:cid";
 import Option "mo:core/Option";
-import DateTimeComponents "mo:datetime/Components";
+import DateTime "mo:datetime/DateTime";
+import BaseX "mo:base-x-encoder";
 
 module {
 
@@ -48,14 +49,14 @@ module {
         "neg",
         Option.getMapped<Bool, Json.Json>(label_.neg, func(x) = #bool(x), #null_),
       ),
-      ("cts", #string(DateTimeComponents.toText(DateTimeComponents.fromTime(label_.cts)))),
+      ("cts", #string(DateTime.DateTime(label_.cts).toText())),
       (
         "exp",
-        Option.getMapped<Nat, Json.Json>(label_.exp, func(x) = #string(DateTimeComponents.toText(DateTimeComponents.fromTime(x))), #null_),
+        Option.getMapped<Nat, Json.Json>(label_.exp, func(x) = #string(DateTime.DateTime(x).toText()), #null_),
       ),
       (
         "sig",
-        Option.getMapped<Blob, Json.Json>(label_.sig, func(x) = #string(BaseX.toBase64(x.vals())), #null_),
+        Option.getMapped<Blob, Json.Json>(label_.sig, func(x) = #string(BaseX.toBase64(x.vals(), #standard({ includePadding = true }))), #null_),
       ),
     ]);
   };

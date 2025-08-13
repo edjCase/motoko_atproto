@@ -27,6 +27,7 @@ import CreateSession "./Types/Lexicons/Com/Atproto/Server/CreateSession";
 import GetSession "./Types/Lexicons/Com/Atproto/Server/GetSession";
 import CreateAccount "./Types/Lexicons/Com/Atproto/Server/CreateAccount";
 import ApplyWrites "./Types/Lexicons/Com/Atproto/Repo/ApplyWrites";
+import GetProfile "./Types/Lexicons/App/Bsky/Actor/GetProfile";
 
 module {
 
@@ -65,6 +66,7 @@ module {
         case ("com.atproto.server.describeserver") describeServer(routeContext);
         case ("com.atproto.sync.listblobs") listBlobs(routeContext);
         case ("com.atproto.sync.listrepos") listRepos(routeContext);
+        case ("app.bsky.actor.getprofile") getProfile(routeContext);
         case (_) {
           routeContext.buildResponse(
             #badRequest,
@@ -507,6 +509,50 @@ module {
       };
 
       let responseJson = GetSession.toJson(response);
+      routeContext.buildResponse(
+        #ok,
+        #json(responseJson),
+      );
+    };
+
+    func getProfile(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
+      // Parse query parameters for the actor parameter
+      let ?actorParam = routeContext.getQueryParam("actor") else return routeContext.buildResponse(
+        #badRequest,
+        #error(#message("Missing required query parameter: actor")),
+      );
+
+      let account = switch (DID.Plc.fromText(actorParam)) {
+        case (#ok(did)) switch (accountHandler.get(did)) {
+          case (#ok(account)) account;
+          case (#err(_)) return routeContext.buildResponse(
+            #notFound,
+            #error(#message("Profile not found")),
+          );
+        };
+        case (#err(_)) switch (accountHandler.getByHandle(actorParam)) {
+          case (#ok(account)) account;
+          case (#err(_)) return routeContext.buildResponse(
+            #notFound,
+            #error(#message("Profile not found")),
+          );
+        };
+      };
+
+      let responseJson = GetProfile.toJson({
+        did = account.id;
+        handle = account.handle;
+        avatar = null; // TODO: Add avatar support
+        displayName = null; // TODO: Add displayName support
+        banner = null; // TODO
+        createdAt = null; // TODO
+        description = null; // TODO
+        followersCount = null; // TODO
+        followsCount = null; // TODO
+        indexedAt = null; // TODO
+        labels = []; // TODO
+        postsCount = null; // TODO
+      });
       routeContext.buildResponse(
         #ok,
         #json(responseJson),

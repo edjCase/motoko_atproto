@@ -2,8 +2,8 @@ import Json "mo:json";
 import Array "mo:base/Array";
 import Option "mo:core/Option";
 import DID "mo:did";
-import AtUri "../../../../../AtUri";
-import DateTimeComponents "mo:datetime/Components";
+import AtUri "../../../../AtUri";
+import DateTime "mo:datetime/DateTime";
 import BaseX "mo:base-x-encoder";
 import LabelDefs "../../../Com/Atproto/Label/Defs";
 import DynamicArray "mo:xtended-collections/DynamicArray";
@@ -13,7 +13,7 @@ module {
   /// Basic profile view with essential information
   public type ProfileViewBasic = {
     /// DID of the actor
-    did : DID.DID; // DID
+    did : DID.Plc.DID; // DID
 
     /// Handle of the actor
     handle : Text; // Handle string
@@ -60,7 +60,7 @@ module {
     let labelsJson = Array.map<LabelDefs.Label, Json.Json>(profile.labels, LabelDefs.labelToJson);
 
     fields.add(("$type", #string(typeString)));
-    fields.add(("did", #string(DID.toText(profile.did))));
+    fields.add(("did", #string(DID.Plc.toText(profile.did))));
     fields.add(("handle", #string(profile.handle)));
     fields.add(("labels", #array(labelsJson)));
 
@@ -75,7 +75,7 @@ module {
     };
 
     switch (profile.createdAt) {
-      case (?createdAt) fields.add(("createdAt", #string(DateTimeComponents.toText(DateTimeComponents.fromTime(createdAt)))));
+      case (?createdAt) fields.add(("createdAt", #string(DateTime.DateTime(createdAt).toText())));
       case (null) ();
     };
   };
@@ -92,7 +92,7 @@ module {
     };
 
     switch (profile.indexedAt) {
-      case (?indexedAt) fields.add(("indexedAt", #string(DateTimeComponents.toText(DateTimeComponents.fromTime(indexedAt)))));
+      case (?indexedAt) fields.add(("indexedAt", #string(DateTime.DateTime(indexedAt).toText())));
       case (null) ();
     };
   };

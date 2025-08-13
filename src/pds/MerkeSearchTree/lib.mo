@@ -5,7 +5,7 @@
 // import Blob "mo:base/Blob";
 // import Array "mo:base/Array";
 // import Buffer "mo:base/Buffer";
-// import IterTools "mo:itertools/Iter";
+// import IterX "mo:xtended-iter/IterX";
 // import Sha256 "mo:sha2/Sha256";
 
 // module MST {
