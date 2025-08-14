@@ -20,7 +20,6 @@ import Debug "mo:core/Debug";
 import ServerInfoHandler "./ServerInfoHandler";
 import Domain "mo:url-kit/Domain";
 import DIDModule "../DID";
-import IterX "mo:xtended-iter/IterX";
 import Nat "mo:core/Nat";
 import Array "mo:core/Array";
 import DescribeRepo "../Types/Lexicons/Com/Atproto/Repo/DescribeRepo";

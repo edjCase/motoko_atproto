@@ -14,6 +14,7 @@ import TID "mo:tid";
 import Json "mo:json";
 import Result "mo:base/Result";
 import Nat "mo:core/Nat";
+import TextX "mo:xtended-text/TextX";
 import DescribeRepo "./Types/Lexicons/Com/Atproto/Repo/DescribeRepo";
 import CreateRecord "./Types/Lexicons/Com/Atproto/Repo/CreateRecord";
 import GetRecord "./Types/Lexicons/Com/Atproto/Repo/GetRecord";
@@ -28,6 +29,9 @@ import GetSession "./Types/Lexicons/Com/Atproto/Server/GetSession";
 import CreateAccount "./Types/Lexicons/Com/Atproto/Server/CreateAccount";
 import ApplyWrites "./Types/Lexicons/Com/Atproto/Repo/ApplyWrites";
 import GetProfile "./Types/Lexicons/App/Bsky/Actor/GetProfile";
+import GetProfiles "./Types/Lexicons/App/Bsky/Actor/GetProfiles";
+import ActorDefs "./Types/Lexicons/App/Bsky/Actor/Defs";
+import DynamicArray "mo:xtended-collections/DynamicArray";
 
 module {
 
@@ -67,6 +71,7 @@ module {
         case ("com.atproto.sync.listblobs") listBlobs(routeContext);
         case ("com.atproto.sync.listrepos") listRepos(routeContext);
         case ("app.bsky.actor.getprofile") getProfile(routeContext);
+        case ("app.bsky.actor.getprofiles") await* getProfiles(routeContext);
         case (_) {
           routeContext.buildResponse(
             #badRequest,
@@ -522,24 +527,31 @@ module {
         #error(#message("Missing required query parameter: actor")),
       );
 
-      let account = switch (DID.Plc.fromText(actorParam)) {
+      let ?profile = getProfileInternal(actorParam) else return routeContext.buildResponse(
+        #notFound,
+        #error(#message("Profile not found: " # actorParam)),
+      );
+
+      let responseJson = GetProfile.toJson(profile);
+      routeContext.buildResponse(
+        #ok,
+        #json(responseJson),
+      );
+    };
+
+    func getProfileInternal(idOrHandle : Text) : ?ActorDefs.ProfileViewDetailed {
+
+      let account = switch (DID.Plc.fromText(idOrHandle)) {
         case (#ok(did)) switch (accountHandler.get(did)) {
           case (#ok(account)) account;
-          case (#err(_)) return routeContext.buildResponse(
-            #notFound,
-            #error(#message("Profile not found")),
-          );
+          case (#err(_)) return null;
         };
-        case (#err(_)) switch (accountHandler.getByHandle(actorParam)) {
+        case (#err(_)) switch (accountHandler.getByHandle(idOrHandle)) {
           case (#ok(account)) account;
-          case (#err(_)) return routeContext.buildResponse(
-            #notFound,
-            #error(#message("Profile not found")),
-          );
+          case (#err(_)) return null;
         };
       };
-
-      let responseJson = GetProfile.toJson({
+      ?{
         did = account.id;
         handle = account.handle;
         avatar = null; // TODO: Add avatar support
@@ -552,6 +564,33 @@ module {
         indexedAt = null; // TODO
         labels = []; // TODO
         postsCount = null; // TODO
+      };
+    };
+
+    func getProfiles(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
+      // Parse query parameter: actors (comma-separated)
+      let ?actorsParam = routeContext.getQueryParam("actors") else return routeContext.buildResponse(
+        #badRequest,
+        #error(#message("Missing required query parameter: actors")),
+      );
+      let actors = Text.split(actorsParam, #char(','));
+
+      let profiles = DynamicArray.DynamicArray<ActorDefs.ProfileViewDetailed>(25);
+      for (actor_ in actors) {
+        let trimmedActor = TextX.trimWhitespace(actor_);
+        let ?profile = getProfileInternal(trimmedActor) else return routeContext.buildResponse(
+          #notFound,
+          #error(#message("Profile not found: " # trimmedActor)),
+        );
+        profiles.add(profile);
+      };
+      if (profiles.size() > 25) return routeContext.buildResponse(
+        #badRequest,
+        #error(#message("Too many actors (max 25)")),
+      );
+
+      let responseJson = GetProfiles.toJson({
+        profiles = DynamicArray.toArray(profiles);
       });
       routeContext.buildResponse(
         #ok,

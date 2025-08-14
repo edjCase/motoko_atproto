@@ -10,7 +10,6 @@ import Order "mo:core/Order";
 import Iter "mo:core/Iter";
 import Nat "mo:core/Nat";
 import Nat8 "mo:core/Nat8";
-import IterX "mo:xtended-iter/IterX";
 import Char "mo:core/Char";
 import Debug "mo:core/Debug";
 import CIDBuilder "../CIDBuilder";
