@@ -30,7 +30,10 @@ import CreateAccount "./Types/Lexicons/Com/Atproto/Server/CreateAccount";
 import ApplyWrites "./Types/Lexicons/Com/Atproto/Repo/ApplyWrites";
 import GetProfile "./Types/Lexicons/App/Bsky/Actor/GetProfile";
 import GetProfiles "./Types/Lexicons/App/Bsky/Actor/GetProfiles";
+import GetPreferences "./Types/Lexicons/App/Bsky/Actor/GetPreferences";
 import ActorDefs "./Types/Lexicons/App/Bsky/Actor/Defs";
+import AtUri "./Types/AtUri";
+import LabelDefs "./Types/Lexicons/Com/Atproto/Label/Defs";
 import DynamicArray "mo:xtended-collections/DynamicArray";
 
 module {
@@ -72,6 +75,7 @@ module {
         case ("com.atproto.sync.listrepos") listRepos(routeContext);
         case ("app.bsky.actor.getprofile") getProfile(routeContext);
         case ("app.bsky.actor.getprofiles") await* getProfiles(routeContext);
+        case ("app.bsky.actor.getpreferences") getPreferences(routeContext);
         case (_) {
           routeContext.buildResponse(
             #badRequest,
@@ -551,6 +555,7 @@ module {
           case (#err(_)) return null;
         };
       };
+
       ?{
         did = account.id;
         handle = account.handle;
@@ -564,6 +569,12 @@ module {
         indexedAt = null; // TODO
         labels = []; // TODO
         postsCount = null; // TODO
+        associated = null; // TODO
+        joinedViaStarterPack = null; // TODO
+        pinnedPost = null; // TODO
+        status = null; // TODO
+        verification = null; // TODO
+        viewer = null; // TODO
       };
     };
 
@@ -592,6 +603,19 @@ module {
       let responseJson = GetProfiles.toJson({
         profiles = DynamicArray.toArray(profiles);
       });
+      routeContext.buildResponse(
+        #ok,
+        #json(responseJson),
+      );
+    };
+
+    func getPreferences(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
+
+      let response : GetPreferences.Response = {
+        preferences = []; // TODO preferences
+      };
+
+      let responseJson = GetPreferences.toJson(response);
       routeContext.buildResponse(
         #ok,
         #json(responseJson),
