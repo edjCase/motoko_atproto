@@ -1,9 +1,9 @@
-import Result "mo:core/Result";
-import DID "mo:did";
-import Blob "mo:core/Blob";
-import Text "mo:core/Text";
-import Error "mo:core/Error";
-import { ic } "mo:ic";
+import Result "mo:core@1/Result";
+import DID "mo:did@2";
+import Blob "mo:core@1/Blob";
+import Text "mo:core@1/Text";
+import Error "mo:core@1/Error";
+import { ic } "mo:ic@3";
 
 module {
   public type StableData = {

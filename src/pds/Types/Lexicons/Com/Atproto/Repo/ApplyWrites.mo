@@ -1,16 +1,16 @@
-import DID "mo:did";
-import CID "mo:cid";
-import TID "mo:tid";
-import DagCbor "mo:dag-cbor";
+import DID "mo:did@2";
+import CID "mo:cid@1";
+import TID "mo:tid@1";
+import DagCbor "mo:dag-cbor@2";
 import AtUri "../../../../AtUri";
-import Json "mo:json";
-import Result "mo:core/Result";
+import Json "mo:json@1";
+import Result "mo:core@1/Result";
 import Array "mo:base/Array";
 import JsonDagCborMapper "../../../../../JsonDagCborMapper";
 import Common "./Common";
-import List "mo:core/List";
-import Iter "mo:core/Iter";
-import Nat "mo:core/Nat";
+import List "mo:core@1/List";
+import Iter "mo:core@1/Iter";
+import Nat "mo:core@1/Nat";
 
 module {
 

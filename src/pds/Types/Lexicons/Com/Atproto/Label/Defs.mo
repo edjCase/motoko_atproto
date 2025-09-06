@@ -1,10 +1,10 @@
-import Json "mo:json";
+import Json "mo:json@1";
 import AtUri "../../../../AtUri";
-import DID "mo:did";
-import CID "mo:cid";
-import Option "mo:core/Option";
-import DateTime "mo:datetime/DateTime";
-import BaseX "mo:base-x-encoder";
+import DID "mo:did@2";
+import CID "mo:cid@1";
+import Option "mo:core@1/Option";
+import DateTime "mo:datetime@1/DateTime";
+import BaseX "mo:base-x-encoder@2";
 
 module {
 

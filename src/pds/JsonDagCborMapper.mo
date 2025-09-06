@@ -1,9 +1,9 @@
 import Text "mo:base/Text";
-import Array "mo:core/Array";
-import Json "mo:json";
-import BaseX "mo:base-x-encoder";
-import DagCbor "mo:dag-cbor";
-import CID "mo:cid";
+import Array "mo:core@1/Array";
+import Json "mo:json@1";
+import BaseX "mo:base-x-encoder@2";
+import DagCbor "mo:dag-cbor@2";
+import CID "mo:cid@1";
 
 module {
 

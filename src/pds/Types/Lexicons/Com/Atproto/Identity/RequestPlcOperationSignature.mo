@@ -1,4 +1,4 @@
-import Result "mo:core/Result";
+import Result "mo:core@1/Result";
 
 module {
 

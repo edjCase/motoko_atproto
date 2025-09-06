@@ -1,6 +1,6 @@
-import Json "mo:json";
+import Json "mo:json@1";
 import Result "mo:base/Result";
-import DID "mo:did";
+import DID "mo:did@2";
 
 module {
   // com.atproto.sync.getRepoStatus

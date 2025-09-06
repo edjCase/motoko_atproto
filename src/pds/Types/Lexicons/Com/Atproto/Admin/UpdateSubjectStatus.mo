@@ -1,8 +1,8 @@
-import Json "mo:json";
-import Result "mo:core/Result";
+import Json "mo:json@1";
+import Result "mo:core@1/Result";
 import AdminDefs "./Defs";
 import StrongRef "../../../../StrongRef";
-import CID "mo:cid";
+import CID "mo:cid@1";
 import AtUri "../../../../AtUri";
 
 module {

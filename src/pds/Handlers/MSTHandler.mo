@@ -1,23 +1,23 @@
-import Result "mo:core/Result";
-import CID "mo:cid";
-import Blob "mo:core/Blob";
+import Result "mo:core@1/Result";
+import CID "mo:cid@1";
+import Blob "mo:core@1/Blob";
 import Buffer "mo:base/Buffer";
-import Text "mo:core/Text";
+import Text "mo:core@1/Text";
 import Sha256 "mo:sha2/Sha256";
-import Array "mo:core/Array";
+import Array "mo:core@1/Array";
 import MST "../Types/MST";
-import Order "mo:core/Order";
-import Iter "mo:core/Iter";
-import Nat "mo:core/Nat";
-import Nat8 "mo:core/Nat8";
-import Char "mo:core/Char";
-import Debug "mo:core/Debug";
+import Order "mo:core@1/Order";
+import Iter "mo:core@1/Iter";
+import Nat "mo:core@1/Nat";
+import Nat8 "mo:core@1/Nat8";
+import Char "mo:core@1/Char";
+import Debug "mo:core@1/Debug";
 import CIDBuilder "../CIDBuilder";
-import PureMap "mo:core/pure/Map";
-import Set "mo:core/Set";
-import Runtime "mo:core/Runtime";
-import DagCbor "mo:dag-cbor";
-import DagPb "mo:dag-pb";
+import PureMap "mo:core@1/pure/Map";
+import Set "mo:core@1/Set";
+import Runtime "mo:core@1/Runtime";
+import DagCbor "mo:dag-cbor@2";
+import DagPb "mo:dag-pb@0";
 
 module {
 

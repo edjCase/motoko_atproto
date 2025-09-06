@@ -1,4 +1,4 @@
-import DagCbor "mo:dag-cbor";
+import DagCbor "mo:dag-cbor@2";
 import Result "mo:base/Result";
 import RepoCommon "./Types/Lexicons/Com/Atproto/Repo/Common";
 

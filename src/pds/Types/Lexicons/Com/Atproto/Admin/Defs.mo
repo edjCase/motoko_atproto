@@ -1,9 +1,9 @@
-import DagCbor "mo:dag-cbor";
-import Json "mo:json";
+import DagCbor "mo:dag-cbor@2";
+import Json "mo:json@1";
 import Array "mo:base/Array";
 import JsonDagCborMapper "../../../../../JsonDagCborMapper";
 import ServerDefs "../Server/Defs";
-import DynamicArray "mo:xtended-collections/DynamicArray";
+import DynamicArray "mo:xtended-collections@0/DynamicArray";
 
 module {
 

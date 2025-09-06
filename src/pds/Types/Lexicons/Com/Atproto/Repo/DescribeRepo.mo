@@ -1,7 +1,7 @@
-import DID "mo:did";
+import DID "mo:did@2";
 import DIDDocument "../../../../DIDDocument";
-import Json "mo:json";
-import Array "mo:core/Array";
+import Json "mo:json@1";
+import Array "mo:core@1/Array";
 
 module {
 

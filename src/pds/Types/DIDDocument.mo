@@ -1,6 +1,6 @@
-import DID "mo:did";
-import Json "mo:json";
-import Array "mo:core/Array";
+import DID "mo:did@2";
+import Json "mo:json@1";
+import Array "mo:core@1/Array";
 import Text "mo:base/Text";
 
 module {

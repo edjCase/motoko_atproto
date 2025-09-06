@@ -1,16 +1,16 @@
-import DID "mo:did";
-import Result "mo:core/Result";
-import Json "mo:json";
+import DID "mo:did@2";
+import Result "mo:core@1/Result";
+import Json "mo:json@1";
 import KeyHandler "./KeyHandler";
-import DagCbor "mo:dag-cbor";
-import IC "mo:ic/Call";
-import Array "mo:core/Array";
-import BaseX "mo:base-x-encoder";
+import DagCbor "mo:dag-cbor@2";
+import IC "mo:ic@3/Call";
+import Array "mo:core@1/Array";
+import BaseX "mo:base-x-encoder@2";
 import Sha256 "mo:sha2/Sha256";
-import Error "mo:core/Error";
-import TextX "mo:xtended-text/TextX";
-import Text "mo:core/Text";
-import Debug "mo:core/Debug";
+import Error "mo:core@1/Error";
+import TextX "mo:xtended-text@2/TextX";
+import Text "mo:core@1/Text";
+import Debug "mo:core@1/Debug";
 
 module {
 

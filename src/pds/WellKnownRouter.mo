@@ -1,10 +1,10 @@
-import RouteContext "mo:liminal/RouteContext";
-import Route "mo:liminal/Route";
+import RouteContext "mo:liminal@1/RouteContext";
+import Route "mo:liminal@1/Route";
 import DIDModule "./DID";
 import KeyHandler "./Handlers/KeyHandler";
 import ServerInfoHandler "./Handlers/ServerInfoHandler";
 import Domain "mo:url-kit/Domain";
-import DID "mo:did";
+import DID "mo:did@2";
 import JsonDagCborMapper "./JsonDagCborMapper";
 import DIDDocument "./Types/DIDDocument";
 

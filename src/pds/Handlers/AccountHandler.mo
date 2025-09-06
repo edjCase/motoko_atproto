@@ -1,31 +1,31 @@
-import PureMap "mo:core/pure/Map";
+import PureMap "mo:core@1/pure/Map";
 import Array "mo:base/Array";
-import DID "mo:did";
-import Result "mo:core/Result";
+import DID "mo:did@2";
+import Result "mo:core@1/Result";
 import CreateSession "../Types/Lexicons/Com/Atproto/Server/CreateSession";
 import GetSession "../Types/Lexicons/Com/Atproto/Server/GetSession";
 import CreateAccount "../Types/Lexicons/Com/Atproto/Server/CreateAccount";
-import JWT "mo:jwt";
-import PBKDF2 "mo:pbkdf2-sha512";
+import JWT "mo:jwt@2";
+import PBKDF2 "mo:pbkdf2-sha512@1";
 import DIDModule "../DID";
-import Time "mo:core/Time";
-import Random "mo:core/Random";
+import Time "mo:core@1/Time";
+import Random "mo:core@1/Random";
 import SHA256 "mo:sha2/Sha256";
-import TextX "mo:xtended-text/TextX";
+import TextX "mo:xtended-text@2/TextX";
 import Blob "mo:base/Blob";
 import DIDDocument "../Types/DIDDocument";
-import IterX "mo:xtended-iter/IterX";
-import BaseX "mo:base-x-encoder";
+import IterX "mo:xtended-iter@1/IterX";
+import BaseX "mo:base-x-encoder@2";
 import KeyHandler "./KeyHandler";
 import ServerInfoHandler "./ServerInfoHandler";
-import Text "mo:core/Text";
+import Text "mo:core@1/Text";
 import DIDDirectoryHandler "./DIDDirectoryHandler";
 import Domain "mo:url-kit/Domain";
-import Runtime "mo:core/Runtime";
-import Json "mo:json";
-import ECDSA "mo:ecdsa";
-import Debug "mo:core/Debug";
-import Iter "mo:core/Iter";
+import Runtime "mo:core@1/Runtime";
+import Json "mo:json@1";
+import ECDSA "mo:ecdsa@7";
+import Debug "mo:core@1/Debug";
+import Iter "mo:core@1/Iter";
 
 module {
 

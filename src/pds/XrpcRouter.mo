@@ -1,28 +1,26 @@
 import Text "mo:base/Text";
-import Array "mo:core/Array";
+import Array "mo:core@1/Array";
 import Repository "./Types/Repository";
 import RepositoryHandler "Handlers/RepositoryHandler";
 import ServerInfoHandler "Handlers/ServerInfoHandler";
 import AccountHandler "Handlers/AccountHandler";
-import RouteContext "mo:liminal/RouteContext";
-import Route "mo:liminal/Route";
+import RouteContext "mo:liminal@1/RouteContext";
+import Route "mo:liminal@1/Route";
 import Serde "mo:serde";
-import DID "mo:did";
+import DID "mo:did@2";
 import Domain "mo:url-kit/Domain";
-import CID "mo:cid";
-import TID "mo:tid";
-import Json "mo:json";
+import CID "mo:cid@1";
+import TID "mo:tid@1";
+import Json "mo:json@1";
 import Result "mo:base/Result";
-import Nat "mo:core/Nat";
-import TextX "mo:xtended-text/TextX";
+import Nat "mo:core@1/Nat";
+import TextX "mo:xtended-text@2/TextX";
 import DescribeRepo "./Types/Lexicons/Com/Atproto/Repo/DescribeRepo";
 import CreateRecord "./Types/Lexicons/Com/Atproto/Repo/CreateRecord";
 import GetRecord "./Types/Lexicons/Com/Atproto/Repo/GetRecord";
 import PutRecord "./Types/Lexicons/Com/Atproto/Repo/PutRecord";
 import DeleteRecord "./Types/Lexicons/Com/Atproto/Repo/DeleteRecord";
-import ListRecords "./Types/Lexicons/Com/Atproto/Repo/ListRecords";
 import UploadBlob "./Types/Lexicons/Com/Atproto/Repo/UploadBlob";
-import RepoCommon "./Types/Lexicons/Com/Atproto/Repo/Common";
 import ListBlobs "./Types/Lexicons/Com/Atproto/Sync/ListBlobs";
 import CreateSession "./Types/Lexicons/Com/Atproto/Server/CreateSession";
 import GetSession "./Types/Lexicons/Com/Atproto/Server/GetSession";
@@ -31,10 +29,9 @@ import ApplyWrites "./Types/Lexicons/Com/Atproto/Repo/ApplyWrites";
 import GetProfile "./Types/Lexicons/App/Bsky/Actor/GetProfile";
 import GetProfiles "./Types/Lexicons/App/Bsky/Actor/GetProfiles";
 import GetPreferences "./Types/Lexicons/App/Bsky/Actor/GetPreferences";
+import GetServices "./Types/Lexicons/App/Bsky/Labeler/GetServices";
 import ActorDefs "./Types/Lexicons/App/Bsky/Actor/Defs";
-import AtUri "./Types/AtUri";
-import LabelDefs "./Types/Lexicons/Com/Atproto/Label/Defs";
-import DynamicArray "mo:xtended-collections/DynamicArray";
+import DynamicArray "mo:xtended-collections@0/DynamicArray";
 
 module {
 
@@ -76,6 +73,7 @@ module {
         case ("app.bsky.actor.getprofile") getProfile(routeContext);
         case ("app.bsky.actor.getprofiles") await* getProfiles(routeContext);
         case ("app.bsky.actor.getpreferences") getPreferences(routeContext);
+        case ("app.bsky.labeler.getservices") getServices(routeContext);
         case (_) {
           routeContext.buildResponse(
             #badRequest,
@@ -616,6 +614,43 @@ module {
       };
 
       let responseJson = GetPreferences.toJson(response);
+      routeContext.buildResponse(
+        #ok,
+        #json(responseJson),
+      );
+    };
+
+    func getServices(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
+      // Parse query parameters
+      let ?didsParam = routeContext.getQueryParam("dids") else return routeContext.buildResponse(
+        #badRequest,
+        #error(#message("Missing required query parameter: dids")),
+      );
+
+      let detailed = switch (routeContext.getQueryParam("detailed")) {
+        case (null) ?false;
+        case (?detailedText) switch (detailedText) {
+          case ("true") ?true;
+          case ("false") ?false;
+          case (_) return routeContext.buildResponse(
+            #badRequest,
+            #error(#message("Invalid detailed parameter, expected 'true' or 'false'")),
+          );
+        };
+      };
+
+      // Split DIDs by comma
+      let dids = Text.split(didsParam, #char(','));
+      let didsArray = Array.fromIter(dids);
+
+      // TODO: Implement actual labeler service lookup
+      let mockViews : [GetServices.LabelerViewUnion] = [];
+
+      let response : GetServices.Response = {
+        views = mockViews;
+      };
+
+      let responseJson = GetServices.toJson(response);
       routeContext.buildResponse(
         #ok,
         #json(responseJson),

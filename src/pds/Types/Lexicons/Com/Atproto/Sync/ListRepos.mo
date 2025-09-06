@@ -1,7 +1,7 @@
-import CID "mo:cid";
-import Json "mo:json";
-import DID "mo:did";
-import Array "mo:core/Array";
+import CID "mo:cid@1";
+import Json "mo:json@1";
+import DID "mo:did@2";
+import Array "mo:core@1/Array";
 
 module {
   // com.atproto.sync.listRepos

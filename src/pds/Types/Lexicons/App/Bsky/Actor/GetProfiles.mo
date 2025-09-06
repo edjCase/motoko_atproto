@@ -1,9 +1,9 @@
-import Json "mo:json";
-import Result "mo:core/Result";
+import Json "mo:json@1";
+import Result "mo:core@1/Result";
 import ActorDefs "./Defs";
-import Array "mo:core/Array";
-import DynamicArray "mo:xtended-collections/DynamicArray";
-import Nat "mo:core/Nat";
+import Array "mo:core@1/Array";
+import DynamicArray "mo:xtended-collections@0/DynamicArray";
+import Nat "mo:core@1/Nat";
 
 module {
   /// Request type for app.bsky.actor.getProfiles

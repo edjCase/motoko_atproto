@@ -1,8 +1,8 @@
-import DID "mo:did";
-import Json "mo:json";
-import Result "mo:core/Result";
+import DID "mo:did@2";
+import Json "mo:json@1";
+import Result "mo:core@1/Result";
 import DIDDocument "../../../../DIDDocument";
-import DagCbor "mo:dag-cbor";
+import DagCbor "mo:dag-cbor@2";
 import JsonDagCborMapper "../../../../../JsonDagCborMapper";
 
 module {

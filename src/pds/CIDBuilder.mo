@@ -1,15 +1,15 @@
-import CID "mo:cid";
+import CID "mo:cid@1";
 import Commit "Types/Commit";
-import DID "mo:did";
-import TID "mo:tid";
-import DagCbor "mo:dag-cbor";
+import DID "mo:did@2";
+import TID "mo:tid@1";
+import DagCbor "mo:dag-cbor@2";
 import Sha256 "mo:sha2/Sha256";
-import BaseX "mo:base-x-encoder";
-import Text "mo:core/Text";
-import Array "mo:core/Array";
-import Runtime "mo:core/Runtime";
+import BaseX "mo:base-x-encoder@2";
+import Text "mo:core@1/Text";
+import Array "mo:core@1/Array";
+import Runtime "mo:core@1/Runtime";
 import MST "Types/MST";
-import Nat8 "mo:core/Nat8";
+import Nat8 "mo:core@1/Nat8";
 
 module {
 

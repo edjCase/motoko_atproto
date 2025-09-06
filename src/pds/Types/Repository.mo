@@ -1,7 +1,7 @@
-import DID "mo:did";
-import CID "mo:cid";
-import TID "mo:tid";
-import DagCbor "mo:dag-cbor";
+import DID "mo:did@2";
+import CID "mo:cid@1";
+import TID "mo:tid@1";
+import DagCbor "mo:dag-cbor@2";
 import AtUri "./AtUri";
 import DIDModule "../DID"
 

@@ -1,5 +1,5 @@
-import Json "mo:json";
-import DID "mo:did";
+import Json "mo:json@1";
+import DID "mo:did@2";
 
 module {
   // com.atproto.server.reserveSigningKey

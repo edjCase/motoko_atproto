@@ -1,4 +1,4 @@
-import Json "mo:json";
+import Json "mo:json@1";
 import Array "mo:base/Array";
 
 module {

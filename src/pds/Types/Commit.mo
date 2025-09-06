@@ -1,6 +1,6 @@
-import CID "mo:cid";
-import TID "mo:tid";
-import DID "mo:did";
+import CID "mo:cid@1";
+import TID "mo:tid@1";
+import DID "mo:did@2";
 
 module {
   public type UnsignedCommit = {

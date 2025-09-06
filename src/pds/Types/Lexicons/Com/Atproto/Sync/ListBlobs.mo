@@ -1,13 +1,13 @@
-import DID "mo:did";
-import CID "mo:cid";
-import TID "mo:tid";
-import DagCbor "mo:dag-cbor";
+import DID "mo:did@2";
+import CID "mo:cid@1";
+import TID "mo:tid@1";
+import DagCbor "mo:dag-cbor@2";
 import AtUri "../../../../AtUri";
-import Json "mo:json";
-import Result "mo:core/Result";
-import Array "mo:core/Array";
-import Nat "mo:core/Nat";
-import Text "mo:core/Text";
+import Json "mo:json@1";
+import Result "mo:core@1/Result";
+import Array "mo:core@1/Array";
+import Nat "mo:core@1/Nat";
+import Text "mo:core@1/Text";
 
 module {
 

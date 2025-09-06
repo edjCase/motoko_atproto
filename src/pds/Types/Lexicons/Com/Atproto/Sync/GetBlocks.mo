@@ -1,6 +1,6 @@
-import CID "mo:cid";
+import CID "mo:cid@1";
 import Result "mo:base/Result";
-import DID "mo:did";
+import DID "mo:did@2";
 
 module {
   // com.atproto.sync.getBlocks

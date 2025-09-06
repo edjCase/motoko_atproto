@@ -1,5 +1,5 @@
 import Domain "mo:url-kit/Domain";
-import PlcDID "mo:did/Plc";
+import PlcDID "mo:did@2/Plc";
 
 module {
   public type ServerInfo = {

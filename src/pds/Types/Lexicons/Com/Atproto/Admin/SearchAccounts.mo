@@ -1,5 +1,5 @@
-import Json "mo:json";
-import Result "mo:core/Result";
+import Json "mo:json@1";
+import Result "mo:core@1/Result";
 import Array "mo:base/Array";
 import AdminDefs "./Defs";
 

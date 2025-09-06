@@ -1,5 +1,5 @@
-import CID "mo:cid";
-import Json "mo:json";
+import CID "mo:cid@1";
+import Json "mo:json@1";
 
 module {
 
