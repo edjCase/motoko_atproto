@@ -1,6 +1,6 @@
 import CID "mo:cid@1";
 import Commit "Types/Commit";
-import DID "mo:did@2";
+import DID "mo:did@3";
 import TID "mo:tid@1";
 import DagCbor "mo:dag-cbor@2";
 import Sha256 "mo:sha2/Sha256";

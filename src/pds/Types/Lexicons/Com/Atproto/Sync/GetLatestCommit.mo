@@ -1,7 +1,7 @@
 import CID "mo:cid@1";
 import Json "mo:json@1";
 import Result "mo:base/Result";
-import DID "mo:did@2";
+import DID "mo:did@3";
 
 module {
   // com.atproto.sync.getLatestCommit

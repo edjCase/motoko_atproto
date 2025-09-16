@@ -3,16 +3,16 @@ name = "atproto"
 version = "0.0.1"
 description = ""
 repository = "https://github.com/edjcase/motoko_atproto"
-keywords = [ "at", "protocol", "atproto", "ipld" ]
+keywords = ["at", "protocol", "atproto", "ipld"]
 license = "MIT"
 
 [dependencies]
 "core@1" = "1.0.0"
-"liminal@1" = "1.1.0"
+"liminal@1" = "1.2.0"
 "base-x-encoder@2" = "2.1.0"
 "dag-cbor@2" = "2.1.0"
 "cid@1" = "1.1.0"
-"did@2" = "2.1.0"
+"did@3" = "3.0.0"
 "json@1" = "1.4.0"
 "xtended-text@2" = "2.2.0"
 "tid@1" = "1.1.0"
@@ -25,6 +25,7 @@ license = "MIT"
 "datetime@1" = "1.1.0"
 "xtended-iter@1" = "1.1.0"
 "xtended-collections@0" = "0.2.0"
+"url-kit@3" = "3.0.0"
 
 [dev-dependencies]
 test = "2.1.1"

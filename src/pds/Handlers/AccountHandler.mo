@@ -1,6 +1,6 @@
 import PureMap "mo:core@1/pure/Map";
 import Array "mo:base/Array";
-import DID "mo:did@2";
+import DID "mo:did@3";
 import Result "mo:core@1/Result";
 import CreateSession "../Types/Lexicons/Com/Atproto/Server/CreateSession";
 import GetSession "../Types/Lexicons/Com/Atproto/Server/GetSession";
@@ -20,7 +20,7 @@ import KeyHandler "./KeyHandler";
 import ServerInfoHandler "./ServerInfoHandler";
 import Text "mo:core@1/Text";
 import DIDDirectoryHandler "./DIDDirectoryHandler";
-import Domain "mo:url-kit/Domain";
+import Domain "mo:url-kit@3/Domain";
 import Runtime "mo:core@1/Runtime";
 import Json "mo:json@1";
 import ECDSA "mo:ecdsa@7";
@@ -139,7 +139,7 @@ module {
         case (?did) did;
         case (null) {
           let ?serverInfo = serverInfoHandler.get() else Runtime.trap("Server is not intiialized");
-          let handle = request.handle # "." # Domain.toText(serverInfo.domain);
+          let handle = request.handle # "." # serverInfo.hostname;
           let createRequest : DIDDirectoryHandler.CreatePlcRequest = {
             // TODO?
             alsoKnownAs = ["at://" # handle];
@@ -147,7 +147,7 @@ module {
             services = [{
               id = "atproto_pds";
               type_ = "AtprotoPersonalDataServer";
-              endpoint = "https://" # Domain.toText(serverInfo.domain);
+              endpoint = "https://" # serverInfo.hostname;
             }];
           };
           switch (await* didDirectoryHandler.create(createRequest)) {
@@ -297,14 +297,14 @@ module {
       let ?serverInfo = serverInfoHandler.get() else return #err("Server not initialized");
 
       let webDID = {
-        host = #domain(serverInfo.domain);
+        hostname = serverInfo.hostname;
         path = [];
         port = null;
       };
       let didDoc = DIDModule.generateDIDDocument(did, webDID, verificationPublicKey);
 
       #ok({
-        handle = account.handle # "." # Domain.toText(serverInfo.domain);
+        handle = account.handle # "." # serverInfo.hostname;
         did = DID.Plc.toText(did);
         email = account.email;
         emailConfirmed = null; // TODO: Implement email confirmation
@@ -327,8 +327,8 @@ module {
       account : AccountData,
     ) : async* Result.Result<CreateSessionResponse, Text> {
       let ?serverInfo = serverInfoHandler.get() else return #err("Server not initialized");
-      let webDID = {
-        host = #domain(serverInfo.domain);
+      let webDID : DID.Web.DID = {
+        hostname = serverInfo.hostname;
         path = [];
         port = null;
       };
@@ -436,7 +436,7 @@ module {
       #ok({
         accessJwt = accessJwt;
         refreshJwt = refreshJwt;
-        handle = account.handle # "." # Domain.toText(serverInfo.domain);
+        handle = account.handle # "." # serverInfo.hostname;
         did = did;
         didDoc = ?didDoc;
       });
@@ -466,7 +466,7 @@ module {
               };
             };
             let ?serverInfo = serverInfoHandler.get() else Runtime.trap("Server not intialized");
-            let domainText = "." # Domain.toText(serverInfo.domain);
+            let domainText = "." # serverInfo.hostname;
             switch (Text.stripEnd(identifier, #text(domainText))) {
               case (null) ();
               case (?strippedId) {

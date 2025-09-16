@@ -1,5 +1,5 @@
 import Result "mo:core@1/Result";
-import DID "mo:did@2";
+import DID "mo:did@3";
 import Blob "mo:core@1/Blob";
 import Text "mo:core@1/Text";
 import Error "mo:core@1/Error";

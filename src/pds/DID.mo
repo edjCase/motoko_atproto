@@ -1,6 +1,6 @@
 import Text "mo:base/Text";
-import PlcDID "mo:did@2/Plc";
-import DID "mo:did@2";
+import PlcDID "mo:did@3/Plc";
+import DID "mo:did@3";
 import AtUri "./Types/AtUri";
 import DIDDocument "Types/DIDDocument";
 import Order "mo:core@1/Order";

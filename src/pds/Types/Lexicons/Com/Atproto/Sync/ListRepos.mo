@@ -1,6 +1,6 @@
 import CID "mo:cid@1";
 import Json "mo:json@1";
-import DID "mo:did@2";
+import DID "mo:did@3";
 import Array "mo:core@1/Array";
 
 module {

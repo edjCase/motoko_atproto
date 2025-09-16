@@ -1,5 +1,5 @@
 import Result "mo:base/Result";
-import DID "mo:did@2";
+import DID "mo:did@3";
 
 module {
   // com.atproto.sync.getRecord

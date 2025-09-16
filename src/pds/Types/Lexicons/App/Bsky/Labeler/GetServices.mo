@@ -2,11 +2,12 @@ import Json "mo:json@1";
 import Result "mo:core@1/Result";
 import Array "mo:base/Array";
 import Nat "mo:base/Nat";
-import DID "mo:did@2";
+import DID "mo:did@3";
 import CID "mo:cid@1";
 import AtUri "../../../../AtUri";
 import DateTime "mo:datetime@1/DateTime";
 import DynamicArray "mo:xtended-collections@0/DynamicArray";
+import Iter "mo:core@1/Iter";
 
 module {
 
@@ -102,16 +103,12 @@ module {
   public func fromJson(json : Json.Json) : Result.Result<Request, Text> {
     let dids = switch (Json.getAsArray(json, "dids")) {
       case (#ok(didsArray)) {
-        let didsResult = Array.mapEntries<Json.Json, Text>(
-          didsArray,
-          func(idx, didJson) {
-            switch (didJson) {
-              case (#string(did)) did;
-              case (_) return #err("Invalid DID at index " # Nat.toText(idx) # ", expected string");
-            };
-          },
-        );
-        didsResult;
+        let dynamicArray = DynamicArray.DynamicArray<Text>(didsArray.size());
+        for ((idx, didJson) in Iter.enumerate(didsArray.vals())) {
+          let #string(did) = didJson else return #err("Invalid DID at index " # Nat.toText(idx) # ", expected string");
+          dynamicArray.add(did);
+        };
+        DynamicArray.toArray(dynamicArray);
       };
       case (#err(#pathNotFound)) return #err("Missing required field: dids");
       case (#err(#typeMismatch)) return #err("Invalid dids field, expected array");

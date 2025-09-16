@@ -1,4 +1,4 @@
-import DID "mo:did@2";
+import DID "mo:did@3";
 import Json "mo:json@1";
 import Array "mo:core@1/Array";
 import Text "mo:base/Text";

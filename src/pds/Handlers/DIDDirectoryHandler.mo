@@ -1,4 +1,4 @@
-import DID "mo:did@2";
+import DID "mo:did@3";
 import Result "mo:core@1/Result";
 import Json "mo:json@1";
 import KeyHandler "./KeyHandler";

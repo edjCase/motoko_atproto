@@ -1,5 +1,5 @@
 import Repository "../Types/Repository";
-import DID "mo:did@2";
+import DID "mo:did@3";
 import CID "mo:cid@1";
 import TID "mo:tid@1";
 import PureMap "mo:core@1/pure/Map";
@@ -18,7 +18,7 @@ import Iter "mo:core@1/Iter";
 import LexiconValidator "../LexiconValidator";
 import Debug "mo:core@1/Debug";
 import ServerInfoHandler "./ServerInfoHandler";
-import Domain "mo:url-kit/Domain";
+import Domain "mo:url-kit@3/Domain";
 import DIDModule "../DID";
 import Nat "mo:core@1/Nat";
 import Array "mo:core@1/Array";
@@ -107,14 +107,14 @@ module {
 
       let ?serverInfo = serverInfoHandler.get() else return #err("Server not initialized");
 
-      let handle = Domain.toText(serverInfo.domain);
+      let handle = serverInfo.hostname;
 
       let verificationKey : DID.Key.DID = switch (await* keyHandler.getPublicKey(#verification)) {
         case (#ok(did)) did;
         case (#err(e)) return #err("Failed to get verification public key: " # e);
       };
       let webDid : DID.Web.DID = {
-        host = #domain(serverInfo.domain);
+        hostname = serverInfo.hostname;
         path = [];
         port = null;
       };

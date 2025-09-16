@@ -15,7 +15,7 @@ import AccountHandler "Handlers/AccountHandler";
 import DIDDirectoryHandler "Handlers/DIDDirectoryHandler";
 import ServerInfo "Types/ServerInfo";
 import DIDModule "./DID";
-import DID "mo:did@2";
+import DID "mo:did@3";
 import TID "mo:tid@1";
 import CID "mo:cid@1";
 import PureMap "mo:core@1/pure/Map";
@@ -26,7 +26,7 @@ import HttpContext "mo:liminal@1/HttpContext";
 import App "mo:liminal@1/App";
 import Runtime "mo:core@1/Runtime";
 
-actor {
+persistent actor {
   transient let tidGenerator = TID.Generator();
 
   stable var repositoryStableData : RepositoryHandler.StableData = {

@@ -1,9 +1,9 @@
-import Domain "mo:url-kit/Domain";
-import PlcDID "mo:did@2/Plc";
+import Domain "mo:url-kit@3/Domain";
+import PlcDID "mo:did@3/Plc";
 
 module {
   public type ServerInfo = {
-    domain : Domain.Domain;
+    hostname : Text;
     plcDid : PlcDID.DID;
     contactEmailAddress : ?Text;
   };

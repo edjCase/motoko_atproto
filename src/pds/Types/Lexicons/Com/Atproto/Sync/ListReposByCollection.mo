@@ -1,5 +1,5 @@
 import Json "mo:json@1";
-import DID "mo:did@2";
+import DID "mo:did@3";
 import Array "mo:base/Array";
 
 module {

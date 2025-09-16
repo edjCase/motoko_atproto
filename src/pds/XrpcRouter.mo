@@ -7,8 +7,8 @@ import AccountHandler "Handlers/AccountHandler";
 import RouteContext "mo:liminal@1/RouteContext";
 import Route "mo:liminal@1/Route";
 import Serde "mo:serde";
-import DID "mo:did@2";
-import Domain "mo:url-kit/Domain";
+import DID "mo:did@3";
+import Domain "mo:url-kit@3/Domain";
 import CID "mo:cid@1";
 import TID "mo:tid@1";
 import Json "mo:json@1";
@@ -115,17 +115,17 @@ module {
     };
 
     func describeServer(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
-      let ?info = serverInfoHandler.get() else return routeContext.buildResponse(
+      let ?serverInfo = serverInfoHandler.get() else return routeContext.buildResponse(
         #badRequest,
         #error(#message("Server not initialized")),
       );
 
       let linksCandid = [
-        // ("privacyPolicy", #Text(info.privacyPolicy)), // TODO?
-        // ("termsOfService", #Text(info.termsOfService)), // TODO?
+        // ("privacyPolicy", #Text(serverInfo.privacyPolicy)), // TODO?
+        // ("termsOfService", #Text(serverInfo.termsOfService)), // TODO?
       ];
 
-      let contactCandid = switch (info.contactEmailAddress) {
+      let contactCandid = switch (serverInfo.contactEmailAddress) {
         case (null) [];
         case (?email) [
           ("email", #Text(email)),
@@ -134,7 +134,15 @@ module {
 
       routeContext.buildResponse(
         #ok,
-        #content(#Record([("did", #Text(DID.Plc.toText(info.plcDid))), ("availableUserDomains", #Array([#Text("." # Domain.toText(info.domain))])), ("inviteCodeRequired", #Bool(true)), ("links", #Record(linksCandid)), ("contact", #Record(contactCandid))])),
+        #content(
+          #Record([
+            ("did", #Text(DID.Plc.toText(serverInfo.plcDid))),
+            ("availableUserDomains", #Array([#Text("." # serverInfo.hostname)])),
+            ("inviteCodeRequired", #Bool(true)),
+            ("links", #Record(linksCandid)),
+            ("contact", #Record(contactCandid)),
+          ])
+        ),
       );
     };
 
@@ -629,9 +637,9 @@ module {
 
       let detailed = switch (routeContext.getQueryParam("detailed")) {
         case (null) ?false;
-        case (?detailedText) switch (detailedText) {
-          case ("true") ?true;
-          case ("false") ?false;
+        case (?detailedText) switch (Text.toLowercase(detailedText)) {
+          case ("true" or "" or "1") ?true; // TODO bool parser?
+          case ("false" or "0") ?false;
           case (_) return routeContext.buildResponse(
             #badRequest,
             #error(#message("Invalid detailed parameter, expected 'true' or 'false'")),

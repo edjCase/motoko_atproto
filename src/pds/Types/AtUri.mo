@@ -1,6 +1,6 @@
 import Text "mo:core@1/Text";
 import TextX "mo:xtended-text@2/TextX";
-import DID "mo:did@2";
+import DID "mo:did@3";
 
 module {
 

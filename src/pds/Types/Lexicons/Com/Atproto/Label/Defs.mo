@@ -1,6 +1,6 @@
 import Json "mo:json@1";
 import AtUri "../../../../AtUri";
-import DID "mo:did@2";
+import DID "mo:did@3";
 import CID "mo:cid@1";
 import Option "mo:core@1/Option";
 import DateTime "mo:datetime@1/DateTime";
