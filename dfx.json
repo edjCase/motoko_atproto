@@ -1,9 +1,9 @@
 {
-  "dfx": "0.28.0",
   "canisters": {
     "pds": {
       "main": "src/pds/main.mo",
-      "type": "motoko"
+      "type": "motoko",
+      "args": "--enhanced-orthogonal-persistence"
     },
     "frontend": {
       "dependencies": [
