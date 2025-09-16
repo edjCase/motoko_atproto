@@ -25,7 +25,9 @@ import CreateAccount "Types/Lexicons/Com/Atproto/Server/CreateAccount";
 import HttpContext "mo:liminal@1/HttpContext";
 import App "mo:liminal@1/App";
 import Runtime "mo:core@1/Runtime";
+import Migrations "./Migrations";
 
+(with migration = Migrations.hostname)
 persistent actor {
   transient let tidGenerator = TID.Generator();
 
