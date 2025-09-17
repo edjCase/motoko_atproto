@@ -33,6 +33,7 @@ import GetPreferences "./Types/Lexicons/App/Bsky/Actor/GetPreferences";
 import PutPreferences "./Types/Lexicons/App/Bsky/Actor/PutPreferences";
 import GetServices "./Types/Lexicons/App/Bsky/Labeler/GetServices";
 import ActorDefs "./Types/Lexicons/App/Bsky/Actor/Defs";
+import ResolveHandle "./Types/Lexicons/Com/Atproto/Identity/ResolveHandle";
 import DynamicArray "mo:xtended-collections@0/DynamicArray";
 
 module {
@@ -73,6 +74,7 @@ module {
         case ("com.atproto.server.describeserver") describeServer(routeContext);
         case ("com.atproto.sync.listblobs") listBlobs(routeContext);
         case ("com.atproto.sync.listrepos") listRepos(routeContext);
+        case ("com.atproto.identity.resolvehandle") resolveHandle(routeContext);
         case ("app.bsky.actor.getprofile") getProfile(routeContext);
         case ("app.bsky.actor.getprofiles") getProfiles(routeContext);
         case ("app.bsky.actor.getpreferences") getPreferences(routeContext);
@@ -730,6 +732,39 @@ module {
       };
 
       let responseJson = GetServices.toJson(response);
+      routeContext.buildResponse(
+        #ok,
+        #json(responseJson),
+      );
+    };
+
+    func resolveHandle(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
+      // Parse query parameters for the handle parameter
+      let ?handleParam = routeContext.getQueryParam("handle") else return routeContext.buildResponse(
+        #badRequest,
+        #error(#message("Missing required query parameter: handle")),
+      );
+      let ?serverInfo = serverInfoHandler.get() else return routeContext.buildResponse(
+        #badRequest,
+        #error(#message("Server not initialized")),
+      );
+
+      let handle = Text.trimEnd(handleParam, #text("." # serverInfo.hostname));
+
+      // Resolve handle to DID using AccountHandler
+      let account = switch (accountHandler.getByHandle(handle)) {
+        case (#ok(account)) account;
+        case (#err(_)) return routeContext.buildResponse(
+          #notFound,
+          #error(#message("Handle not found: " # handleParam)),
+        );
+      };
+
+      let response : ResolveHandle.Response = {
+        did = account.id;
+      };
+
+      let responseJson = ResolveHandle.toJson(response);
       routeContext.buildResponse(
         #ok,
         #json(responseJson),
