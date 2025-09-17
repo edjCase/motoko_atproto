@@ -14,36 +14,27 @@ module {
 
   // Generate the AT Protocol DID Document
   public func generateDIDDocument(
-    plcDid : PlcDID.DID,
-    webDid : DID.Web.DID,
+    did : DID.DID,
+    alsoKnownAs : [Text],
     verificationPublicKey : DID.Key.DID,
   ) : DIDDocument.DIDDocument {
-
-    let webDidText : Text = DID.Web.toText(webDid);
+    let keyId = DID.toText(did) # "#atproto"; // TODO configurable keys
     {
-      id = #web(webDid);
+      id = did;
       context = [
         "https://www.w3.org/ns/did/v1",
+        "https://w3id.org/security/multikey/v1",
         "https://w3id.org/security/suites/secp256k1-2019/v1",
       ];
-      alsoKnownAs = [
-        AtUri.toText({
-          repoId = plcDid;
-          collectionAndRecord = null;
-        })
-      ];
+      alsoKnownAs = alsoKnownAs;
       verificationMethod = [{
-        id = webDidText # "#atproto";
+        id = keyId;
         type_ = "Multikey";
-        controller = #web(webDid);
+        controller = did;
         publicKeyMultibase = ?verificationPublicKey;
       }];
-      authentication = [
-        webDidText # "#atproto"
-      ];
-      assertionMethod = [
-        webDidText # "#atproto"
-      ];
+      authentication = [keyId];
+      assertionMethod = [keyId];
     };
   };
 

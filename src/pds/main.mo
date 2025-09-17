@@ -137,7 +137,7 @@ persistent actor {
 
   // Candid API methods
   public func initialize(serverInfo : ServerInfo.ServerInfo) : async Result.Result<(), Text> {
-    if (serverInfoHandler.get() != null) {
+    if (serverInfoHandler.isInitialized()) {
       return #err("Server is already initialized");
     };
 
@@ -150,7 +150,7 @@ persistent actor {
   };
 
   public query func isInitialized() : async Bool {
-    serverInfoHandler.get() != null;
+    serverInfoHandler.isInitialized();
   };
 
   public func buildPlcRequest(request : DIDDirectoryHandler.CreatePlcRequest) : async Result.Result<(Text, Text), Text> {

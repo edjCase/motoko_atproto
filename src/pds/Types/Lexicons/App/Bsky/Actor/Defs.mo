@@ -138,10 +138,9 @@ module {
   };
 
   // Helper function to add basic profile fields that are common to all profile types
-  private func addBasicProfileFields(fields : DynamicArray.DynamicArray<(Text, Json.Json)>, profile : ProfileViewBasic, typeString : Text) : () {
+  private func addBasicProfileFields(fields : DynamicArray.DynamicArray<(Text, Json.Json)>, profile : ProfileViewBasic) : () {
     let labelsJson = Array.map<LabelDefs.Label, Json.Json>(profile.labels, LabelDefs.labelToJson);
 
-    fields.add(("$type", #string(typeString)));
     fields.add(("did", #string(DID.Plc.toText(profile.did))));
     fields.add(("handle", #string(profile.handle)));
     fields.add(("labels", #array(labelsJson)));
@@ -163,9 +162,9 @@ module {
   };
 
   // Helper function to add ProfileView fields (includes basic fields + ProfileView-specific fields)
-  private func addProfileViewFields(fields : DynamicArray.DynamicArray<(Text, Json.Json)>, profile : ProfileView, typeString : Text) : () {
+  private func addProfileViewFields(fields : DynamicArray.DynamicArray<(Text, Json.Json)>, profile : ProfileView) : () {
     // Add basic fields first
-    addBasicProfileFields(fields, profile, typeString);
+    addBasicProfileFields(fields, profile);
 
     // Add ProfileView-specific fields
     switch (profile.description) {
@@ -181,20 +180,20 @@ module {
 
   public func profileViewBasicToJson(profile : ProfileViewBasic) : Json.Json {
     let fields = DynamicArray.DynamicArray<(Text, Json.Json)>(10);
-    addBasicProfileFields(fields, profile, "app.bsky.actor.defs#profileViewBasic");
+    addBasicProfileFields(fields, profile);
     #object_(DynamicArray.toArray(fields));
   };
 
   public func profileViewToJson(profile : ProfileView) : Json.Json {
     let fields = DynamicArray.DynamicArray<(Text, Json.Json)>(12);
-    addProfileViewFields(fields, profile, "app.bsky.actor.defs#profileView");
+    addProfileViewFields(fields, profile);
     #object_(DynamicArray.toArray(fields));
   };
   public func profileViewDetailedToJson(profile : ProfileViewDetailed) : Json.Json {
     let fields = DynamicArray.DynamicArray<(Text, Json.Json)>(15);
 
     // Add ProfileView fields using helper (includes basic + ProfileView fields)
-    addProfileViewFields(fields, profile, "app.bsky.actor.defs#profileViewDetailed");
+    addProfileViewFields(fields, profile);
 
     // Add ProfileViewDetailed-specific fields
     switch (profile.banner) {

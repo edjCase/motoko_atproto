@@ -7,6 +7,8 @@ import Domain "mo:url-kit@3/Domain";
 import DID "mo:did@3";
 import JsonDagCborMapper "./JsonDagCborMapper";
 import DIDDocument "./Types/DIDDocument";
+import ServerInfo "./Types/ServerInfo";
+import AtUri "./Types/AtUri";
 
 module {
 
@@ -16,23 +18,20 @@ module {
   ) = this {
 
     public func getDidDocument<system>(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
-      let ?serverInfo = serverInfoHandler.get() else return routeContext.buildResponse(#internalServerError, #text("Server not initialized"));
+      let serverInfo = serverInfoHandler.get();
       let publicKey : DID.Key.DID = switch (await* keyHandler.getPublicKey(#verification)) {
         case (#ok(did)) did;
         case (#err(e)) return routeContext.buildResponse(#internalServerError, #error(#message("Failed to get verification public key: " # e)));
       };
-      let webDid : DID.Web.DID = {
-        hostname = serverInfo.hostname;
-        path = [];
-        port = null;
-      };
-      let didDoc = DIDModule.generateDIDDocument(serverInfo.plcDid, webDid, publicKey);
+      let webDid = ServerInfo.buildWebDID(serverInfo);
+      let alsoKnownAs = [AtUri.toText({ authority = #plc(serverInfo.plcDid); collection = null })];
+      let didDoc = DIDModule.generateDIDDocument(#web(webDid), alsoKnownAs, publicKey);
       let didDocJson = DIDDocument.toJson(didDoc);
       routeContext.buildResponse(#ok, #json(didDocJson));
     };
 
     public func getIcDomains<system>(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
-      let ?serverInfo = serverInfoHandler.get() else return routeContext.buildResponse(#internalServerError, #text("Server not initialized"));
+      let serverInfo = serverInfoHandler.get();
       routeContext.buildResponse(#ok, #text(serverInfo.hostname));
     };
   };

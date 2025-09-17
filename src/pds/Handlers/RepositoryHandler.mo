@@ -105,7 +105,7 @@ module {
 
       let collections = mstHandler.getAllCollections();
 
-      let ?serverInfo = serverInfoHandler.get() else return #err("Server not initialized");
+      let serverInfo = serverInfoHandler.get();
 
       let handle = serverInfo.hostname;
 
@@ -113,13 +113,8 @@ module {
         case (#ok(did)) did;
         case (#err(e)) return #err("Failed to get verification public key: " # e);
       };
-      let webDid : DID.Web.DID = {
-        hostname = serverInfo.hostname;
-        path = [];
-        port = null;
-      };
-
-      let didDoc = DIDModule.generateDIDDocument(request.repo, webDid, verificationKey);
+      let alsoKnownAs = [AtUri.toText({ authority = #plc(serverInfo.plcDid); collection = null })];
+      let didDoc = DIDModule.generateDIDDocument(#plc(request.repo), alsoKnownAs, verificationKey);
 
       let handleIsCorrect = true; // TODO?
 
@@ -214,8 +209,11 @@ module {
 
       // Create record path
       let path = AtUri.toText({
-        repoId = request.repo;
-        collectionAndRecord = ?(request.collection, ?rKey);
+        authority = #plc(request.repo);
+        collection = ?{
+          id = request.collection;
+          recordKey = ?rKey;
+        };
       });
       let pathKey = MST.pathToKey(path);
 
@@ -282,8 +280,11 @@ module {
           rev = newRev;
         };
         uri = {
-          repoId = request.repo;
-          collectionAndRecord = ?(request.collection, ?rKey);
+          authority = #plc(request.repo);
+          collection = ?{
+            id = request.collection;
+            recordKey = ?rKey;
+          };
         };
         validationStatus = validationStatus;
       });
@@ -308,8 +309,11 @@ module {
       #ok({
         cid = ?recordCID;
         uri = {
-          repoId = request.repo;
-          collectionAndRecord = ?(request.collection, ?request.rkey);
+          authority = #plc(request.repo);
+          collection = ?{
+            id = request.collection;
+            recordKey = ?request.rkey;
+          };
         };
         value = value;
       });
@@ -418,8 +422,11 @@ module {
           rev = newRev;
         };
         uri = {
-          repoId = request.repo;
-          collectionAndRecord = ?(request.collection, ?request.rkey);
+          authority = #plc(request.repo);
+          collection = ?{
+            id = request.collection;
+            recordKey = ?request.rkey;
+          };
         };
         validationStatus = ?validationStatus;
       });
@@ -583,8 +590,11 @@ module {
 
             #create({
               uri = {
-                repoId = request.repo;
-                collectionAndRecord = ?(createOp.collection, ?rKey);
+                authority = #plc(request.repo);
+                collection = ?{
+                  id = createOp.collection;
+                  recordKey = ?rKey;
+                };
               };
               cid = recordCID;
               validationStatus = validationStatus;
@@ -623,8 +633,11 @@ module {
 
             #update({
               uri = {
-                repoId = request.repo;
-                collectionAndRecord = ?(updateOp.collection, ?updateOp.rkey);
+                authority = #plc(request.repo);
+                collection = ?{
+                  id = updateOp.collection;
+                  recordKey = ?updateOp.rkey;
+                };
               };
               cid = recordCID;
               validationStatus = validationStatus;
@@ -716,8 +729,11 @@ module {
           let ?value : ?DagCbor.Value = PureMap.get(repo.records, compareCID, cid) else Runtime.trap("Record not found: " # CID.toText(cid));
           {
             uri = {
-              repoId = request.repo;
-              collectionAndRecord = ?(request.collection, ?key);
+              authority = #plc(request.repo);
+              collection = ?{
+                id = request.collection;
+                recordKey = ?key;
+              };
             };
             cid = cid;
             value = value;

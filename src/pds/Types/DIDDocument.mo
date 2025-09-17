@@ -2,6 +2,7 @@ import DID "mo:did@3";
 import Json "mo:json@1";
 import Array "mo:core@1/Array";
 import Text "mo:core@1/Text";
+import AtUri "./AtUri";
 
 module {
 
@@ -12,6 +13,11 @@ module {
     verificationMethod : [VerificationMethod];
     authentication : [Text];
     assertionMethod : [Text];
+  };
+
+  public type KeyReference = {
+    keyId : Text;
+    actorId : DID.Plc.DID;
   };
 
   public type VerificationMethod = {
@@ -34,7 +40,7 @@ module {
           "publicKeyMultibase",
           switch (vm.publicKeyMultibase) {
             case (null) #null_;
-            case (?publicKey) #string(DID.Key.toText(publicKey, #base58btc));
+            case (?publicKey) #string(DID.Key.toTextRaw(publicKey, #base58btc));
           },
         ),
       ]),

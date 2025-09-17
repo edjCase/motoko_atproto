@@ -35,6 +35,8 @@ import GetServices "./Types/Lexicons/App/Bsky/Labeler/GetServices";
 import ActorDefs "./Types/Lexicons/App/Bsky/Actor/Defs";
 import ResolveHandle "./Types/Lexicons/Com/Atproto/Identity/ResolveHandle";
 import DynamicArray "mo:xtended-collections@0/DynamicArray";
+import Runtime "mo:core@1/Runtime";
+import ServerInfo "Types/ServerInfo";
 
 module {
 
@@ -121,10 +123,7 @@ module {
     };
 
     func describeServer(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
-      let ?serverInfo = serverInfoHandler.get() else return routeContext.buildResponse(
-        #badRequest,
-        #error(#message("Server not initialized")),
-      );
+      let serverInfo = serverInfoHandler.get();
 
       let linksCandid = [
         // ("privacyPolicy", #Text(serverInfo.privacyPolicy)), // TODO?
@@ -540,21 +539,24 @@ module {
     };
 
     func getProfileInternal(idOrHandle : Text) : ?ActorDefs.ProfileViewDetailed {
-
+      let serverInfo = serverInfoHandler.get();
       let account = switch (DID.Plc.fromText(idOrHandle)) {
         case (#ok(did)) switch (accountHandler.get(did)) {
-          case (#ok(account)) account;
-          case (#err(_)) return null;
+          case (?account) account;
+          case (null) return null;
         };
-        case (#err(_)) switch (accountHandler.getByHandle(idOrHandle)) {
-          case (#ok(account)) account;
-          case (#err(_)) return null;
+        case (#err(_)) {
+          let ?name = ServerInfo.getAccountNameFromHandle(serverInfo, idOrHandle) else return null;
+          switch (accountHandler.getByName(name)) {
+            case (?account) account;
+            case (null) return null;
+          };
         };
       };
 
       ?{
         did = account.id;
-        handle = account.handle;
+        handle = ServerInfo.buildHandleFromAccountName(serverInfo, account.name);
         avatar = null; // TODO: Add avatar support
         displayName = null; // TODO: Add displayName support
         banner = null; // TODO
@@ -744,17 +746,17 @@ module {
         #badRequest,
         #error(#message("Missing required query parameter: handle")),
       );
-      let ?serverInfo = serverInfoHandler.get() else return routeContext.buildResponse(
-        #badRequest,
-        #error(#message("Server not initialized")),
+      let serverInfo = serverInfoHandler.get();
+
+      let ?name = ServerInfo.getAccountNameFromHandle(serverInfo, handleParam) else return routeContext.buildResponse(
+        #notFound,
+        #error(#message("Handle not found: " # handleParam)),
       );
 
-      let handle = Text.trimEnd(handleParam, #text("." # serverInfo.hostname));
-
       // Resolve handle to DID using AccountHandler
-      let account = switch (accountHandler.getByHandle(handle)) {
-        case (#ok(account)) account;
-        case (#err(_)) return routeContext.buildResponse(
+      let account = switch (accountHandler.getByName(name)) {
+        case (?account) account;
+        case (null) return routeContext.buildResponse(
           #notFound,
           #error(#message("Handle not found: " # handleParam)),
         );

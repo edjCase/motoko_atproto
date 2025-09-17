@@ -25,6 +25,8 @@ import Runtime "mo:core@1/Runtime";
 import Debug "mo:core@1/Debug";
 import Iter "mo:core@1/Iter";
 import ECDSA "mo:ecdsa@7";
+import AtUri "../Types/AtUri";
+import ServerInfo "../Types/ServerInfo";
 
 module {
 
@@ -51,7 +53,7 @@ module {
   };
 
   public type AccountData = {
-    handle : Text;
+    name : Text;
     email : ?Text;
     passwordHash : Blob;
     salt : Blob;
@@ -78,25 +80,42 @@ module {
   ) {
     var sessions = stableData.sessions;
     var accounts = stableData.accounts;
-    var handleMap = PureMap.entries(accounts)
+    var nameMap = PureMap.entries(accounts)
     |> Iter.map<(DID.Plc.DID, AccountData), (Text, DID.Plc.DID)>(
       _,
       func((did, account) : (DID.Plc.DID, AccountData)) : (Text, DID.Plc.DID) {
-        (account.handle, did);
+        (account.name, did);
       },
     )
-    |> PureMap.fromIter(_, Text.compare); // TODO case sensitivity? TODO lazy load?
+    |> PureMap.fromIter(_, TextX.compareIgnoreCase); // TODO lazy load?
 
-    public func get(id : DID.Plc.DID) : Result.Result<Account, Text> {
-      let ?account = PureMap.get(accounts, DIDModule.comparePlcDID, id) else return #err("Account not found with id: " # DID.Plc.toText(id));
-      #ok({
+    var emailMap = PureMap.entries(accounts)
+    |> Iter.filterMap<(DID.Plc.DID, AccountData), (Text, DID.Plc.DID)>(
+      _,
+      func((did, account) : (DID.Plc.DID, AccountData)) : ?(Text, DID.Plc.DID) {
+        switch (account.email) {
+          case (?email) ?(email, did);
+          case (null) null;
+        };
+      },
+    )
+    |> PureMap.fromIter(_, TextX.compareIgnoreCase); // TODO case sensitivity? TODO lazy load?
+
+    public func get(id : DID.Plc.DID) : ?Account {
+      let ?account = PureMap.get(accounts, DIDModule.comparePlcDID, id) else return null;
+      ?{
         account with
         id = id;
-      });
+      };
     };
 
-    public func getByHandle(handle : Text) : Result.Result<Account, Text> {
-      let ?accountId = PureMap.get(handleMap, Text.compare, handle) else return #err("Account not found with handle: " # handle);
+    public func getByName(name : Text) : ?Account {
+      let ?accountId = PureMap.get(nameMap, TextX.compareIgnoreCase, name) else return null;
+      get(accountId);
+    };
+
+    public func getByEmail(email : Text) : ?Account {
+      let ?accountId = PureMap.get(emailMap, TextX.compareIgnoreCase, email) else return null;
       get(accountId);
     };
 
@@ -106,6 +125,9 @@ module {
 
       // Validate request
       if (TextX.isEmptyOrWhitespace(request.handle)) return #err("Handle cannot be empty");
+
+      let serverInfo = serverInfoHandler.get();
+      let ?name = ServerInfo.getAccountNameFromHandle(serverInfo, request.handle) else return #err("Handle must end with '.{server hostname}'");
 
       if (request.inviteCode != null) {
         // TODO
@@ -138,11 +160,9 @@ module {
       let did : DID.Plc.DID = switch (request.did) {
         case (?did) did;
         case (null) {
-          let ?serverInfo = serverInfoHandler.get() else Runtime.trap("Server is not intiialized");
-          let handle = request.handle # "." # serverInfo.hostname;
           let createRequest : DIDDirectoryHandler.CreatePlcRequest = {
             // TODO?
-            alsoKnownAs = ["at://" # handle];
+            alsoKnownAs = ["at://" # request.handle];
             // TODO?
             services = [{
               id = "atproto_pds";
@@ -160,6 +180,19 @@ module {
       // Check if account already exists
       let null = PureMap.get<DID.Plc.DID, AccountData>(accounts, DIDModule.comparePlcDID, did) else return #err("Account already exists");
 
+      let (newNameMap, nameIsUnique) = PureMap.insert(nameMap, TextX.compareIgnoreCase, name, did);
+      if (not nameIsUnique) {
+        return #err("Handle is already taken");
+      };
+
+      let (newEmailMap, emailIsUnique) = switch (request.email) {
+        case (?email) PureMap.insert(emailMap, TextX.compareIgnoreCase, email, did);
+        case (null) (emailMap, true);
+      };
+      if (not emailIsUnique) {
+        return #err("Email is already in use");
+      };
+
       let salt = await Random.blob();
 
       let passwordHash = PBKDF2.pbkdf2_sha512(
@@ -170,22 +203,22 @@ module {
       );
 
       // Create new account
-      let newAccount : AccountData = {
-        handle = request.handle;
+      let newAccount : Account = {
+        id = did;
+        name = name;
         email = request.email;
         passwordHash = Blob.fromArray(passwordHash);
         salt = salt;
       };
 
       // Store the account in stable data
-      let updatedAccounts = PureMap.add(accounts, DIDModule.comparePlcDID, did, newAccount);
+      accounts := PureMap.add(accounts, DIDModule.comparePlcDID, did, newAccount); // TODO how to best handle async failure
 
-      accounts := updatedAccounts; // TODO how to best handle async failure
+      // Update lookup maps
+      nameMap := newNameMap;
+      emailMap := newEmailMap;
 
-      await* createSessionInternal(
-        did,
-        newAccount,
-      );
+      await* createSessionInternal(newAccount);
     };
 
     public func createSession(
@@ -201,7 +234,7 @@ module {
       // };
 
       // Try parse the identifier as a DID, then email/handle
-      let ?(did, account) = getAccountFromIdentifier(request.identifier) else return #err("Account not found for identifier: " # request.identifier);
+      let ?account = getAccountFromIdentifier(request.identifier) else return #err("Account not found for identifier: " # request.identifier);
 
       // Validate password
       let passwordHash = Blob.fromArray(
@@ -217,7 +250,7 @@ module {
       };
 
       Result.chain<CreateSessionResponse, CreateSession.Response, Text>(
-        await* createSessionInternal(did, account),
+        await* createSessionInternal(account),
         func(res : CreateSessionResponse) : Result.Result<CreateSession.Response, Text> {
           #ok({
             res with
@@ -243,21 +276,18 @@ module {
       ) else return #err("Account not found");
 
       // Get server info for handle formatting
-      let ?serverInfo = serverInfoHandler.get() else return #err("Server not initialized");
+      let serverInfo = serverInfoHandler.get();
 
-      let serverId = {
-        hostname = serverInfo.hostname;
-        path = [];
-        port = null;
-      };
       let publicKey = switch (await* keyHandler.getPublicKey(#verification)) {
         case (#ok(pubKey)) pubKey;
         case (#err(err)) return #err("Failed to get verification public key: " # err);
       };
-      let didDoc = DIDModule.generateDIDDocument(actorId, serverId, publicKey);
+      let handle = ServerInfo.buildHandleFromAccountName(serverInfo, account.name);
+      let alsoKnownAs = [AtUri.toText({ authority = #handle(handle); collection = null })];
+      let didDoc = DIDModule.generateDIDDocument(#plc(actorId), alsoKnownAs, publicKey);
 
       #ok({
-        handle = account.handle # "." # serverInfo.hostname;
+        handle = handle;
         did = DID.Plc.toText(actorId);
         email = account.email;
         emailConfirmed = null; // TODO: Implement email confirmation
@@ -275,16 +305,9 @@ module {
       };
     };
 
-    private func createSessionInternal(
-      actorId : DID.Plc.DID,
-      account : AccountData,
-    ) : async* Result.Result<CreateSessionResponse, Text> {
-      let ?serverInfo = serverInfoHandler.get() else return #err("Server not initialized");
-      let serverId : DID.Web.DID = {
-        hostname = serverInfo.hostname;
-        path = [];
-        port = null;
-      };
+    private func createSessionInternal(account : Account) : async* Result.Result<CreateSessionResponse, Text> {
+      let serverInfo = serverInfoHandler.get();
+      let serverId : DID.Web.DID = ServerInfo.buildWebDID(serverInfo);
 
       // Generate session identifiers
       let randomBytes = await Random.blob();
@@ -294,11 +317,11 @@ module {
       let refreshTokenId = BaseX.toBase64(bytesHalf2, #url({ includePadding = false }));
 
       // TODO run in parallel
-      let refreshTokenInfo = switch (await* jwtHandler.generateRefreshToken(actorId, serverId)) {
+      let refreshTokenInfo = switch (await* jwtHandler.generateRefreshToken(account.id, serverId)) {
         case (#ok(info)) info;
         case (#err(err)) return #err("Failed to generate refresh token: " # err);
       };
-      let accessTokenInfo = switch (await* jwtHandler.generateAccessToken(actorId, serverId, refreshTokenId)) {
+      let accessTokenInfo = switch (await* jwtHandler.generateAccessToken(account.id, serverId, refreshTokenId)) {
         case (#ok(info)) info;
         case (#err(err)) return #err("Failed to generate access token: " # err);
       };
@@ -308,7 +331,7 @@ module {
       let now = Time.now();
       // Create new session
       let newSession : Session = {
-        did = actorId;
+        did = account.id;
         createdAt = now;
         lastActiveAt = now;
         refreshTokenHash = refreshTokenHash;
@@ -325,7 +348,9 @@ module {
       };
 
       // Get DID document
-      let didDoc = DIDModule.generateDIDDocument(actorId, serverId, publicKey);
+      let handle = ServerInfo.buildHandleFromAccountName(serverInfo, account.name);
+      let alsoKnownAs = [AtUri.toText({ authority = #handle(handle); collection = null })];
+      let didDoc = DIDModule.generateDIDDocument(#plc(account.id), alsoKnownAs, publicKey);
 
       // Store the session in stable data (using sessionId as key, not token)
       sessions := PureMap.add(sessions, Text.compare, sessionId, newSession);
@@ -334,13 +359,13 @@ module {
       #ok({
         accessJwt = accessTokenInfo.token;
         refreshJwt = refreshTokenInfo.token;
-        handle = account.handle # "." # serverInfo.hostname;
-        did = actorId;
+        handle = handle;
+        did = account.id;
         didDoc = ?didDoc;
       });
     };
 
-    func getAccountFromIdentifier(identifier : Text) : ?(DID.Plc.DID, AccountData) {
+    func getAccountFromIdentifier(identifier : Text) : ?Account {
       switch (DID.Plc.fromText(identifier)) {
         case (#ok(did)) {
           let ?account = PureMap.get(
@@ -348,33 +373,17 @@ module {
             DIDModule.comparePlcDID,
             did,
           ) else return null;
-          ?(did, account);
+          ?{
+            account with
+            id = did;
+          };
         };
         case (#err(_)) {
-          label f for ((did, acc) in PureMap.entries(accounts)) {
-            if (TextX.equalIgnoreCase(acc.handle, identifier)) {
-              return ?(did, acc);
-            };
-            switch (acc.email) {
-              case (null) ();
-              case (?email) {
-                if (TextX.equalIgnoreCase(email, identifier)) {
-                  return ?(did, acc);
-                };
-              };
-            };
-            let ?serverInfo = serverInfoHandler.get() else Runtime.trap("Server not intialized");
-            let domainText = "." # serverInfo.hostname;
-            switch (Text.stripEnd(identifier, #text(domainText))) {
-              case (null) ();
-              case (?strippedId) {
-                if (acc.handle == strippedId) {
-                  return ?(did, acc);
-                };
-              };
-            };
+          let serverInfo = serverInfoHandler.get();
+          switch (ServerInfo.getAccountNameFromHandle(serverInfo, identifier)) {
+            case (?name) getByName(name);
+            case (null) getByEmail(identifier); // Fallback to email
           };
-          null;
         };
       };
     };
