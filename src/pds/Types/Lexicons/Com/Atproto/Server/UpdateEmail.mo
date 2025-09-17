@@ -1,5 +1,5 @@
 import Json "mo:json@1";
-import Result "mo:base/Result";
+import Result "mo:core@1/Result";
 
 module {
   // com.atproto.server.updateEmail

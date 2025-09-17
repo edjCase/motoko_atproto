@@ -1,18 +1,17 @@
 import PureMap "mo:core@1/pure/Map";
-import Array "mo:base/Array";
+import Array "mo:core@1/Array";
 import DID "mo:did@3";
 import Result "mo:core@1/Result";
 import CreateSession "../Types/Lexicons/Com/Atproto/Server/CreateSession";
 import GetSession "../Types/Lexicons/Com/Atproto/Server/GetSession";
 import CreateAccount "../Types/Lexicons/Com/Atproto/Server/CreateAccount";
-import JWT "mo:jwt@2";
 import PBKDF2 "mo:pbkdf2-sha512@1";
 import DIDModule "../DID";
 import Time "mo:core@1/Time";
 import Random "mo:core@1/Random";
 import SHA256 "mo:sha2/Sha256";
 import TextX "mo:xtended-text@2/TextX";
-import Blob "mo:base/Blob";
+import Blob "mo:core@1/Blob";
 import DIDDocument "../Types/DIDDocument";
 import IterX "mo:xtended-iter@1/IterX";
 import BaseX "mo:base-x-encoder@2";
@@ -20,12 +19,12 @@ import KeyHandler "./KeyHandler";
 import ServerInfoHandler "./ServerInfoHandler";
 import Text "mo:core@1/Text";
 import DIDDirectoryHandler "./DIDDirectoryHandler";
+import JwtHandler "./JwtHandler";
 import Domain "mo:url-kit@3/Domain";
 import Runtime "mo:core@1/Runtime";
-import Json "mo:json@1";
-import ECDSA "mo:ecdsa@7";
 import Debug "mo:core@1/Debug";
 import Iter "mo:core@1/Iter";
+import ECDSA "mo:ecdsa@7";
 
 module {
 
@@ -75,6 +74,7 @@ module {
     keyHandler : KeyHandler.Handler,
     serverInfoHandler : ServerInfoHandler.Handler,
     didDirectoryHandler : DIDDirectoryHandler.Handler,
+    jwtHandler : JwtHandler.Handler,
   ) {
     var sessions = stableData.sessions;
     var accounts = stableData.accounts;
@@ -232,80 +232,33 @@ module {
     };
 
     public func getSession(
-      accessToken : Text
+      actorId : DID.Plc.DID
     ) : async* Result.Result<GetSession.Response, Text> {
-      // Parse and validate the JWT token
-      let token = switch (JWT.parse(accessToken)) {
-        case (#ok(token)) token;
-        case (#err(e)) return #err("Invalid access token format: " # debug_show (e));
-      };
-
-      let verificationPublicKey = switch (await* keyHandler.getPublicKey(#verification)) {
-        case (#ok(pubKey)) pubKey;
-        case (#err(err)) return #err("Failed to get verification public key: " # err);
-      };
-
-      let jwtKey = switch (verificationPublicKey.keyType) {
-        case (#secp256k1) {
-          switch (ECDSA.publicKeyFromBytes(verificationPublicKey.publicKey.vals(), #raw({ curve = ECDSA.secp256k1Curve() }))) {
-            case (#ok(key)) #ecdsa(key);
-            case (#err(e)) return #err("Failed to parse secp256k1 key bytes: " # e);
-          };
-        };
-        case (#ed25519) Debug.todo();
-        case (#p256) Debug.todo();
-      };
-
-      // Verify the token signature
-      let validationOptions : JWT.ValidationOptions = {
-        expiration = true; // Check token expiration
-        notBefore = true; // Check token validity start time
-        issuer = #skip; // Skip issuer validation
-        audience = #skip; // Skip audience validation
-        signature = #key(jwtKey); // Validate signature
-      };
-
-      switch (JWT.validate(token, validationOptions)) {
-        case (#ok) ();
-        case (#err(e)) return #err("Access token is invalid: " # e);
-      };
-
-      // Extract DID from token payload
-      let ?("sub", #string(didText)) = Array.find<(Text, Json.Json)>(token.payload, func((key, _)) = key == "sub") else return #err("Missing 'sub' claim in token");
-
-      let did = switch (DID.Plc.fromText(didText)) {
-        case (#ok(did)) did;
-        case (#err(e)) return #err("Invalid DID in token: " # e);
-      };
 
       // Check if account exists
-      let ?account = PureMap.get(accounts, DIDModule.comparePlcDID, did) else return #err("Account not found");
-
-      // Check token expiration
-      let expTime = switch (JWT.getPayloadValue(token, "exp")) {
-        case (?#number(#int(expTime))) expTime;
-        case (exp) return #err("Invalid 'exp' claim in token: " # debug_show (exp));
-      };
-
-      let currentTime = Time.now() / 1_000_000_000; // Convert to seconds
-
-      if (currentTime >= expTime) {
-        return #err("Access token has expired");
-      };
+      let ?account = PureMap.get(
+        accounts,
+        DIDModule.comparePlcDID,
+        actorId,
+      ) else return #err("Account not found");
 
       // Get server info for handle formatting
       let ?serverInfo = serverInfoHandler.get() else return #err("Server not initialized");
 
-      let webDID = {
+      let serverId = {
         hostname = serverInfo.hostname;
         path = [];
         port = null;
       };
-      let didDoc = DIDModule.generateDIDDocument(did, webDID, verificationPublicKey);
+      let publicKey = switch (await* keyHandler.getPublicKey(#verification)) {
+        case (#ok(pubKey)) pubKey;
+        case (#err(err)) return #err("Failed to get verification public key: " # err);
+      };
+      let didDoc = DIDModule.generateDIDDocument(actorId, serverId, publicKey);
 
       #ok({
         handle = account.handle # "." # serverInfo.hostname;
-        did = DID.Plc.toText(did);
+        did = DID.Plc.toText(actorId);
         email = account.email;
         emailConfirmed = null; // TODO: Implement email confirmation
         emailAuthFactor = null; // TODO: Implement email authentication factor
@@ -323,15 +276,16 @@ module {
     };
 
     private func createSessionInternal(
-      did : DID.Plc.DID,
+      actorId : DID.Plc.DID,
       account : AccountData,
     ) : async* Result.Result<CreateSessionResponse, Text> {
       let ?serverInfo = serverInfoHandler.get() else return #err("Server not initialized");
-      let webDID : DID.Web.DID = {
+      let serverId : DID.Web.DID = {
         hostname = serverInfo.hostname;
         path = [];
         port = null;
       };
+
       // Generate session identifiers
       let randomBytes = await Random.blob();
       let (bytesHalf1, bytesHalf2) = IterX.splitAt(randomBytes.vals(), randomBytes.size() / 2);
@@ -339,105 +293,49 @@ module {
       let sessionId = "sess_" # BaseX.toBase64(bytesHalf1, #url({ includePadding = false }));
       let refreshTokenId = BaseX.toBase64(bytesHalf2, #url({ includePadding = false }));
 
+      // TODO run in parallel
+      let refreshTokenInfo = switch (await* jwtHandler.generateRefreshToken(actorId, serverId)) {
+        case (#ok(info)) info;
+        case (#err(err)) return #err("Failed to generate refresh token: " # err);
+      };
+      let accessTokenInfo = switch (await* jwtHandler.generateAccessToken(actorId, serverId, refreshTokenId)) {
+        case (#ok(info)) info;
+        case (#err(err)) return #err("Failed to generate access token: " # err);
+      };
+
+      let refreshTokenHash = SHA256.fromBlob(#sha256, Text.encodeUtf8(refreshTokenInfo.token));
+
       let now = Time.now();
-      let issueTime = now / 1_000_000_000; // Convert to seconds from nanoseconds
-      let accessExpiresAt = now + (60 * 60); // 1 hour in seconds
-      let refreshExpiresAt = now + (90 * 24 * 60 * 60); // 90 days in seconds
-
-      // Generate access JWT (short-lived, 1 hour)
-      let accessPayload : JWT.UnsignedToken = {
-        header = [
-          ("typ", #string("at+jwt")),
-          ("alg", #string("ES256K")),
-        ];
-        payload = [
-          ("scope", #string("com.atproto.refresh")),
-          ("sub", #string(DID.Plc.toText(did))),
-          ("aud", #string(DID.Web.toText(webDID))),
-          ("iat", #number(#int(issueTime))),
-          ("exp", #number(#int(accessExpiresAt))),
-        ];
-      };
-      let accessTokenMessage = JWT.toBlobUnsigned(accessPayload);
-      let accessTokenMessageHash = SHA256.fromBlob(#sha256, accessTokenMessage);
-      let accessTokenSignature = switch (await* keyHandler.sign(#verification, accessTokenMessageHash)) {
-        case (#ok(sig)) sig;
-        case (#err(err)) return #err("Failed to sign access token: " # err);
-      };
-
-      let accessJwt = JWT.toText({
-        accessPayload with
-        signature = {
-          algorithm = "ES256K";
-          value = accessTokenSignature;
-          message = accessTokenMessage;
-        };
-      });
-
-      // Generate refresh JWT (long-lived)
-      let refreshPayload : JWT.UnsignedToken = {
-        header = [
-          ("typ", #string("refresh+jwt")),
-          ("alg", #string("ES256K")),
-        ];
-        payload = [
-          ("scope", #string("com.atproto.refresh")),
-          ("sub", #string(DID.Plc.toText(did))),
-          ("aud", #string(DID.Web.toText(webDID))),
-          ("jti", #string(refreshTokenId)),
-          ("iat", #number(#int(issueTime))),
-          ("exp", #number(#int(refreshExpiresAt))),
-        ];
-      };
-      let refreshTokenMessage = JWT.toBlobUnsigned(refreshPayload);
-      let refreshTokenMessageHash = SHA256.fromBlob(#sha256, refreshTokenMessage);
-      let refreshTokenSignature = switch (
-        await* keyHandler.sign(#rotation, refreshTokenMessageHash)
-      ) {
-        case (#ok(sig)) sig;
-        case (#err(err)) return #err("Failed to sign refresh token: " # err);
-      };
-
-      let refreshJwt = JWT.toText({
-        refreshPayload with
-        signature = {
-          algorithm = "ES256K";
-          value = refreshTokenSignature;
-          message = refreshTokenMessage;
-        };
-      });
-
-      let refreshTokenHash = SHA256.fromBlob(#sha256, Text.encodeUtf8(refreshJwt));
       // Create new session
       let newSession : Session = {
-        did = did;
+        did = actorId;
         createdAt = now;
         lastActiveAt = now;
         refreshTokenHash = refreshTokenHash;
         refreshTokenId = refreshTokenId;
-        refreshExpiresAt = refreshExpiresAt;
+        refreshExpiresAt = refreshTokenInfo.expiresAt;
         refreshCount = 0;
         lastRefreshAt = null;
         revoked = null;
       };
 
-      let verificationPublicKey = switch (await* keyHandler.getPublicKey(#verification)) {
+      let publicKey = switch (await* keyHandler.getPublicKey(#verification)) {
         case (#ok(pubKey)) pubKey;
         case (#err(err)) return #err("Failed to get verification public key: " # err);
       };
 
       // Get DID document
-      let didDoc = DIDModule.generateDIDDocument(did, webDID, verificationPublicKey);
+      let didDoc = DIDModule.generateDIDDocument(actorId, serverId, publicKey);
 
       // Store the session in stable data (using sessionId as key, not token)
       sessions := PureMap.add(sessions, Text.compare, sessionId, newSession);
 
       // Return response
       #ok({
-        accessJwt = accessJwt;
-        refreshJwt = refreshJwt;
+        accessJwt = accessTokenInfo.token;
+        refreshJwt = refreshTokenInfo.token;
         handle = account.handle # "." # serverInfo.hostname;
-        did = did;
+        did = actorId;
         didDoc = ?didDoc;
       });
     };

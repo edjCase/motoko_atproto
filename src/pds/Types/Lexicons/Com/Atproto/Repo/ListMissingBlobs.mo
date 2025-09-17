@@ -2,8 +2,8 @@ import CID "mo:cid@1";
 import AtUri "../../../../AtUri";
 import Json "mo:json@1";
 import Result "mo:core@1/Result";
-import Array "mo:base/Array";
-import Int "mo:base/Int";
+import Array "mo:core@1/Array";
+import Int "mo:core@1/Int";
 
 module {
 

@@ -17,6 +17,8 @@ module {
 
   public class Handler(stableData : StableData) = this {
     var verificationDerivationPath : [Blob] = stableData.verificationDerivationPath;
+    var verificationPublicKeyCache : ?DID.Key.DID = null; // Cache the verification key to avoid repeated calls to ic.ecdsa_public_key
+    var rotationPublicKeyCache : ?DID.Key.DID = null; // Cache the rotation key to avoid repeated calls to ic.ecdsa_public_key
 
     public func sign(key : KeyKind, messageHash : Blob) : async* Result.Result<Blob, Text> {
       let derivationPath = getDerivationPathForKey(key);
@@ -40,6 +42,15 @@ module {
     };
 
     public func getPublicKey(key : KeyKind) : async* Result.Result<DID.Key.DID, Text> {
+      // TODO validate that caching is ok
+      let cachedKey = switch (key) {
+        case (#rotation) rotationPublicKeyCache;
+        case (#verification) verificationPublicKeyCache;
+      };
+      switch (cachedKey) {
+        case (?key) return #ok(key);
+        case (null) ();
+      };
       let derivationPath = getDerivationPathForKey(key);
       try {
         let { public_key } = await ic.ecdsa_public_key({
@@ -55,10 +66,15 @@ module {
             name = "test_key_1"; // TODO based on environment
           };
         });
-        #ok({
+        let didKey = {
           keyType = #secp256k1;
           publicKey = public_key;
-        });
+        };
+        switch (key) {
+          case (#rotation) rotationPublicKeyCache := ?didKey;
+          case (#verification) verificationPublicKeyCache := ?didKey;
+        };
+        #ok(didKey);
       } catch (e) {
         #err("Failed to get public key: " # Error.message(e));
       };

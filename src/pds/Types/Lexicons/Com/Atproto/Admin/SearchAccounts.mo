@@ -1,6 +1,6 @@
 import Json "mo:json@1";
 import Result "mo:core@1/Result";
-import Array "mo:base/Array";
+import Array "mo:core@1/Array";
 import AdminDefs "./Defs";
 
 module {

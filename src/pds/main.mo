@@ -1,11 +1,10 @@
-import Text "mo:base/Text";
-import Result "mo:base/Result";
+import Text "mo:core@1/Text";
+import Result "mo:core@1/Result";
 import XrpcRouter "./XrpcRouter";
 import WellKnownRouter "./WellKnownRouter";
 import RouterMiddleware "mo:liminal@1/Middleware/Router";
 import CompressionMiddleware "mo:liminal@1/Middleware/Compression";
 import CORSMiddleware "mo:liminal@1/Middleware/CORS";
-import JWTMiddleware "mo:liminal@1/Middleware/JWT";
 import Liminal "mo:liminal@1";
 import Router "mo:liminal@1/Router";
 import RepositoryHandler "Handlers/RepositoryHandler";
@@ -13,8 +12,10 @@ import ServerInfoHandler "Handlers/ServerInfoHandler";
 import KeyHandler "Handlers/KeyHandler";
 import AccountHandler "Handlers/AccountHandler";
 import DIDDirectoryHandler "Handlers/DIDDirectoryHandler";
+import BskyHandler "Handlers/BskyHandler";
+import JwtHandler "Handlers/JwtHandler";
+import AuthMiddleware "Middleware/AuthMiddleware";
 import ServerInfo "Types/ServerInfo";
-import DIDModule "./DID";
 import DID "mo:did@3";
 import TID "mo:tid@1";
 import CID "mo:cid@1";
@@ -22,52 +23,77 @@ import PureMap "mo:core@1/pure/Map";
 import Json "mo:json@1";
 import UploadBlob "Types/Lexicons/Com/Atproto/Repo/UploadBlob";
 import CreateAccount "Types/Lexicons/Com/Atproto/Server/CreateAccount";
-import HttpContext "mo:liminal@1/HttpContext";
-import App "mo:liminal@1/App";
-import Runtime "mo:core@1/Runtime";
-import Migrations "./Migrations";
 
-(with migration = Migrations.hostname)
 persistent actor {
   transient let tidGenerator = TID.Generator();
 
-  stable var repositoryStableData : RepositoryHandler.StableData = {
+  var repositoryStableData : RepositoryHandler.StableData = {
     repositories = PureMap.empty<DID.Plc.DID, RepositoryHandler.RepositoryWithData>();
     blobs = PureMap.empty<CID.CID, RepositoryHandler.BlobWithMetaData>();
   };
-  stable var serverInfoStableData : ServerInfoHandler.StableData = {
+  var serverInfoStableData : ServerInfoHandler.StableData = {
     info = null;
   };
-  stable var keyHandlerStableData : KeyHandler.StableData = {
+  var keyHandlerStableData : KeyHandler.StableData = {
     verificationDerivationPath = ["\00"]; // TODO: configure properly
   };
-  stable var accountStableData : AccountHandler.StableData = {
+  var accountStableData : AccountHandler.StableData = {
     accounts = PureMap.empty<DID.Plc.DID, AccountHandler.AccountData>();
     sessions = PureMap.empty<Text, AccountHandler.Session>();
   };
+  var bskyStableData : BskyHandler.StableData = {
+    preferences = PureMap.empty<DID.Plc.DID, BskyHandler.Preferences>();
+  };
 
+  // Handlers
   transient var keyHandler = KeyHandler.Handler(keyHandlerStableData);
+  transient var jwtHandler = JwtHandler.Handler(keyHandler);
   transient var didDirectoryHandler = DIDDirectoryHandler.Handler(keyHandler);
   transient var serverInfoHandler = ServerInfoHandler.Handler(serverInfoStableData);
-  transient var repositoryHandler = RepositoryHandler.Handler(repositoryStableData, keyHandler, tidGenerator, serverInfoHandler);
-  transient var accountHandler = AccountHandler.Handler(accountStableData, keyHandler, serverInfoHandler, didDirectoryHandler);
-  transient var xrpcRouter = XrpcRouter.Router(repositoryHandler, serverInfoHandler, accountHandler);
-  transient var wellKnownRouter = WellKnownRouter.Router(serverInfoHandler, keyHandler);
+  transient var repositoryHandler = RepositoryHandler.Handler(
+    repositoryStableData,
+    keyHandler,
+    tidGenerator,
+    serverInfoHandler,
+  );
+  transient var accountHandler = AccountHandler.Handler(
+    accountStableData,
+    keyHandler,
+    serverInfoHandler,
+    didDirectoryHandler,
+    jwtHandler,
+  );
+  transient var bskyHandler = BskyHandler.Handler(bskyStableData);
+
+  // Routers
+  transient var xrpcRouter = XrpcRouter.Router(
+    repositoryHandler,
+    serverInfoHandler,
+    accountHandler,
+    bskyHandler,
+  );
+  transient var wellKnownRouter = WellKnownRouter.Router(
+    serverInfoHandler,
+    keyHandler,
+  );
 
   system func preupgrade() {
     keyHandlerStableData := keyHandler.toStableData();
     serverInfoStableData := serverInfoHandler.toStableData();
     repositoryStableData := repositoryHandler.toStableData();
     accountStableData := accountHandler.toStableData();
+    bskyStableData := bskyHandler.toStableData();
   };
 
   system func postupgrade() {
     keyHandler := KeyHandler.Handler(keyHandlerStableData);
+    jwtHandler := JwtHandler.Handler(keyHandler);
     didDirectoryHandler := DIDDirectoryHandler.Handler(keyHandler);
     serverInfoHandler := ServerInfoHandler.Handler(serverInfoStableData);
     repositoryHandler := RepositoryHandler.Handler(repositoryStableData, keyHandler, tidGenerator, serverInfoHandler);
-    accountHandler := AccountHandler.Handler(accountStableData, keyHandler, serverInfoHandler, didDirectoryHandler);
-    xrpcRouter := XrpcRouter.Router(repositoryHandler, serverInfoHandler, accountHandler);
+    accountHandler := AccountHandler.Handler(accountStableData, keyHandler, serverInfoHandler, didDirectoryHandler, jwtHandler);
+    bskyHandler := BskyHandler.Handler(bskyStableData);
+    xrpcRouter := XrpcRouter.Router(repositoryHandler, serverInfoHandler, accountHandler, bskyHandler);
     wellKnownRouter := WellKnownRouter.Router(serverInfoHandler, keyHandler);
   };
 
@@ -92,16 +118,7 @@ persistent actor {
         allowHeaders = [];
         allowMethods = [#get, #post];
       }),
-      JWTMiddleware.new({
-        locations = JWTMiddleware.defaultLocations;
-        validation = {
-          audience = #skip;
-          issuer = #skip;
-          signature = #skip;
-          notBefore = false;
-          expiration = false;
-        };
-      }),
+      AuthMiddleware.new(keyHandler), // Custom auth middleware to extract actorId from Authorization header
       RouterMiddleware.new(routerConfig),
     ];
     errorSerializer = Liminal.defaultJsonErrorSerializer;

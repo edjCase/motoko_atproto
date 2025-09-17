@@ -1,4 +1,4 @@
-import Text "mo:base/Text";
+import Text "mo:core@1/Text";
 import Array "mo:core@1/Array";
 import Json "mo:json@1";
 import BaseX "mo:base-x-encoder@2";

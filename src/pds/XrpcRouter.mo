@@ -1,9 +1,10 @@
-import Text "mo:base/Text";
+import Text "mo:core@1/Text";
 import Array "mo:core@1/Array";
 import Repository "./Types/Repository";
 import RepositoryHandler "Handlers/RepositoryHandler";
 import ServerInfoHandler "Handlers/ServerInfoHandler";
 import AccountHandler "Handlers/AccountHandler";
+import BskyHandler "Handlers/BskyHandler";
 import RouteContext "mo:liminal@1/RouteContext";
 import Route "mo:liminal@1/Route";
 import Serde "mo:serde";
@@ -12,7 +13,7 @@ import Domain "mo:url-kit@3/Domain";
 import CID "mo:cid@1";
 import TID "mo:tid@1";
 import Json "mo:json@1";
-import Result "mo:base/Result";
+import Result "mo:core@1/Result";
 import Nat "mo:core@1/Nat";
 import TextX "mo:xtended-text@2/TextX";
 import DescribeRepo "./Types/Lexicons/Com/Atproto/Repo/DescribeRepo";
@@ -29,6 +30,7 @@ import ApplyWrites "./Types/Lexicons/Com/Atproto/Repo/ApplyWrites";
 import GetProfile "./Types/Lexicons/App/Bsky/Actor/GetProfile";
 import GetProfiles "./Types/Lexicons/App/Bsky/Actor/GetProfiles";
 import GetPreferences "./Types/Lexicons/App/Bsky/Actor/GetPreferences";
+import PutPreferences "./Types/Lexicons/App/Bsky/Actor/PutPreferences";
 import GetServices "./Types/Lexicons/App/Bsky/Labeler/GetServices";
 import ActorDefs "./Types/Lexicons/App/Bsky/Actor/Defs";
 import DynamicArray "mo:xtended-collections@0/DynamicArray";
@@ -39,6 +41,7 @@ module {
     repositoryHandler : RepositoryHandler.Handler,
     serverInfoHandler : ServerInfoHandler.Handler,
     accountHandler : AccountHandler.Handler,
+    bskyHandler : BskyHandler.Handler,
   ) {
 
     public func routeGet<system>(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
@@ -52,7 +55,7 @@ module {
     func routeAsync(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
       let nsid = routeContext.getRouteParam("nsid");
 
-      switch (Text.toLowercase(nsid)) {
+      switch (Text.toLower(nsid)) {
         case ("_health") health(routeContext);
         case ("com.atproto.repo.applywrites") await* applyWrites(routeContext);
         case ("com.atproto.repo.createrecord") await* createRecord(routeContext);
@@ -71,8 +74,9 @@ module {
         case ("com.atproto.sync.listblobs") listBlobs(routeContext);
         case ("com.atproto.sync.listrepos") listRepos(routeContext);
         case ("app.bsky.actor.getprofile") getProfile(routeContext);
-        case ("app.bsky.actor.getprofiles") await* getProfiles(routeContext);
+        case ("app.bsky.actor.getprofiles") getProfiles(routeContext);
         case ("app.bsky.actor.getpreferences") getPreferences(routeContext);
+        case ("app.bsky.actor.putpreferences") putPreferences(routeContext);
         case ("app.bsky.labeler.getservices") getServices(routeContext);
         case (_) {
           routeContext.buildResponse(
@@ -493,29 +497,13 @@ module {
     };
 
     func getSession(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
-      // Extract Authorization header
-      let ?authHeader = routeContext.getHeader("Authorization") else return routeContext.buildResponse(
+      let ?actorId = getRequestActorId(routeContext) else return routeContext.buildResponse(
         #unauthorized,
-        #error(#message("Missing Authorization header")),
-      );
-
-      // Check if it's a Bearer token
-      let bearerPrefix = "Bearer ";
-      if (not Text.startsWith(authHeader, #text(bearerPrefix))) {
-        return routeContext.buildResponse(
-          #unauthorized,
-          #error(#message("Authorization header must use Bearer token")),
-        );
-      };
-
-      // Extract the token
-      let ?accessToken = Text.stripStart(authHeader, #text(bearerPrefix)) else return routeContext.buildResponse(
-        #unauthorized,
-        #error(#message("Invalid Authorization header format")),
+        #empty,
       );
 
       // Get session info from the account handler
-      let response = switch (await* accountHandler.getSession(accessToken)) {
+      let response = switch (await* accountHandler.getSession(actorId)) {
         case (#ok(response)) response;
         case (#err(e)) return routeContext.buildResponse(
           #unauthorized,
@@ -584,7 +572,7 @@ module {
       };
     };
 
-    func getProfiles(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
+    func getProfiles(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
       // Parse query parameter: actors (comma-separated)
       let ?actorsParam = routeContext.getQueryParam("actors") else return routeContext.buildResponse(
         #badRequest,
@@ -616,9 +604,72 @@ module {
     };
 
     func getPreferences(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
+      let ?actorId = getRequestActorId(routeContext) else return routeContext.buildResponse(
+        #unauthorized,
+        #empty,
+      );
+      let preferences = bskyHandler.getPreferences(actorId);
+      let preferenceItems = DynamicArray.DynamicArray<ActorDefs.PreferenceItem>(16);
+
+      switch (preferences.adultContent) {
+        case (null) ();
+        case (?p) preferenceItems.add(#adultContentPref(p));
+      };
+      switch (preferences.contentLabel) {
+        case (null) ();
+        case (?p) preferenceItems.add(#contentLabelPref(p));
+      };
+      switch (preferences.savedFeeds) {
+        case (null) ();
+        case (?p) preferenceItems.add(#savedFeedsPref(p));
+      };
+      switch (preferences.savedFeedsV2) {
+        case (null) ();
+        case (?p) preferenceItems.add(#savedFeedsPrefV2(p));
+      };
+      switch (preferences.personalDetails) {
+        case (null) ();
+        case (?p) preferenceItems.add(#personalDetailsPref(p));
+      };
+      switch (preferences.feedView) {
+        case (null) ();
+        case (?p) preferenceItems.add(#feedViewPref(p));
+      };
+      switch (preferences.threadView) {
+        case (null) ();
+        case (?p) preferenceItems.add(#threadViewPref(p));
+      };
+      switch (preferences.interests) {
+        case (null) ();
+        case (?p) preferenceItems.add(#interestsPref(p));
+      };
+      switch (preferences.mutedWords) {
+        case (null) ();
+        case (?p) preferenceItems.add(#mutedWordsPref(p));
+      };
+      switch (preferences.hiddenPosts) {
+        case (null) ();
+        case (?p) preferenceItems.add(#hiddenPostsPref(p));
+      };
+      switch (preferences.bskyAppState) {
+        case (null) ();
+        case (?p) preferenceItems.add(#bskyAppStatePref(p));
+      };
+      switch (preferences.labelers) {
+        case (null) ();
+        case (?p) preferenceItems.add(#labelersPref(p));
+      };
+      switch (preferences.postInteractionSettings) {
+        case (null) ();
+        case (?p) preferenceItems.add(#postInteractionSettingsPref(p));
+      };
+      switch (preferences.verification) {
+        case (null) ();
+        case (?p) preferenceItems.add(#verificationPrefs(p));
+      };
 
       let response : GetPreferences.Response = {
-        preferences = []; // TODO preferences
+        preferences = DynamicArray.toArray(preferenceItems);
       };
 
       let responseJson = GetPreferences.toJson(response);
@@ -628,28 +679,48 @@ module {
       );
     };
 
-    func getServices(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
-      // Parse query parameters
-      let ?didsParam = routeContext.getQueryParam("dids") else return routeContext.buildResponse(
-        #badRequest,
-        #error(#message("Missing required query parameter: dids")),
+    func putPreferences(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
+      let ?actorId = getRequestActorId(routeContext) else return routeContext.buildResponse(
+        #unauthorized,
+        #empty,
       );
-
-      let detailed = switch (routeContext.getQueryParam("detailed")) {
-        case (null) ?false;
-        case (?detailedText) switch (Text.toLowercase(detailedText)) {
-          case ("true" or "" or "1") ?true; // TODO bool parser?
-          case ("false" or "0") ?false;
-          case (_) return routeContext.buildResponse(
-            #badRequest,
-            #error(#message("Invalid detailed parameter, expected 'true' or 'false'")),
-          );
-        };
+      let request = switch (parseRequestFromBody(routeContext, PutPreferences.fromJson)) {
+        case (#ok(req)) req;
+        case (#err(e)) return routeContext.buildResponse(
+          #badRequest,
+          #error(#message(e)),
+        );
       };
+      bskyHandler.putPreferences(actorId, request.preferences);
+      routeContext.buildResponse(
+        #ok,
+        #empty,
+      );
+    };
 
-      // Split DIDs by comma
-      let dids = Text.split(didsParam, #char(','));
-      let didsArray = Array.fromIter(dids);
+    func getServices(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
+      // TODO
+      // Parse query parameters
+      // let ?didsParam = routeContext.getQueryParam("dids") else return routeContext.buildResponse(
+      //   #badRequest,
+      //   #error(#message("Missing required query parameter: dids")),
+      // );
+
+      // let detailed = switch (routeContext.getQueryParam("detailed")) {
+      //   case (null) ?false;
+      //   case (?detailedText) switch (Text.toLower(detailedText)) {
+      //     case ("true" or "" or "1") ?true; // TODO bool parser?
+      //     case ("false" or "0") ?false;
+      //     case (_) return routeContext.buildResponse(
+      //       #badRequest,
+      //       #error(#message("Invalid detailed parameter, expected 'true' or 'false'")),
+      //     );
+      //   };
+      // };
+
+      // // Split DIDs by comma
+      // let dids = Text.split(didsParam, #char(','));
+      // let didsArray = Array.fromIter(dids);
 
       // TODO: Implement actual labeler service lookup
       let mockViews : [GetServices.LabelerViewUnion] = [];
@@ -695,6 +766,19 @@ module {
       switch (parser(parsedJson)) {
         case (#ok(req)) #ok(req);
         case (#err(e)) return #err("Invalid request: " # e);
+      };
+    };
+
+    func getRequestActorId(routeContext : RouteContext.RouteContext) : ?DID.Plc.DID {
+      switch (routeContext.getIdentity()) {
+        case (null) null;
+        case (?identity) switch (identity.getId()) {
+          case (null) null;
+          case (?id) switch (DID.Plc.fromText(id)) {
+            case (#ok(did)) ?did;
+            case (#err(_)) null; // Invalid DID in identity
+          };
+        };
       };
     };
   };

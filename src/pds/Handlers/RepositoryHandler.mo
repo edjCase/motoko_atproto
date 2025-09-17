@@ -8,7 +8,7 @@ import DagCbor "mo:dag-cbor@2";
 import MST "../Types/MST";
 import CIDBuilder "../CIDBuilder";
 import AtUri "../Types/AtUri";
-import Result "mo:base/Result";
+import Result "mo:core@1/Result";
 import KeyHandler "../Handlers/KeyHandler";
 import Text "mo:core@1/Text";
 import Order "mo:core@1/Order";

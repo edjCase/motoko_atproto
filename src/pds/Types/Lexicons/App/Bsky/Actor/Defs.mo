@@ -1,10 +1,13 @@
 import Json "mo:json@1";
-import Array "mo:base/Array";
+import Array "mo:core@1/Array";
+import Result "mo:core@1/Result";
+import Int "mo:core@1/Int";
 import DID "mo:did@3";
 import AtUri "../../../../AtUri";
 import DateTime "mo:datetime@1/DateTime";
 import LabelDefs "../../../Com/Atproto/Label/Defs";
 import DynamicArray "mo:xtended-collections@0/DynamicArray";
+import Time "mo:core@1/Time";
 
 module {
 
@@ -23,7 +26,7 @@ module {
     avatar : ?AtUri.AtUri; // URI
 
     /// Creation timestamp
-    createdAt : ?Nat; // Epoch Nanoseconds
+    createdAt : ?Time.Time;
 
     /// Labels applied to this profile
     labels : [LabelDefs.Label];
@@ -47,7 +50,7 @@ module {
     description : ?Text;
 
     /// Index timestamp
-    indexedAt : ?Nat; // Epoch Nanoseconds
+    indexedAt : ?Time.Time;
   };
 
   /// Detailed profile view with complete information
@@ -122,7 +125,7 @@ module {
     issuer : DID.Plc.DID;
     uri : AtUri.AtUri;
     isValid : Bool;
-    createdAt : Nat; // Epoch Nanoseconds
+    createdAt : Time.Time;
   };
 
   /// Status view information
@@ -130,7 +133,7 @@ module {
     status : Text; // Known value: "app.bsky.actor.status#live"
     record : Json.Json; // Unknown type - using Json for flexibility
     embed : ?Text; // Reference to embed - simplified as Text for now
-    expiresAt : ?Nat; // Epoch Nanoseconds
+    expiresAt : ?Time.Time;
     isActive : ?Bool;
   };
 
@@ -281,7 +284,7 @@ module {
     value : Text;
     targets : [MutedWordTarget];
     actorTarget : ?{ #all; #excludeFollowing };
-    expiresAt : ?DateTime.DateTime;
+    expiresAt : ?Time.Time;
   };
 
   public type MutedWordsPref = {
@@ -308,7 +311,7 @@ module {
     id : Text;
     completed : Bool;
     data : ?Text;
-    expiresAt : ?DateTime.DateTime;
+    expiresAt : ?Time.Time;
   };
 
   public type BskyAppStatePref = {
@@ -366,6 +369,25 @@ module {
       case (#show) "show";
       case (#warn) "warn";
       case (#hide) "hide";
+    };
+  };
+
+  private func textToFeedType(text : Text) : ?FeedType {
+    switch (text) {
+      case ("feed") ?#feed;
+      case ("list") ?#list;
+      case ("timeline") ?#timeline;
+      case (_) null;
+    };
+  };
+
+  private func textToVisibility(text : Text) : ?ContentVisibility {
+    switch (text) {
+      case ("ignore") ?#ignore_;
+      case ("show") ?#show;
+      case ("warn") ?#warn;
+      case ("hide") ?#hide;
+      case (_) null;
     };
   };
 
@@ -437,6 +459,167 @@ module {
       },
     );
     #array(prefsJson);
+  };
+
+  private func parseAdultContentPref(prefJson : Json.Json) : Result.Result<PreferenceItem, Text> {
+    let enabled = switch (Json.getAsBool(prefJson, "enabled")) {
+      case (#ok(e)) e;
+      case (#err(_)) return #err("Invalid or missing 'enabled' field in adultContentPref");
+    };
+    #ok(#adultContentPref({ enabled = enabled }));
+  };
+
+  private func parseContentLabelPref(prefJson : Json.Json) : Result.Result<PreferenceItem, Text> {
+    let label_ = switch (Json.getAsText(prefJson, "label")) {
+      case (#ok(l)) l;
+      case (#err(_)) return #err("Invalid or missing 'label' field in contentLabelPref");
+    };
+    let visibilityText = switch (Json.getAsText(prefJson, "visibility")) {
+      case (#ok(v)) v;
+      case (#err(_)) return #err("Invalid or missing 'visibility' field in contentLabelPref");
+    };
+    let visibility = switch (textToVisibility(visibilityText)) {
+      case (?v) v;
+      case (null) return #err("Invalid visibility value: " # visibilityText);
+    };
+    let labelerDid : ?DID.DID = switch (Json.getAsText(prefJson, "labelerDid")) {
+      case (#ok(did)) switch (DID.fromText(did)) {
+        case (#ok(d)) ?d;
+        case (#err(_)) return #err("Invalid labelerDid format: " # did);
+      };
+      case (#err(#pathNotFound)) null;
+      case (#err(#typeMismatch)) return #err("Invalid labelerDid field type in contentLabelPref");
+    };
+    #ok(#contentLabelPref({ labelerDid = labelerDid; label_ = label_; visibility = visibility }));
+  };
+
+  private func parseSavedFeedsPref(prefJson : Json.Json) : Result.Result<PreferenceItem, Text> {
+    let pinnedArray = switch (Json.getAsArray(prefJson, "pinned")) {
+      case (#ok(arr)) arr;
+      case (#err(_)) return #err("Invalid or missing 'pinned' array in savedFeedsPref");
+    };
+    let savedArray = switch (Json.getAsArray(prefJson, "saved")) {
+      case (#ok(arr)) arr;
+      case (#err(_)) return #err("Invalid or missing 'saved' array in savedFeedsPref");
+    };
+
+    let pinnedUris = DynamicArray.DynamicArray<AtUri.AtUri>(pinnedArray.size());
+    for (item in pinnedArray.vals()) {
+      switch (Json.getAsText(item, "")) {
+        case (#ok(uri)) {
+          switch (AtUri.fromText(uri)) {
+            case (?parsedUri) pinnedUris.add(parsedUri);
+            case (null) return #err("Invalid URI format in pinned array: " # uri);
+          };
+        };
+        case (#err(_)) return #err("Invalid item in pinned array");
+      };
+    };
+
+    let savedUris = DynamicArray.DynamicArray<AtUri.AtUri>(savedArray.size());
+    for (item in savedArray.vals()) {
+      switch (Json.getAsText(item, "")) {
+        case (#ok(uri)) {
+          switch (AtUri.fromText(uri)) {
+            case (?parsedUri) savedUris.add(parsedUri);
+            case (null) return #err("Invalid URI format in saved array: " # uri);
+          };
+        };
+        case (#err(_)) return #err("Invalid item in saved array");
+      };
+    };
+
+    let timelineIndex = switch (Json.getAsInt(prefJson, "timelineIndex")) {
+      case (#ok(idx)) ?Int.abs(idx);
+      case (#err(#pathNotFound)) null;
+      case (#err(#typeMismatch)) return #err("Invalid timelineIndex field type in savedFeedsPref");
+    };
+
+    #ok(#savedFeedsPref({ pinned = DynamicArray.toArray(pinnedUris); saved = DynamicArray.toArray(savedUris); timelineIndex = timelineIndex }));
+  };
+
+  private func parseSavedFeedsPrefV2(prefJson : Json.Json) : Result.Result<PreferenceItem, Text> {
+    let itemsArray = switch (Json.getAsArray(prefJson, "items")) {
+      case (#ok(arr)) arr;
+      case (#err(_)) return #err("Invalid or missing 'items' array in savedFeedsPrefV2");
+    };
+
+    let items = DynamicArray.DynamicArray<SavedFeed>(itemsArray.size());
+    for (itemJson in itemsArray.vals()) {
+      let id = switch (Json.getAsText(itemJson, "id")) {
+        case (#ok(i)) i;
+        case (#err(_)) return #err("Invalid or missing 'id' field in savedFeed item");
+      };
+      let typeText = switch (Json.getAsText(itemJson, "type")) {
+        case (#ok(t)) t;
+        case (#err(_)) return #err("Invalid or missing 'type' field in savedFeed item");
+      };
+      let type_ = switch (textToFeedType(typeText)) {
+        case (?t) t;
+        case (null) return #err("Invalid feed type value: " # typeText);
+      };
+      let value = switch (Json.getAsText(itemJson, "value")) {
+        case (#ok(v)) v;
+        case (#err(_)) return #err("Invalid or missing 'value' field in savedFeed item");
+      };
+      let pinned = switch (Json.getAsBool(itemJson, "pinned")) {
+        case (#ok(p)) p;
+        case (#err(_)) return #err("Invalid or missing 'pinned' field in savedFeed item");
+      };
+      items.add({
+        id = id;
+        type_ = type_;
+        value = value;
+        pinned = pinned;
+      });
+    };
+
+    #ok(#savedFeedsPrefV2({ items = DynamicArray.toArray(items) }));
+  };
+
+  private func parsePersonalDetailsPref(prefJson : Json.Json) : Result.Result<PreferenceItem, Text> {
+    let birthDate = switch (Json.getAsText(prefJson, "birthDate")) {
+      case (#ok(date)) ?date;
+      case (#err(#pathNotFound)) null;
+      case (#err(#typeMismatch)) return #err("Invalid birthDate field type in personalDetailsPref");
+    };
+    #ok(#personalDetailsPref({ birthDate = birthDate }));
+  };
+
+  public func preferencesFromJson(json : Json.Json) : Result.Result<Preferences, Text> {
+    let prefsArray = switch (Json.getAsArray(json, "")) {
+      case (#ok(arr)) arr;
+      case (#err(#pathNotFound)) return #err("Invalid preferences, expected array");
+      case (#err(#typeMismatch)) return #err("Invalid preferences, expected array");
+    };
+
+    let preferences = DynamicArray.DynamicArray<PreferenceItem>(prefsArray.size());
+
+    label f for (prefJson in prefsArray.vals()) {
+      let typeStr = switch (Json.getAsText(prefJson, "$type")) {
+        case (#ok(t)) t;
+        case (#err(_)) return #err("Invalid or missing '$type' field in preference item");
+      };
+
+      let result = switch (typeStr) {
+        case ("app.bsky.actor.defs#adultContentPref") parseAdultContentPref(prefJson);
+        case ("app.bsky.actor.defs#contentLabelPref") parseContentLabelPref(prefJson);
+        case ("app.bsky.actor.defs#savedFeedsPref") parseSavedFeedsPref(prefJson);
+        case ("app.bsky.actor.defs#savedFeedsPrefV2") parseSavedFeedsPrefV2(prefJson);
+        case ("app.bsky.actor.defs#personalDetailsPref") parsePersonalDetailsPref(prefJson);
+        case (_) {
+          // Skip unknown preference types by continuing to next iteration
+          continue f;
+        };
+      };
+
+      switch (result) {
+        case (#ok(pref)) preferences.add(pref);
+        case (#err(e)) return #err(e);
+      };
+    };
+
+    #ok(DynamicArray.toArray(preferences));
   };
 
 };

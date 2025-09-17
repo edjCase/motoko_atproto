@@ -1,10 +1,10 @@
-// import Result "mo:base/Result";
-// import Text "mo:base/Text";
-// import Iter "mo:base/Iter";
-// import Char "mo:base/Char";
-// import Blob "mo:base/Blob";
-// import Array "mo:base/Array";
-// import Buffer "mo:base/Buffer";
+// import Result "mo:core@1/Result";
+// import Text "mo:core@1/Text";
+// import Iter "mo:core@1/Iter";
+// import Char "mo:core@1/Char";
+// import Blob "mo:core@1/Blob";
+// import Array "mo:core@1/Array";
+// import Buffer "mo:core@1/Buffer";
 // import IterX "mo:xtended-iter@1/IterX";
 // import Sha256 "mo:sha2/Sha256";
 

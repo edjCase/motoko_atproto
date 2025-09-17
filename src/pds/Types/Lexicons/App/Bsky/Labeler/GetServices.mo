@@ -1,7 +1,7 @@
 import Json "mo:json@1";
 import Result "mo:core@1/Result";
-import Array "mo:base/Array";
-import Nat "mo:base/Nat";
+import Array "mo:core@1/Array";
+import Nat "mo:core@1/Nat";
 import DID "mo:did@3";
 import CID "mo:cid@1";
 import AtUri "../../../../AtUri";

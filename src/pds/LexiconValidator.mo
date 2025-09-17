@@ -1,5 +1,5 @@
 import DagCbor "mo:dag-cbor@2";
-import Result "mo:base/Result";
+import Result "mo:core@1/Result";
 import RepoCommon "./Types/Lexicons/Com/Atproto/Repo/Common";
 
 module {

@@ -1,7 +1,7 @@
 import Result "mo:core@1/Result";
 import CID "mo:cid@1";
 import Blob "mo:core@1/Blob";
-import Buffer "mo:base/Buffer";
+import DynamicArray "mo:xtended-collections@0/DynamicArray";
 import Text "mo:core@1/Text";
 import Sha256 "mo:sha2/Sha256";
 import Array "mo:core@1/Array";
@@ -122,9 +122,9 @@ module {
           subtreeCID = null;
         };
 
-        let entriesBuffer = Buffer.fromArray<MST.TreeEntry>(node.entries);
+        let entriesBuffer = DynamicArray.fromArray<MST.TreeEntry>(node.entries);
         entriesBuffer.insert(insertIndex, newEntry);
-        let newEntries = Buffer.toArray(entriesBuffer);
+        let newEntries = DynamicArray.toArray(entriesBuffer);
 
         // Compress keys
         let compressedEntries = compressKeys(newEntries);
@@ -164,9 +164,9 @@ module {
         // If we found exact key match and depths match
         if (compareKeys(key, entryKey) == #equal and keyDepth == entryDepth) {
           // Remove this entry
-          let entriesBuffer = Buffer.fromArray<MST.TreeEntry>(node.entries);
+          let entriesBuffer = DynamicArray.fromArray<MST.TreeEntry>(node.entries);
           let _ = entriesBuffer.remove(i);
-          let newEntries = Buffer.toArray(entriesBuffer);
+          let newEntries = DynamicArray.toArray(entriesBuffer);
 
           // Recompress the keys if any entries remain
           let compressedEntries = if (newEntries.size() > 0) {
@@ -219,12 +219,12 @@ module {
                       node.entries[i - 1] with
                       t = ?newRightCID;
                     };
-                    let entriesBuffer = Buffer.fromArray<MST.TreeEntry>(node.entries);
+                    let entriesBuffer = DynamicArray.fromArray<MST.TreeEntry>(node.entries);
                     entriesBuffer.put(i - 1, updatedEntry);
 
                     #ok({
                       node with
-                      entries = Buffer.toArray(entriesBuffer);
+                      entries = DynamicArray.toArray(entriesBuffer);
                     });
                   };
                 };
@@ -252,12 +252,12 @@ module {
                 node.entries[lastIndex] with
                 t = ?newRightCID;
               };
-              let entriesBuffer = Buffer.fromArray<MST.TreeEntry>(node.entries);
+              let entriesBuffer = DynamicArray.fromArray<MST.TreeEntry>(node.entries);
               entriesBuffer.put(lastIndex, updatedEntry);
 
               #ok({
                 node with
-                entries = Buffer.toArray(entriesBuffer);
+                entries = DynamicArray.toArray(entriesBuffer);
               });
             };
           };
@@ -300,7 +300,7 @@ module {
     };
 
     public func getCollectionRecords(collection : Text) : [(key : Text, CID.CID)] {
-      let records = Buffer.Buffer<(key : Text, CID.CID)>(0);
+      let records = DynamicArray.DynamicArray<(key : Text, CID.CID)>(0);
 
       iterateEntries(
         func(entryKey : Text, entryValue : CID.CID) {
@@ -314,11 +314,11 @@ module {
         }
       );
 
-      Buffer.toArray(records);
+      DynamicArray.toArray(records);
     }; // Add these functions to the MSTHandler module
 
     public func getAllRecordCIDs() : [CID.CID] {
-      let cids = Buffer.Buffer<CID.CID>(0);
+      let cids = DynamicArray.DynamicArray<CID.CID>(0);
 
       iterateEntries(
         func(_ : Text, entryValue : CID.CID) {
@@ -326,7 +326,7 @@ module {
         }
       );
 
-      Buffer.toArray(cids);
+      DynamicArray.toArray(cids);
     };
 
     private func iterateEntries(
@@ -485,7 +485,7 @@ module {
           switch (key, val) {
             case ("l", #cid(cid)) leftSubtreeCID := ?cid;
             case ("e", #array(entryArray)) {
-              let entriesBuffer = Buffer.Buffer<MST.TreeEntry>(entryArray.size());
+              let entriesBuffer = DynamicArray.DynamicArray<MST.TreeEntry>(entryArray.size());
 
               for (entryVal in entryArray.vals()) {
                 switch (parseTreeEntryFromCbor(entryVal)) {
@@ -494,7 +494,7 @@ module {
                 };
               };
 
-              entries := Buffer.toArray(entriesBuffer);
+              entries := DynamicArray.toArray(entriesBuffer);
             };
             case (_) ();
           };
@@ -657,7 +657,7 @@ module {
       return entries;
     };
 
-    let compressed = Buffer.Buffer<MST.TreeEntry>(entries.size());
+    let compressed = DynamicArray.DynamicArray<MST.TreeEntry>(entries.size());
 
     // First entry keeps full key
     compressed.add({
@@ -667,7 +667,7 @@ module {
 
     // Subsequent entries get compressed
     for (i in Nat.range(1, entries.size())) {
-      let prevKey = reconstructKey(Buffer.toArray(compressed), i - 1);
+      let prevKey = reconstructKey(DynamicArray.toArray(compressed), i - 1);
       let currentKey = entries[i].keySuffix;
       let prefixLen = commonPrefixLength(prevKey, currentKey);
 
@@ -684,7 +684,7 @@ module {
       });
     };
 
-    Buffer.toArray(compressed);
+    DynamicArray.toArray(compressed);
   };
 
   // Calculate common prefix length between two byte arrays

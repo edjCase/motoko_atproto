@@ -1,5 +1,5 @@
 import CID "mo:cid@1";
-import Result "mo:base/Result";
+import Result "mo:core@1/Result";
 import DID "mo:did@3";
 
 module {
