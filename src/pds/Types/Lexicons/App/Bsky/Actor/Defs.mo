@@ -23,7 +23,7 @@ module {
     displayName : ?Text;
 
     /// Optional avatar image
-    avatar : ?AtUri.AtUri; // URI
+    avatar : ?Text; // URI
 
     /// Creation timestamp
     createdAt : ?Time.Time;
@@ -56,7 +56,7 @@ module {
   /// Detailed profile view with complete information
   public type ProfileViewDetailed = ProfileView and {
     /// Optional banner image
-    banner : ?AtUri.AtUri; // URI
+    banner : ?Text; // URI
 
     /// Number of followers
     followersCount : ?Nat;
@@ -151,7 +151,7 @@ module {
     };
 
     switch (profile.avatar) {
-      case (?avatar) fields.add(("avatar", #string(AtUri.toText(avatar))));
+      case (?avatar) fields.add(("avatar", #string(avatar)));
       case (null) ();
     };
 
@@ -197,7 +197,7 @@ module {
 
     // Add ProfileViewDetailed-specific fields
     switch (profile.banner) {
-      case (?banner) fields.add(("banner", #string(AtUri.toText(banner))));
+      case (?banner) fields.add(("banner", #string(banner)));
       case (null) ();
     };
 

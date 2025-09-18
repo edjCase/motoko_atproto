@@ -7,6 +7,7 @@ import Json "mo:json@1";
 import Result "mo:core@1/Result";
 import JsonDagCborMapper "../../../../../JsonDagCborMapper";
 
+// com.atproto.repo.getRecord
 module {
 
   /// Request type for getting a single repository record
@@ -51,51 +52,6 @@ module {
       ),
       ("value", valueJson),
     ]);
-  };
-
-  public func fromJson(json : Json.Json) : Result.Result<Request, Text> {
-
-    // Extract required fields
-
-    let repoText = switch (Json.getAsText(json, "repo")) {
-      case (#ok(repo)) repo;
-      case (#err(#pathNotFound)) return #err("Missing required field: repo");
-      case (#err(#typeMismatch)) return #err("Invalid repo field, expected string");
-    };
-    let repo = switch (DID.Plc.fromText(repoText)) {
-      case (#ok(did)) did;
-      case (#err(e)) return #err("Invalid repo DID: " # e);
-    };
-
-    let collection = switch (Json.getAsText(json, "collection")) {
-      case (#ok(collection)) collection;
-      case (#err(#pathNotFound)) return #err("Missing required field: collection");
-      case (#err(#typeMismatch)) return #err("Invalid collection field, expected string");
-    };
-
-    let rkey = switch (Json.getAsText(json, "rkey")) {
-      case (#ok(rkey)) rkey;
-      case (#err(#pathNotFound)) return #err("Missing required field: rkey");
-      case (#err(#typeMismatch)) return #err("Invalid rkey field, expected string");
-    };
-
-    // Extract optional fields
-
-    let cid = switch (Json.getAsText(json, "cid")) {
-      case (#ok(s)) switch (CID.fromText(s)) {
-        case (#ok(cid)) ?cid;
-        case (#err(e)) return #err("Invalid cid: " # e);
-      };
-      case (#err(#pathNotFound)) null;
-      case (#err(#typeMismatch)) return #err("Invalid cid field, expected string");
-    };
-
-    #ok({
-      repo = repo;
-      collection = collection;
-      rkey = rkey;
-      cid = cid;
-    });
   };
 
 };

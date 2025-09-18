@@ -62,6 +62,7 @@ persistent actor {
     serverInfoHandler,
     didDirectoryHandler,
     jwtHandler,
+    repositoryHandler,
   );
   transient var bskyHandler = BskyHandler.Handler(bskyStableData);
 
@@ -90,10 +91,27 @@ persistent actor {
     jwtHandler := JwtHandler.Handler(keyHandler);
     didDirectoryHandler := DIDDirectoryHandler.Handler(keyHandler);
     serverInfoHandler := ServerInfoHandler.Handler(serverInfoStableData);
-    repositoryHandler := RepositoryHandler.Handler(repositoryStableData, keyHandler, tidGenerator, serverInfoHandler);
-    accountHandler := AccountHandler.Handler(accountStableData, keyHandler, serverInfoHandler, didDirectoryHandler, jwtHandler);
+    repositoryHandler := RepositoryHandler.Handler(
+      repositoryStableData,
+      keyHandler,
+      tidGenerator,
+      serverInfoHandler,
+    );
+    accountHandler := AccountHandler.Handler(
+      accountStableData,
+      keyHandler,
+      serverInfoHandler,
+      didDirectoryHandler,
+      jwtHandler,
+      repositoryHandler,
+    );
     bskyHandler := BskyHandler.Handler(bskyStableData);
-    xrpcRouter := XrpcRouter.Router(repositoryHandler, serverInfoHandler, accountHandler, bskyHandler);
+    xrpcRouter := XrpcRouter.Router(
+      repositoryHandler,
+      serverInfoHandler,
+      accountHandler,
+      bskyHandler,
+    );
     wellKnownRouter := WellKnownRouter.Router(serverInfoHandler, keyHandler);
   };
 

@@ -82,7 +82,7 @@ module {
       };
 
       if (not isValidKey(key)) {
-        return #err("Invalid key");
+        return #err("Invalid key: " # debug_show (key));
       };
       let ?node = getNode(rootNodeCID) else return #err("Node not found: " # CID.toText(rootNodeCID));
       let keyDepth = calculateDepth(key);
@@ -149,7 +149,7 @@ module {
       };
 
       if (not isValidKey(key)) {
-        return #err("Invalid key");
+        return #err("Invalid key: " # debug_show (key));
       };
 
       let ?node = getNode(rootNodeCID) else return #err("Node not found: " # CID.toText(rootNodeCID));
@@ -625,8 +625,13 @@ module {
       code == 0x5F; // _
     };
 
-    keyText.chars()
-    |> Iter.all(_, isValidChar);
+    (
+      recordKey.chars()
+      |> Iter.all(_, isValidChar)
+    ) and (
+      collection.chars()
+      |> Iter.all(_, isValidChar)
+    );
   };
 
   // Reconstruct full key from compressed entries

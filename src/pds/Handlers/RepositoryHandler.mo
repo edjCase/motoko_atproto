@@ -290,8 +290,8 @@ module {
       });
     };
 
-    public func getRecord(request : GetRecord.Request) : Result.Result<GetRecord.Response, Text> {
-      let ?repo = PureMap.get(repositories, DIDModule.comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
+    public func getRecord(request : GetRecord.Request) : ?GetRecord.Response {
+      let ?repo = PureMap.get(repositories, DIDModule.comparePlcDID, request.repo) else return null;
 
       let path = request.collection # "/" # request.rkey;
       let pathKey = MST.pathToKey(path);
@@ -299,14 +299,14 @@ module {
       let mstHandler = MSTHandler.Handler(repo.nodes);
 
       // Get the current commit to find the MST root
-      let ?currentCommit = PureMap.get(repo.commits, TID.compare, repo.rev) else return #err("No commits found in repository");
+      let ?currentCommit = PureMap.get(repo.commits, TID.compare, repo.rev) else return null;
 
       // Get the root MST node from the commit's data field
-      let ?rootNode = mstHandler.getNode(currentCommit.data) else return #err("Failed to get root node from MST");
+      let ?rootNode = mstHandler.getNode(currentCommit.data) else return null;
 
-      let ?recordCID = mstHandler.getCID(rootNode, pathKey) else return #err("Record not found at path: " # path);
-      let ?value = PureMap.get(repo.records, compareCID, recordCID) else return #err("Record not found at path: " # path);
-      #ok({
+      let ?recordCID = mstHandler.getCID(rootNode, pathKey) else return null;
+      let ?value = PureMap.get(repo.records, compareCID, recordCID) else return null;
+      ?{
         cid = ?recordCID;
         uri = {
           authority = #plc(request.repo);
@@ -316,7 +316,7 @@ module {
           };
         };
         value = value;
-      });
+      };
     };
 
     public func putRecord(request : PutRecord.Request) : async* Result.Result<PutRecord.Response, Text> {
@@ -371,7 +371,7 @@ module {
       let currentNodeCID = currentCommit.data;
 
       // Update MST (this will replace existing record or add new one)
-      let newNode = switch (mstHandler.addCID(currentCommit.data, pathKey, recordCID)) {
+      let newNode = switch (mstHandler.addCID(currentNodeCID, pathKey, recordCID)) {
         case (#ok(mst)) mst;
         case (#err(e)) return #err("Failed to update MST: " # debug_show (e));
       };

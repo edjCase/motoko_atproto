@@ -19,6 +19,7 @@ import KeyHandler "./KeyHandler";
 import ServerInfoHandler "./ServerInfoHandler";
 import Text "mo:core@1/Text";
 import DIDDirectoryHandler "./DIDDirectoryHandler";
+import RepositoryHandler "./RepositoryHandler";
 import JwtHandler "./JwtHandler";
 import Domain "mo:url-kit@3/Domain";
 import Runtime "mo:core@1/Runtime";
@@ -77,6 +78,7 @@ module {
     serverInfoHandler : ServerInfoHandler.Handler,
     didDirectoryHandler : DIDDirectoryHandler.Handler,
     jwtHandler : JwtHandler.Handler,
+    repositoryHandler : RepositoryHandler.Handler,
   ) {
     var sessions = stableData.sessions;
     var accounts = stableData.accounts;
@@ -127,7 +129,7 @@ module {
       if (TextX.isEmptyOrWhitespace(request.handle)) return #err("Handle cannot be empty");
 
       let serverInfo = serverInfoHandler.get();
-      let ?name = ServerInfo.getAccountNameFromHandle(serverInfo, request.handle) else return #err("Handle must end with '.{server hostname}'");
+      let ?name = ServerInfo.getAccountNameFromHandle(serverInfo, request.handle) else return #err("Handle must end with '." # serverInfo.hostname # "'");
 
       if (request.inviteCode != null) {
         // TODO
@@ -194,6 +196,12 @@ module {
       };
 
       let salt = await Random.blob();
+
+      // Create repository for the new account
+      switch (await* repositoryHandler.create(did)) {
+        case (#ok(_)) ();
+        case (#err(e)) return #err("Failed to create repository: " # e);
+      };
 
       let passwordHash = PBKDF2.pbkdf2_sha512(
         #text(password),

@@ -37,6 +37,7 @@ import ResolveHandle "./Types/Lexicons/Com/Atproto/Identity/ResolveHandle";
 import DynamicArray "mo:xtended-collections@0/DynamicArray";
 import Runtime "mo:core@1/Runtime";
 import ServerInfo "Types/ServerInfo";
+import DagCbor "mo:dag-cbor@2";
 
 module {
 
@@ -305,7 +306,7 @@ module {
 
     func getRecord(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
 
-      let request = switch (parseRequestFromBody(routeContext, GetRecord.fromJson)) {
+      let request = switch (parseGetRecordRequest(routeContext)) {
         case (#ok(req)) req;
         case (#err(e)) return routeContext.buildResponse(
           #badRequest,
@@ -314,13 +315,11 @@ module {
       };
 
       let response = switch (repositoryHandler.getRecord(request)) {
-        case (#ok(response)) response;
-        case (#err(e)) {
-          return routeContext.buildResponse(
-            #notFound,
-            #error(#message("Failed to get record: " # e)),
-          );
-        };
+        case (?response) response;
+        case (null) return routeContext.buildResponse(
+          #notFound,
+          #error(#message("Record not found: " # request.collection # "/" # request.rkey)),
+        );
       };
 
       let responseJson = GetRecord.toJson(response);
@@ -328,6 +327,40 @@ module {
         #ok,
         #json(responseJson),
       );
+    };
+
+    func parseGetRecordRequest(routeContext : RouteContext.RouteContext) : Result.Result<GetRecord.Request, Text> {
+
+      // Extract required fields
+
+      let ?repoText = routeContext.getQueryParam("repo") else return #err("Missing required query parameter: repo");
+
+      let repo = switch (DID.Plc.fromText(repoText)) {
+        case (#ok(did)) did;
+        case (#err(e)) return #err("Invalid repo DID: " # e);
+      };
+
+      let ?collection = routeContext.getQueryParam("collection") else return #err("Missing required query parameter: collection");
+
+      let ?rkey = routeContext.getQueryParam("rkey") else return #err("Missing required query parameter: rkey");
+
+      // Extract optional fields
+      let cidTextOrNull = routeContext.getQueryParam("cid");
+
+      let cid = switch (cidTextOrNull) {
+        case (null) null;
+        case (?cidText) switch (CID.fromText(cidText)) {
+          case (#ok(cid)) ?cid;
+          case (#err(e)) return #err("Invalid cid: " # e);
+        };
+      };
+
+      #ok({
+        repo = repo;
+        collection = collection;
+        rkey = rkey;
+        cid = cid;
+      });
     };
 
     func importRepo(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
@@ -554,14 +587,39 @@ module {
         };
       };
 
+      let recordRequest : GetRecord.Request = {
+        repo = account.id;
+        collection = "app.bsky.actor.profile";
+        rkey = "self";
+        cid = null;
+      };
+
+      let { avatar; displayName; description } = switch (repositoryHandler.getRecord(recordRequest)) {
+        case (null) ({
+          avatar = null;
+          displayName = null;
+          description = null;
+        });
+        case (?record) {
+          let #ok(avatar) = DagCbor.getAsNullableText(record.value, "avatar", true) else Runtime.trap("Invalid avatar type in profile record");
+          let #ok(displayName) = DagCbor.getAsNullableText(record.value, "displayName", true) else Runtime.trap("Invalid displayName type in profile record");
+          let #ok(description) = DagCbor.getAsNullableText(record.value, "description", true) else Runtime.trap("Invalid description type in profile record");
+          {
+            avatar = avatar;
+            displayName = displayName;
+            description = description;
+          };
+        };
+      };
+
       ?{
         did = account.id;
         handle = ServerInfo.buildHandleFromAccountName(serverInfo, account.name);
-        avatar = null; // TODO: Add avatar support
-        displayName = null; // TODO: Add displayName support
+        avatar = avatar;
+        displayName = displayName;
         banner = null; // TODO
         createdAt = null; // TODO
-        description = null; // TODO
+        description = description;
         followersCount = null; // TODO
         followsCount = null; // TODO
         indexedAt = null; // TODO

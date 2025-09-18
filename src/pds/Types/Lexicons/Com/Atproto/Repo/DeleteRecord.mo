@@ -77,22 +77,22 @@ module {
 
     // Extract optional fields
 
-    let swapRecord = switch (Json.getAsText(json, "swapRecord")) {
-      case (#ok(s)) switch (CID.fromText(s)) {
+    let swapRecord = switch (Json.get(json, "swapRecord")) {
+      case (?#string(s)) switch (CID.fromText(s)) {
         case (#ok(cid)) ?cid;
         case (#err(e)) return #err("Invalid swapRecord CID: " # e);
       };
-      case (#err(#pathNotFound)) null;
-      case (#err(#typeMismatch)) return #err("Invalid swapRecord field, expected string");
+      case (null or ?#null_) null;
+      case (?j) return #err("Invalid swapRecord field, expected string, got: " # debug_show (j));
     };
 
-    let swapCommit = switch (Json.getAsText(json, "swapCommit")) {
-      case (#ok(s)) switch (CID.fromText(s)) {
+    let swapCommit = switch (Json.get(json, "swapCommit")) {
+      case (?#string(s)) switch (CID.fromText(s)) {
         case (#ok(cid)) ?cid;
         case (#err(e)) return #err("Invalid swapCommit CID: " # e);
       };
-      case (#err(#pathNotFound)) null;
-      case (#err(#typeMismatch)) return #err("Invalid swapCommit field, expected string");
+      case (null or ?#null_) null;
+      case (?j) return #err("Invalid swapCommit field, expected string, got: " # debug_show (j));
     };
 
     #ok({
