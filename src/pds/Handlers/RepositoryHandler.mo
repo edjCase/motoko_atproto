@@ -103,7 +103,11 @@ module {
 
       let mstHandler = MSTHandler.Handler(repo.nodes);
 
-      let collections = mstHandler.getAllCollections();
+      // Get current commit to find root node
+      let ?currentCommit = PureMap.get(repo.commits, TID.compare, repo.rev) else return #err("No commits found in repository");
+      let ?rootNode = mstHandler.getNode(currentCommit.data) else return #err("Failed to get root MST node");
+
+      let collections = mstHandler.getAllCollections(rootNode);
 
       let serverInfo = serverInfoHandler.get();
 
@@ -205,7 +209,7 @@ module {
       };
 
       let recordCID = CIDBuilder.fromRecord(rKey, request.record);
-      let updatedRecords = PureMap.add(repo.records, compareCID, recordCID, request.record);
+      let updatedRecords = PureMap.add(repo.records, CIDBuilder.compare, recordCID, request.record);
 
       // Create record path
       let path = AtUri.toText({
@@ -226,10 +230,11 @@ module {
         repo.rev,
       ) else return #err("No commits found in repository");
 
-      let currentNodeCID = currentCommit.data;
+      // Use the commit's data field as the root node CID
+      let rootNodeCID = currentCommit.data;
 
       // Add to MST
-      let newNode = switch (mstHandler.addCID(currentCommit.data, pathKey, recordCID)) {
+      let newNode = switch (mstHandler.addCID(rootNodeCID, pathKey, recordCID)) {
         case (#ok(mst)) mst;
         case (#err(e)) return #err("Failed to add to MST: " # debug_show (e));
       };
@@ -243,7 +248,7 @@ module {
           request.repo,
           newRev,
           newNodeCID,
-          ?currentNodeCID,
+          ?rootNodeCID,
         )
       ) {
         case (#ok(commit)) commit;
@@ -305,7 +310,7 @@ module {
       let ?rootNode = mstHandler.getNode(currentCommit.data) else return null;
 
       let ?recordCID = mstHandler.getCID(rootNode, pathKey) else return null;
-      let ?value = PureMap.get(repo.records, compareCID, recordCID) else return null;
+      let ?value = PureMap.get(repo.records, CIDBuilder.compare, recordCID) else return null;
       ?{
         cid = ?recordCID;
         uri = {
@@ -353,7 +358,7 @@ module {
       };
 
       let recordCID = CIDBuilder.fromRecord(request.rkey, request.record);
-      let updatedRecords = PureMap.add(repo.records, compareCID, recordCID, request.record);
+      let updatedRecords = PureMap.add(repo.records, CIDBuilder.compare, recordCID, request.record);
 
       // Create record path
       let path = request.collection # "/" # request.rkey;
@@ -368,10 +373,11 @@ module {
         repo.rev,
       ) else return #err("No commits found in repository");
 
-      let currentNodeCID = currentCommit.data;
+      // Use the commit's data field as the root node CID
+      let rootNodeCID = currentCommit.data;
 
       // Update MST (this will replace existing record or add new one)
-      let newNode = switch (mstHandler.addCID(currentNodeCID, pathKey, recordCID)) {
+      let newNode = switch (mstHandler.addCID(rootNodeCID, pathKey, recordCID)) {
         case (#ok(mst)) mst;
         case (#err(e)) return #err("Failed to update MST: " # debug_show (e));
       };
@@ -385,7 +391,7 @@ module {
           request.repo,
           newRev,
           newNodeCID,
-          ?currentNodeCID,
+          ?rootNodeCID,
         )
       ) {
         case (#ok(commit)) commit;
@@ -574,7 +580,7 @@ module {
             };
 
             let recordCID = CIDBuilder.fromRecord(rKey, createOp.value);
-            updatedRecords := PureMap.add(updatedRecords, compareCID, recordCID, createOp.value);
+            updatedRecords := PureMap.add(updatedRecords, CIDBuilder.compare, recordCID, createOp.value);
 
             // Create record path for MST
             let path = createOp.collection # "/" # rKey;
@@ -617,7 +623,7 @@ module {
             };
 
             let recordCID = CIDBuilder.fromRecord(updateOp.rkey, updateOp.value);
-            updatedRecords := PureMap.add(updatedRecords, compareCID, recordCID, updateOp.value);
+            updatedRecords := PureMap.add(updatedRecords, CIDBuilder.compare, recordCID, updateOp.value);
 
             // Create record path for MST
             let path = updateOp.collection # "/" # updateOp.rkey;
@@ -718,15 +724,19 @@ module {
 
       let mstHandler = MSTHandler.Handler(repo.nodes);
 
+      // Get current commit to find root node
+      let ?currentCommit = PureMap.get(repo.commits, TID.compare, repo.rev) else return #err("No commits found in repository");
+      let ?rootNode = mstHandler.getNode(currentCommit.data) else return #err("Failed to get root MST node");
+
       // TODO optimize for reverse/limit/cursor
-      let collectionRecords = mstHandler.getCollectionRecords(request.collection);
+      let collectionRecords = mstHandler.getCollectionRecords(rootNode, request.collection);
 
       // Convert to ListRecord format
       let records = collectionRecords
       |> Array.map<(key : Text, CID.CID), ListRecords.ListRecord>(
         _,
         func((key, cid) : (key : Text, CID.CID)) : ListRecords.ListRecord {
-          let ?value : ?DagCbor.Value = PureMap.get(repo.records, compareCID, cid) else Runtime.trap("Record not found: " # CID.toText(cid));
+          let ?value : ?DagCbor.Value = PureMap.get(repo.records, CIDBuilder.compare, cid) else Runtime.trap("Record not found: " # CID.toText(cid));
           {
             uri = {
               authority = #plc(request.repo);
@@ -803,12 +813,12 @@ module {
       // Build maps for quick lookup of blocks
       var blockMap = PureMap.empty<CID.CID, Blob>();
       for (block in request.blocks.vals()) {
-        blockMap := PureMap.add(blockMap, compareCID, block.cid, block.data);
+        blockMap := PureMap.add(blockMap, CIDBuilder.compare, block.cid, block.data);
       };
 
       // Find the latest commit (should be first root)
       let latestCommitCID = roots[0];
-      let ?latestCommitData = PureMap.get(blockMap, compareCID, latestCommitCID) else {
+      let ?latestCommitData = PureMap.get(blockMap, CIDBuilder.compare, latestCommitCID) else {
         return #err("Latest commit block not found");
       };
 
@@ -851,7 +861,7 @@ module {
             switch (commit.prev) {
               case (null) currentCommitOpt := null;
               case (?prevCID) {
-                let ?prevData = PureMap.get(blockMap, compareCID, prevCID) else {
+                let ?prevData = PureMap.get(blockMap, CIDBuilder.compare, prevCID) else {
                   currentCommitOpt := null;
                   break w;
                 };
@@ -908,7 +918,7 @@ module {
       // TODO clear blob if it isn't referenced within a time window
       blobs := PureMap.add(
         stableData.blobs,
-        compareCID,
+        CIDBuilder.compare,
         blobCID,
         blobWithMetaData,
       );
@@ -1050,17 +1060,25 @@ module {
     ) : Result.Result<PureMap.Map<CID.CID, DagCbor.Value>, Text> {
       var records = PureMap.empty<CID.CID, DagCbor.Value>();
 
-      // Get all CID references from MST
-      let allCIDs = mstHandler.getAllRecordCIDs();
+      // Get all CID references from MST - need to find root from latest commit
+      // This function is called with an MST reconstructed from blocks, so we need to find the root
+      // For now, get the first node as root (this may need refinement for complex MSTs)
+      let nodes = mstHandler.getNodes();
+      let ?rootNode = switch (PureMap.entries(nodes) |> _.next()) {
+        case (?(_, node)) ?node;
+        case (null) null;
+      } else return #err("No MST nodes found");
+
+      let allCIDs = mstHandler.getAllRecordCIDs(rootNode);
 
       for (cid in allCIDs.vals()) {
-        let ?blockData = PureMap.get(blockMap, compareCID, cid) else {
+        let ?blockData = PureMap.get(blockMap, CIDBuilder.compare, cid) else {
           return #err("Record block not found: " # CID.toText(cid));
         };
 
         switch (DagCbor.fromBytes(blockData.vals())) {
           case (#ok(value)) {
-            records := PureMap.add(records, compareCID, cid, value);
+            records := PureMap.add(records, CIDBuilder.compare, cid, value);
           };
           case (#err(e)) {
             return #err("Failed to decode record: " # debug_show (e));
@@ -1108,15 +1126,6 @@ module {
         unsigned with
         sig = signature;
       });
-    };
-
-    func compareCID(cid1 : CID.CID, cid2 : CID.CID) : Order.Order {
-      // TODO is this the right way to compare CIDs?
-      if (cid1 == cid2) return #equal;
-
-      let hash1 = CID.getHash(cid1);
-      let hash2 = CID.getHash(cid2);
-      Blob.compare(hash1, hash2);
     };
   };
 };

@@ -3,7 +3,7 @@ name = "atproto"
 version = "0.0.1"
 description = ""
 repository = "https://github.com/edjcase/motoko_atproto"
-keywords = [ "at", "protocol", "atproto", "ipld" ]
+keywords = ["at", "protocol", "atproto", "ipld"]
 license = "MIT"
 
 [dependencies]
@@ -26,6 +26,7 @@ license = "MIT"
 "xtended-iter@1" = "1.1.0"
 "xtended-collections@0" = "0.2.0"
 "url-kit@3" = "3.0.0"
+"sha2@0" = "0.1.6"
 
 [dev-dependencies]
 test = "2.1.1"

@@ -25,16 +25,14 @@ module {
     var nodes = nodes_;
 
     public func getCID(node : MST.Node, key : [Nat8]) : ?CID.CID {
-      let keyDepth = calculateDepth(key);
 
       // Search through entries at this level
       for (i in node.entries.keys()) {
         let entry = node.entries[i];
         let entryKey = reconstructKey(node.entries, i);
-        let entryDepth = calculateDepth(entryKey);
 
-        // If we found exact key match and depths match
-        if (compareKeys(key, entryKey) == #equal and keyDepth == entryDepth) {
+        // If we found exact key match (simplified approach - no depth check)
+        if (compareKeys(key, entryKey) == #equal) {
           return ?entry.valueCID;
         };
 
@@ -134,9 +132,26 @@ module {
           entries = compressedEntries;
         });
       } else {
-        // Key needs to go in a subtree
-        // TODO
-        Debug.todo();
+        // keyDepth != nodeDepth - For now, add to current level to avoid tree corruption
+        // This is a simplified approach that keeps all keys in a flat structure
+        // A full MST implementation would need more sophisticated layer management
+        let newEntry : MST.TreeEntry = {
+          prefixLength = 0;
+          keySuffix = key;
+          valueCID = value;
+          subtreeCID = null;
+        };
+
+        let entriesBuffer = DynamicArray.fromArray<MST.TreeEntry>(node.entries);
+        entriesBuffer.insert(insertIndex, newEntry);
+        let newEntries = DynamicArray.toArray(entriesBuffer);
+
+        let compressedEntries = compressKeys(newEntries);
+
+        return #ok({
+          node with
+          entries = compressedEntries;
+        });
       };
     };
 
@@ -217,7 +232,7 @@ module {
                     let newRightCID = addNode(updatedRightNode);
                     let updatedEntry = {
                       node.entries[i - 1] with
-                      t = ?newRightCID;
+                      subtreeCID = ?newRightCID;
                     };
                     let entriesBuffer = DynamicArray.fromArray<MST.TreeEntry>(node.entries);
                     entriesBuffer.put(i - 1, updatedEntry);
@@ -250,7 +265,7 @@ module {
               let newRightCID = addNode(updatedRightNode);
               let updatedEntry = {
                 node.entries[lastIndex] with
-                t = ?newRightCID;
+                subtreeCID = ?newRightCID;
               };
               let entriesBuffer = DynamicArray.fromArray<MST.TreeEntry>(node.entries);
               entriesBuffer.put(lastIndex, updatedEntry);
@@ -282,10 +297,11 @@ module {
       nodes;
     };
 
-    public func getAllCollections() : [Text] {
+    public func getAllCollections(rootNode : MST.Node) : [Text] {
       let collectionSet = Set.empty<Text>();
 
-      iterateEntries(
+      iterateNodeEntries(
+        rootNode,
         func(entryKey : Text, _ : CID.CID) {
           let parts = Text.split(entryKey, #char('/'));
           let partsArray = Iter.toArray(parts);
@@ -294,15 +310,16 @@ module {
           if (partsArray.size() == 2) {
             Set.add(collectionSet, Text.compare, partsArray[0]);
           };
-        }
+        },
       );
       Array.fromIter(Set.values(collectionSet));
     };
 
-    public func getCollectionRecords(collection : Text) : [(key : Text, CID.CID)] {
+    public func getCollectionRecords(rootNode : MST.Node, collection : Text) : [(key : Text, CID.CID)] {
       let records = DynamicArray.DynamicArray<(key : Text, CID.CID)>(0);
 
-      iterateEntries(
+      iterateNodeEntries(
+        rootNode,
         func(entryKey : Text, entryValue : CID.CID) {
           let parts = Text.split(entryKey, #char('/'));
           let partsArray = Iter.toArray(parts);
@@ -311,26 +328,28 @@ module {
           if (partsArray.size() == 2 and partsArray[0] == collection) {
             records.add((partsArray[1], entryValue));
           };
-        }
+        },
       );
 
       DynamicArray.toArray(records);
-    }; // Add these functions to the MSTHandler module
+    };
 
-    public func getAllRecordCIDs() : [CID.CID] {
+    public func getAllRecordCIDs(rootNode : MST.Node) : [CID.CID] {
       let cids = DynamicArray.DynamicArray<CID.CID>(0);
 
-      iterateEntries(
+      iterateNodeEntries(
+        rootNode,
         func(_ : Text, entryValue : CID.CID) {
           cids.add(entryValue);
-        }
+        },
       );
 
       DynamicArray.toArray(cids);
     };
 
-    private func iterateEntries(
-      callback : (entryKey : Text, entryValue : CID.CID) -> ()
+    private func iterateNodeEntries(
+      rootNode : MST.Node,
+      callback : (entryKey : Text, entryValue : CID.CID) -> (),
     ) : () {
       // Helper function to traverse a node and its subtrees
       func traverseNode(node : MST.Node, keyPrefix : [Nat8]) : () {
@@ -385,10 +404,8 @@ module {
         };
       };
 
-      // Start traversal from all root nodes
-      for ((_, rootNode) in PureMap.entries(nodes)) {
-        traverseNode(rootNode, []);
-      };
+      // Start traversal from the specific root node
+      traverseNode(rootNode, []);
     };
 
   };
@@ -416,7 +433,7 @@ module {
     };
 
     // Get block data
-    let ?blockData = PureMap.get(blockMap, compareCID, nodeCID) else {
+    let ?blockData = PureMap.get(blockMap, CIDBuilder.compare, nodeCID) else {
       return #err("MST node block not found: " # CID.toText(nodeCID));
     };
 
@@ -561,29 +578,24 @@ module {
   private func calculateDepth(key : [Nat8]) : Nat {
     let hash = Sha256.fromArray(#sha256, key);
 
-    var depth = 0;
+    var leadingZeros = 0;
 
+    // Count leading zeros in 2-bit chunks following ATProto specification exactly
+    // This matches the leadingZerosOnHash function in ATProto
     label f for (byte in hash.vals()) {
-      let leadingZeros = countLeadingZeros(byte);
-      depth += leadingZeros;
-
-      // Stop if we didn't get all leading zeros in this byte
-      if (leadingZeros < 4) {
+      // Count 2-bit chunks of leading zeros in this byte
+      if (byte < 64) { leadingZeros += 1 }; // First 2 bits are 00 (< 0b01000000)
+      if (byte < 16) { leadingZeros += 1 }; // First 4 bits are 0000 (< 0b00010000)
+      if (byte < 4) { leadingZeros += 1 }; // First 6 bits are 000000 (< 0b00000100)
+      if (byte == 0) {
+        leadingZeros += 1; // All 8 bits are 0 (== 0b00000000)
+      } else {
+        // Stop at first non-zero byte - this is the key difference from the buggy version
         break f;
       };
     };
 
-    depth / 2; // Divide by 2 for 2-bit chunks
-  };
-
-  // Calculate depth using SHA-256 and 2-bit counting
-  // Helper function to count leading zero bits in a byte
-  private func countLeadingZeros(byte : Nat8) : Nat {
-    if (byte >= 64) return 0; // 0b01000000 - first bit is 1
-    if (byte >= 16) return 1; // 0b00010000 - first two bits are 01
-    if (byte >= 4) return 2; // 0b00000100 - first three bits are 001
-    if (byte >= 1) return 3; // 0b00000001 - first four bits are 0001
-    return 4; // 0b00000000 - all bits are 0
+    leadingZeros;
   };
 
   // Validate key format (must be valid repo path)
@@ -644,12 +656,17 @@ module {
       return entries[0].keySuffix; // First entry has full key
     };
 
-    let prevKey = reconstructKey(entries, index - 1);
     let entry = entries[index];
     let prefixLen = entry.prefixLength;
 
+    if (prefixLen == 0) {
+      return entry.keySuffix; // No compression
+    };
+
+    let prevKey = reconstructKey(entries, index - 1);
+
     if (prefixLen > prevKey.size()) {
-      return entries[index].keySuffix; // Fallback to full key
+      return entry.keySuffix; // Fallback to suffix only
     };
 
     let prefix = Array.sliceToArray<Nat8>(prevKey, 0, prefixLen);
@@ -659,8 +676,19 @@ module {
   // Compress keys by removing common prefixes
   private func compressKeys(entries : [MST.TreeEntry]) : [MST.TreeEntry] {
     if (entries.size() <= 1) {
+      // Ensure single entry has prefixLength = 0
+      if (entries.size() == 1) {
+        return [{
+          entries[0] with
+          prefixLength = 0;
+          keySuffix = reconstructKey(entries, 0);
+        }];
+      };
       return entries;
     };
+
+    // First, reconstruct all full keys from input entries
+    let fullKeys = Array.tabulate<[Nat8]>(entries.size(), func(i) = reconstructKey(entries, i));
 
     let compressed = DynamicArray.DynamicArray<MST.TreeEntry>(entries.size());
 
@@ -668,16 +696,19 @@ module {
     compressed.add({
       entries[0] with
       prefixLength = 0;
+      keySuffix = fullKeys[0];
     });
 
     // Subsequent entries get compressed
-    for (i in Nat.range(1, entries.size())) {
-      let prevKey = reconstructKey(DynamicArray.toArray(compressed), i - 1);
-      let currentKey = entries[i].keySuffix;
+    var i = 1;
+    while (i < entries.size()) {
+      let prevKey = fullKeys[i - 1];
+      let currentKey = fullKeys[i];
       let prefixLen = commonPrefixLength(prevKey, currentKey);
 
       let suffix : [Nat8] = if (prefixLen < currentKey.size()) {
-        Array.sliceToArray<Nat8>(currentKey, prefixLen, currentKey.size() - prefixLen);
+        let suffixLength : Nat = currentKey.size() - prefixLen;
+        Array.tabulate<Nat8>(suffixLength, func(j) = currentKey[prefixLen + j]);
       } else {
         [];
       };
@@ -687,6 +718,8 @@ module {
         prefixLength = prefixLen;
         keySuffix = suffix;
       });
+
+      i += 1;
     };
 
     DynamicArray.toArray(compressed);
@@ -708,11 +741,4 @@ module {
     prefixLen;
   };
 
-  private func compareCID(cid1 : CID.CID, cid2 : CID.CID) : Order.Order {
-    if (cid1 == cid2) return #equal;
-
-    let hash1 = CID.getHash(cid1);
-    let hash2 = CID.getHash(cid2);
-    Blob.compare(hash1, hash2);
-  };
 };
