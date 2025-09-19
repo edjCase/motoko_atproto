@@ -602,10 +602,12 @@ module {
           description = null;
         });
         case (?record) {
-          let avatar = switch (DagCbor.getAsNullableText(record.value, "avatar", true)) {
-            case (#ok(avatar)) avatar;
-            case (#err(e)) {
-              Debug.print("Invalid avatar type in profile record: " # debug_show (e));
+          let avatar : ?Text = switch (DagCbor.get(record.value, "avatar")) {
+            case (?#text(avatarUrl)) ?avatarUrl;
+            case (?#map(avatarMap)) buildAvatarUrlFromObject(avatarMap, account.id);
+            case (null) null;
+            case (_) {
+              Debug.print("Invalid avatar type in profile record: " # debug_show (record.value));
               null;
             };
           };
@@ -652,6 +654,44 @@ module {
         verification = null; // TODO
         viewer = null; // TODO
       };
+    };
+
+    func buildAvatarUrlFromObject(
+      avatarMap : [(Text, DagCbor.Value)],
+      actorId : DID.Plc.DID,
+    ) : ?Text {
+      let type_ = switch (DagCbor.getAsText(#map(avatarMap), "$type")) {
+        case (#ok(type_)) type_;
+        case (#err(e)) {
+          Debug.print("Invalid avatar type in profile record: " # debug_show (e));
+          return null;
+        };
+      };
+      if (type_ != "blob") {
+        Debug.print("Unsupported avatar type in profile record: " # debug_show (type_));
+        return null;
+      };
+      let cidText = switch (DagCbor.getAsText(#map(avatarMap), "ref.$link")) {
+        case (#ok(cid)) cid;
+        case (#err(e)) {
+          Debug.print("Invalid avatar ref type in profile record: " # debug_show (e));
+          return null;
+        };
+      };
+      let mimeType = switch (DagCbor.getAsText(#map(avatarMap), "mimeType")) {
+        case (#ok(mimeType)) mimeType;
+        case (#err(e)) {
+          Debug.print("Invalid avatar type in profile record: " # debug_show (e));
+          return null;
+        };
+      };
+
+      let ?imageType = Text.stripStart(mimeType, #text("image/")) else {
+        Debug.print("Invalid avatar mimeType in profile record, expected image/*: " # debug_show (mimeType));
+        return null;
+      };
+      let actorIdText = DID.Plc.toText(actorId);
+      ?("https://cdn.bsky.app/img/avatar/plain/" # actorIdText # "/" # cidText # "@" # imageType);
     };
 
     func getProfiles(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
