@@ -80,7 +80,7 @@ module {
       };
 
       if (not isValidKey(key)) {
-        return #err("Invalid key: " # debug_show (key));
+        return #err("Invalid key: " # keyToText(key));
       };
       let ?node = getNode(rootNodeCID) else return #err("Node not found: " # CID.toText(rootNodeCID));
       let keyDepth = calculateDepth(key);
@@ -94,7 +94,7 @@ module {
         let comparison = compareKeys(key, entryKey);
 
         if (comparison == #equal) {
-          return #err("Key already exists: " # debug_show (key));
+          return #err("Key already exists: " # keyToText(key));
         } else if (comparison == #less) {
           insertIndex := i;
           found := true;
@@ -155,6 +155,117 @@ module {
       };
     };
 
+    // Helper function to convert key bytes to readable text
+    private func keyToText(key : [Nat8]) : Text {
+      switch (Text.decodeUtf8(Blob.fromArray(key))) {
+        case (?text) text;
+        case (null) debug_show (key); // Fallback to debug format if not valid UTF-8
+      };
+    };
+
+    // Upsert (insert or update) a CID in the MST
+    public func upsertCID(
+      rootNodeCID : CID.CID,
+      key : [Nat8],
+      value : CID.CID,
+    ) : Result.Result<MST.Node, Text> {
+      if (key.size() == 0) {
+        return #err("Key cannot be empty");
+      };
+
+      if (not isValidKey(key)) {
+        return #err("Invalid key: " # keyToText(key));
+      };
+      let ?node = getNode(rootNodeCID) else return #err("Node not found: " # CID.toText(rootNodeCID));
+      let keyDepth = calculateDepth(key);
+
+      // Find insertion/update point
+      var insertIndex = 0;
+      var updateIndex : ?Nat = null;
+
+      label f for (i in node.entries.keys()) {
+        let entryKey = reconstructKey(node.entries, i);
+        let comparison = compareKeys(key, entryKey);
+
+        if (comparison == #equal) {
+          // Key exists, we'll update it
+          updateIndex := ?i;
+          break f;
+        } else if (comparison == #less) {
+          insertIndex := i;
+          break f;
+        } else {
+          insertIndex := i + 1;
+        };
+      };
+
+      switch (updateIndex) {
+        case (?idx) {
+          // Update existing entry
+          let entriesBuffer = DynamicArray.fromArray<MST.TreeEntry>(node.entries);
+          let existingEntry = entriesBuffer.get(idx);
+          let updatedEntry : MST.TreeEntry = {
+            existingEntry with
+            valueCID = value;
+          };
+          entriesBuffer.put(idx, updatedEntry);
+          let newEntries = DynamicArray.toArray(entriesBuffer);
+
+          return #ok({
+            node with
+            entries = newEntries;
+          });
+        };
+        case (null) {
+          // Insert new entry (same logic as addCID)
+          let nodeDepth = if (node.entries.size() > 0) {
+            calculateDepth(reconstructKey(node.entries, 0));
+          } else {
+            keyDepth;
+          };
+
+          if (keyDepth == nodeDepth) {
+            let newEntry : MST.TreeEntry = {
+              prefixLength = 0;
+              keySuffix = key;
+              valueCID = value;
+              subtreeCID = null;
+            };
+
+            let entriesBuffer = DynamicArray.fromArray<MST.TreeEntry>(node.entries);
+            entriesBuffer.insert(insertIndex, newEntry);
+            let newEntries = DynamicArray.toArray(entriesBuffer);
+
+            let compressedEntries = compressKeys(newEntries);
+
+            return #ok({
+              node with
+              entries = compressedEntries;
+            });
+          } else {
+            // Simplified approach: add to current level
+            let newEntry : MST.TreeEntry = {
+              prefixLength = 0;
+              keySuffix = key;
+              valueCID = value;
+              subtreeCID = null;
+            };
+
+            let entriesBuffer = DynamicArray.fromArray<MST.TreeEntry>(node.entries);
+            entriesBuffer.insert(insertIndex, newEntry);
+            let newEntries = DynamicArray.toArray(entriesBuffer);
+
+            let compressedEntries = compressKeys(newEntries);
+
+            return #ok({
+              node with
+              entries = compressedEntries;
+            });
+          };
+        };
+      };
+    };
+
     public func removeCID(
       rootNodeCID : CID.CID,
       key : [Nat8],
@@ -164,7 +275,7 @@ module {
       };
 
       if (not isValidKey(key)) {
-        return #err("Invalid key: " # debug_show (key));
+        return #err("Invalid key: " # keyToText(key));
       };
 
       let ?node = getNode(rootNodeCID) else return #err("Node not found: " # CID.toText(rootNodeCID));

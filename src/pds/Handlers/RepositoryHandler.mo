@@ -190,10 +190,13 @@ module {
         case (null) TID.toText(tidGenerator.next());
       };
 
+      // Validate swapCommit if provided
       switch (request.swapCommit) {
-        case (?_) {
-          // Handle swapCommit field
-          Debug.todo();
+        case (?expectedCommitCID) {
+          // Check that the current head commit matches the expected CID
+          if (repo.head != expectedCommitCID) {
+            return #err("Swap commit failed: expected " # CID.toText(expectedCommitCID) # " but current head is " # CID.toText(repo.head));
+          };
         };
         case (null) ();
       };
@@ -233,13 +236,22 @@ module {
       // Use the commit's data field as the root node CID
       let rootNodeCID = currentCommit.data;
 
+      // Ensure the root node exists in the MST handler
+      switch (mstHandler.getNode(rootNodeCID)) {
+        case (null) {
+          return #err("MST root node not found in repository. Repository may be corrupted or incompletely loaded. Root CID: " # CID.toText(rootNodeCID));
+        };
+        case (?_) {}; // Node exists, continue
+      };
+
       // Add to MST
       let newNode = switch (mstHandler.addCID(rootNodeCID, pathKey, recordCID)) {
         case (#ok(mst)) mst;
         case (#err(e)) return #err("Failed to add to MST: " # debug_show (e));
       };
 
-      let newNodeCID = CIDBuilder.fromMSTNode(newNode);
+      // Store the new root node in the MST handler
+      let newNodeCID = mstHandler.addNode(newNode);
       // Create new commit
       let newRev = tidGenerator.next();
 
@@ -331,18 +343,39 @@ module {
         return #err("Record key exceeds maximum length of 512 characters");
       };
 
+      // Validate swapCommit if provided
       switch (request.swapCommit) {
-        case (?_) {
-          // Handle swapCommit field
-          Debug.todo();
+        case (?expectedCommitCID) {
+          // Check that the current head commit matches the expected CID
+          if (repo.head != expectedCommitCID) {
+            return #err("Swap commit failed: expected " # CID.toText(expectedCommitCID) # " but current head is " # CID.toText(repo.head));
+          };
         };
         case (null) ();
       };
 
+      // Validate swapRecord if provided (for putRecord, ensure current record matches or doesn't exist)
       switch (request.swapRecord) {
-        case (?_) {
-          // Handle swapRecord field
-          Debug.todo();
+        case (?expectedRecordCID) {
+          // Check if record currently exists
+          let path = request.collection # "/" # request.rkey;
+          let pathKey = MST.pathToKey(path);
+          let tempMstHandler = MSTHandler.Handler(repo.nodes);
+          let ?currentCommit = PureMap.get<TID.TID, Commit>(repo.commits, TID.compare, repo.rev) else return #err("No commits found in repository");
+          let ?rootNode = tempMstHandler.getNode(currentCommit.data) else return #err("MST root node not found for swap validation");
+
+          switch (tempMstHandler.getCID(rootNode, pathKey)) {
+            case (?currentRecordCID) {
+              // Record exists, check if it matches expected CID
+              if (currentRecordCID != expectedRecordCID) {
+                return #err("Swap record failed: expected " # CID.toText(expectedRecordCID) # " but current record is " # CID.toText(currentRecordCID));
+              };
+            };
+            case (null) {
+              // Record doesn't exist but swap expects it to
+              return #err("Swap record failed: expected record " # CID.toText(expectedRecordCID) # " but record does not exist");
+            };
+          };
         };
         case (null) ();
       };
@@ -376,13 +409,26 @@ module {
       // Use the commit's data field as the root node CID
       let rootNodeCID = currentCommit.data;
 
-      // Update MST (this will replace existing record or add new one)
-      let newNode = switch (mstHandler.addCID(rootNodeCID, pathKey, recordCID)) {
-        case (#ok(mst)) mst;
-        case (#err(e)) return #err("Failed to update MST: " # debug_show (e));
+      // Ensure the root node exists in the MST handler
+      // If not, we need to reconstruct it from existing data or handle the error
+      switch (mstHandler.getNode(rootNodeCID)) {
+        case (null) {
+          // The root node is missing from our nodes map
+          // This could happen if the repository was loaded from stable storage
+          // and not all MST nodes were properly restored
+          return #err("MST root node not found in repository. Repository may be corrupted or incompletely loaded. Root CID: " # CID.toText(rootNodeCID));
+        };
+        case (?_) {}; // Node exists, continue
       };
 
-      let newNodeCID = CIDBuilder.fromMSTNode(newNode);
+      // Update MST (this will replace existing record or add new one)
+      let newNode = switch (mstHandler.upsertCID(rootNodeCID, pathKey, recordCID)) {
+        case (#ok(mst)) mst;
+        case (#err(e)) return #err("Failed to update MST: " # e);
+      };
+
+      // Store the new root node in the MST handler
+      let newNodeCID = mstHandler.addNode(newNode);
       // Create new commit
       let newRev = tidGenerator.next();
 
@@ -441,18 +487,39 @@ module {
     public func deleteRecord(request : DeleteRecord.Request) : async* Result.Result<DeleteRecord.Response, Text> {
       let ?repo = PureMap.get(repositories, DIDModule.comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
 
+      // Validate swapCommit if provided
       switch (request.swapCommit) {
-        case (?_) {
-          // Handle swapCommit field
-          Debug.todo();
+        case (?expectedCommitCID) {
+          // Check that the current head commit matches the expected CID
+          if (repo.head != expectedCommitCID) {
+            return #err("Swap commit failed: expected " # CID.toText(expectedCommitCID) # " but current head is " # CID.toText(repo.head));
+          };
         };
         case (null) ();
       };
 
+      // Validate swapRecord if provided (for deleteRecord, ensure current record matches)
       switch (request.swapRecord) {
-        case (?_) {
-          // Handle swapRecord field
-          Debug.todo();
+        case (?expectedRecordCID) {
+          // Check if record currently exists and matches expected CID
+          let path = request.collection # "/" # request.rkey;
+          let pathKey = MST.pathToKey(path);
+          let tempMstHandler = MSTHandler.Handler(repo.nodes);
+          let ?currentCommit = PureMap.get<TID.TID, Commit>(repo.commits, TID.compare, repo.rev) else return #err("No commits found in repository");
+          let ?rootNode = tempMstHandler.getNode(currentCommit.data) else return #err("MST root node not found for swap validation");
+
+          switch (tempMstHandler.getCID(rootNode, pathKey)) {
+            case (?currentRecordCID) {
+              // Record exists, check if it matches expected CID
+              if (currentRecordCID != expectedRecordCID) {
+                return #err("Swap record failed: expected " # CID.toText(expectedRecordCID) # " but current record is " # CID.toText(currentRecordCID));
+              };
+            };
+            case (null) {
+              // Record doesn't exist but swap expects it to
+              return #err("Swap record failed: expected record " # CID.toText(expectedRecordCID) # " but record does not exist");
+            };
+          };
         };
         case (null) ();
       };
@@ -473,7 +540,7 @@ module {
       let currentNodeCID = currentCommit.data;
 
       // Check if record exists before trying to delete
-      let ?rootNode = mstHandler.getNode(currentCommit.data) else return #err("Failed to get root node from MST");
+      let ?rootNode = mstHandler.getNode(currentCommit.data) else return #err("MST root node not found in repository. Repository may be corrupted or incompletely loaded. Root CID: " # CID.toText(currentCommit.data));
       let ?_ = mstHandler.getCID(rootNode, pathKey) else return #err("Record not found at path: " # path);
 
       // Remove from MST
@@ -482,7 +549,8 @@ module {
         case (#err(e)) return #err("Failed to remove from MST: " # debug_show (e));
       };
 
-      let newNodeCID = CIDBuilder.fromMSTNode(newNode);
+      // Store the new root node in the MST handler
+      let newNodeCID = mstHandler.addNode(newNode);
       // Create new commit
       let newRev = tidGenerator.next();
 
@@ -1126,6 +1194,29 @@ module {
         unsigned with
         sig = signature;
       });
+    };
+
+    // Helper function to validate repository MST integrity
+    public func validateRepositoryIntegrity(repoId : DID.Plc.DID) : Result.Result<(), Text> {
+      let ?repo = PureMap.get(repositories, DIDModule.comparePlcDID, repoId) else return #err("Repository not found");
+
+      // Get the current commit
+      let ?currentCommit = PureMap.get<TID.TID, Commit>(
+        repo.commits,
+        TID.compare,
+        repo.rev,
+      ) else return #err("No current commit found");
+
+      let rootNodeCID = currentCommit.data;
+      let mstHandler = MSTHandler.Handler(repo.nodes);
+
+      // Check if root node exists
+      switch (mstHandler.getNode(rootNodeCID)) {
+        case (null) {
+          #err("Repository integrity error: MST root node missing. Root CID: " # CID.toText(rootNodeCID) # ". Available nodes: " # debug_show (PureMap.size(repo.nodes)));
+        };
+        case (?_) #ok(());
+      };
     };
   };
 };

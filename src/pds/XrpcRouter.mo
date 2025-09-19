@@ -38,6 +38,7 @@ import DynamicArray "mo:xtended-collections@0/DynamicArray";
 import Runtime "mo:core@1/Runtime";
 import ServerInfo "Types/ServerInfo";
 import DagCbor "mo:dag-cbor@2";
+import Debug "mo:core@1/Debug";
 
 module {
 
@@ -601,9 +602,28 @@ module {
           description = null;
         });
         case (?record) {
-          let #ok(avatar) = DagCbor.getAsNullableText(record.value, "avatar", true) else Runtime.trap("Invalid avatar type in profile record");
-          let #ok(displayName) = DagCbor.getAsNullableText(record.value, "displayName", true) else Runtime.trap("Invalid displayName type in profile record");
-          let #ok(description) = DagCbor.getAsNullableText(record.value, "description", true) else Runtime.trap("Invalid description type in profile record");
+          let avatar = switch (DagCbor.getAsNullableText(record.value, "avatar", true)) {
+            case (#ok(avatar)) avatar;
+            case (#err(e)) {
+              Debug.print("Invalid avatar type in profile record: " # debug_show (e));
+              null;
+            };
+          };
+          let displayName = switch (DagCbor.getAsNullableText(record.value, "displayName", true)) {
+            case (#ok(displayName)) displayName;
+            case (#err(e)) {
+              Debug.print("Invalid displayName type in profile record: " # debug_show (e));
+              null;
+            };
+          };
+
+          let description = switch (DagCbor.getAsNullableText(record.value, "description", true)) {
+            case (#ok(description)) description;
+            case (#err(e)) {
+              Debug.print("Invalid description type in profile record: " # debug_show (e));
+              null;
+            };
+          };
           {
             avatar = avatar;
             displayName = displayName;
