@@ -3,8 +3,6 @@ import Array "mo:core@1/Array";
 import Repository "./Types/Repository";
 import RepositoryHandler "Handlers/RepositoryHandler";
 import ServerInfoHandler "Handlers/ServerInfoHandler";
-import AccountHandler "Handlers/AccountHandler";
-import BskyHandler "Handlers/BskyHandler";
 import RouteContext "mo:liminal@1/RouteContext";
 import Route "mo:liminal@1/Route";
 import Serde "mo:serde";
@@ -23,9 +21,6 @@ import PutRecord "./Types/Lexicons/Com/Atproto/Repo/PutRecord";
 import DeleteRecord "./Types/Lexicons/Com/Atproto/Repo/DeleteRecord";
 import UploadBlob "./Types/Lexicons/Com/Atproto/Repo/UploadBlob";
 import ListBlobs "./Types/Lexicons/Com/Atproto/Sync/ListBlobs";
-import CreateSession "./Types/Lexicons/Com/Atproto/Server/CreateSession";
-import GetSession "./Types/Lexicons/Com/Atproto/Server/GetSession";
-import CreateAccount "./Types/Lexicons/Com/Atproto/Server/CreateAccount";
 import ApplyWrites "./Types/Lexicons/Com/Atproto/Repo/ApplyWrites";
 import GetProfile "./Types/Lexicons/App/Bsky/Actor/GetProfile";
 import GetProfiles "./Types/Lexicons/App/Bsky/Actor/GetProfiles";
@@ -45,8 +40,6 @@ module {
   public class Router(
     repositoryHandler : RepositoryHandler.Handler,
     serverInfoHandler : ServerInfoHandler.Handler,
-    accountHandler : AccountHandler.Handler,
-    bskyHandler : BskyHandler.Handler,
   ) {
 
     public func routeGet<system>(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
@@ -72,9 +65,6 @@ module {
         case ("com.atproto.repo.listrecords") listRecords(routeContext);
         case ("com.atproto.repo.putrecord") await* putRecord(routeContext);
         case ("com.atproto.repo.uploadblob") uploadBlob(routeContext);
-        case ("com.atproto.server.createaccount") await* createAccount(routeContext);
-        case ("com.atproto.server.createsession") await* createSession(routeContext);
-        case ("com.atproto.server.getsession") await* getSession(routeContext);
         case ("com.atproto.server.describeserver") describeServer(routeContext);
         case ("com.atproto.sync.listblobs") listBlobs(routeContext);
         case ("com.atproto.sync.listrepos") listRepos(routeContext);
@@ -166,18 +156,33 @@ module {
           #error(#message("Invalid repo DID: " # e)),
         );
       };
-
-      let request : DescribeRepo.Request = {
-        repo = repo;
+      let serverInfo = serverInfoHandler.get();
+      if (repo != serverInfo.plcDid) {
+        return routeContext.buildResponse(
+          #notFound,
+          #error(#message("Repository not found: " # repoText)),
+        );
       };
-      let response = switch (await* repositoryHandler.describe(request)) {
-        case (#ok(response)) response;
-        case (#err(e)) {
-          return routeContext.buildResponse(
-            #badRequest,
-            #error(#message("Failed to describe repository: " # e)),
-          );
-        };
+
+      let collections = repositoryHandler.getAllCollections();
+
+      let handle = serverInfo.hostname;
+
+      let verificationKey : DID.Key.DID = switch (await* keyHandler.getPublicKey(#verification)) {
+        case (#ok(did)) did;
+        case (#err(e)) return #err("Failed to get verification public key: " # e);
+      };
+      let alsoKnownAs = [AtUri.toText({ authority = #plc(serverInfo.plcDid); collection = null })];
+      let didDoc = DIDModule.generateDIDDocument(#plc(request.repo), alsoKnownAs, verificationKey);
+
+      let handleIsCorrect = true; // TODO?
+
+      let response : DescribeRepo.Response = {
+        handle = handle;
+        did = repo;
+        didDoc = didDoc;
+        collections = collections;
+        handleIsCorrect = handleIsCorrect;
       };
       let responseJson = DescribeRepo.toJson(response);
       routeContext.buildResponse(
@@ -479,74 +484,6 @@ module {
       };
 
       let responseJson = ListBlobs.toJson(response);
-      routeContext.buildResponse(
-        #ok,
-        #json(responseJson),
-      );
-    };
-
-    func createAccount(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
-      let request = switch (parseRequestFromBody(routeContext, CreateAccount.fromJson)) {
-        case (#ok(req)) req;
-        case (#err(e)) return routeContext.buildResponse(
-          #badRequest,
-          #error(#message(e)),
-        );
-      };
-
-      let response = switch (await* accountHandler.create(request)) {
-        case (#ok(response)) response;
-        case (#err(e)) return routeContext.buildResponse(
-          #badRequest,
-          #error(#message("Failed to create account: " # e)),
-        );
-      };
-      let responseJson = CreateAccount.toJson(response);
-      routeContext.buildResponse(
-        #ok,
-        #json(responseJson),
-      );
-    };
-
-    func createSession(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
-      let request = switch (parseRequestFromBody(routeContext, CreateSession.fromJson)) {
-        case (#ok(req)) req;
-        case (#err(e)) return routeContext.buildResponse(
-          #badRequest,
-          #error(#message(e)),
-        );
-      };
-
-      let response = switch (await* accountHandler.createSession(request)) {
-        case (#ok(response)) response;
-        case (#err(e)) return routeContext.buildResponse(
-          #badRequest,
-          #error(#message("Failed to create session: " # e)),
-        );
-      };
-      let responseJson = CreateSession.toJson(response);
-      routeContext.buildResponse(
-        #ok,
-        #json(responseJson),
-      );
-    };
-
-    func getSession(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
-      let ?actorId = getRequestActorId(routeContext) else return routeContext.buildResponse(
-        #unauthorized,
-        #empty,
-      );
-
-      // Get session info from the account handler
-      let response = switch (await* accountHandler.getSession(actorId)) {
-        case (#ok(response)) response;
-        case (#err(e)) return routeContext.buildResponse(
-          #unauthorized,
-          #error(#message("Failed to get session: " # e)),
-        );
-      };
-
-      let responseJson = GetSession.toJson(response);
       routeContext.buildResponse(
         #ok,
         #json(responseJson),

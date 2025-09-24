@@ -41,7 +41,7 @@ import Int "mo:core@1/Int";
 
 module {
   public type StableData = {
-    repositories : PureMap.Map<DID.Plc.DID, RepositoryWithData>;
+    repository : RepositoryWithData;
     blobs : PureMap.Map<CID.CID, BlobWithMetaData>;
   };
 
@@ -53,7 +53,7 @@ module {
     sig : Blob;
   };
 
-  public type RepositoryWithData = Repository.RepositoryWithoutDID and {
+  public type RepositoryWithData = Repository.Repository and {
     commits : PureMap.Map<TID.TID, Commit>;
     records : PureMap.Map<CID.CID, DagCbor.Value>;
     nodes : PureMap.Map<Text, MST.Node>;
@@ -66,119 +66,48 @@ module {
     createdAt : Time.Time;
   };
 
+  public type CreateRecordRequest = {
+    rkey : ?Text;
+    swapCommit : ?CID.CID;
+    validate : ?Bool;
+    record : DagCbor.Value;
+    collection : Text;
+  };
+
   public class Handler(
     stableData : StableData,
     keyHandler : KeyHandler.Handler,
     tidGenerator : TID.Generator,
     serverInfoHandler : ServerInfoHandler.Handler,
   ) {
-    var repositories = stableData.repositories;
+    var repository = stableData.repository;
     var blobs = stableData.blobs;
 
-    public func getAll(limit : Nat) : [Repository.Repository] {
-      return PureMap.entries(repositories)
-      |> Iter.take(_, limit)
-      |> Iter.map(
-        _,
-        func((did, repo) : (DID.Plc.DID, RepositoryWithData)) : Repository.Repository {
-          {
-            repo with
-            did = did;
-          };
-        },
-      )
-      |> Iter.toArray(_);
+    public func get() : Repository.Repository {
+      repository;
     };
 
-    public func get(id : DID.Plc.DID) : ?Repository.Repository {
-      let ?repo = PureMap.get(repositories, DIDModule.comparePlcDID, id) else return null;
-      ?{
-        repo with
-        did = id;
-      };
-    };
-
-    public func describe(request : DescribeRepo.Request) : async* Result.Result<DescribeRepo.Response, Text> {
-      let ?repo = PureMap.get(repositories, DIDModule.comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
-
-      let mstHandler = MSTHandler.Handler(repo.nodes);
+    public func getAllCollections() : Result.Result<[ListRecords.CollectionInfo], Text> {
+      let mstHandler = MSTHandler.Handler(repository.nodes);
 
       // Get current commit to find root node
-      let ?currentCommit = PureMap.get(repo.commits, TID.compare, repo.rev) else return #err("No commits found in repository");
+      let ?currentCommit = PureMap.get(
+        repository.commits,
+        TID.compare,
+        repository.rev,
+      ) else return #err("No commits found in repository");
       let ?rootNode = mstHandler.getNode(currentCommit.data) else return #err("Failed to get root MST node");
 
       let collections = mstHandler.getAllCollections(rootNode);
 
-      let serverInfo = serverInfoHandler.get();
-
-      let handle = serverInfo.hostname;
-
-      let verificationKey : DID.Key.DID = switch (await* keyHandler.getPublicKey(#verification)) {
-        case (#ok(did)) did;
-        case (#err(e)) return #err("Failed to get verification public key: " # e);
-      };
-      let alsoKnownAs = [AtUri.toText({ authority = #plc(serverInfo.plcDid); collection = null })];
-      let didDoc = DIDModule.generateDIDDocument(#plc(request.repo), alsoKnownAs, verificationKey);
-
-      let handleIsCorrect = true; // TODO?
-
       #ok({
-        handle = handle;
-        did = request.repo;
-        didDoc = didDoc;
         collections = collections;
-        handleIsCorrect = handleIsCorrect;
-      });
-    };
-
-    public func create(
-      id : DID.Plc.DID
-    ) : async* Result.Result<Repository.Repository, Text> {
-
-      let mstHandler = MSTHandler.Handler(PureMap.empty<Text, MST.Node>());
-      // First node is empty
-      let newMST : MST.Node = {
-        leftSubtreeCID = null;
-        entries = [];
-      };
-      let rev = tidGenerator.next();
-      let newMSTCID = mstHandler.addNode(newMST);
-      let signedCommit = switch (await* createCommit(id, rev, newMSTCID, null)) {
-        case (#ok(commit)) commit;
-        case (#err(e)) return #err("Failed to create commit: " # e);
-      };
-      let signedCommitCID = CIDBuilder.fromCommit(signedCommit);
-      let newRepo : RepositoryWithData = {
-        head = signedCommitCID;
-        rev = rev;
-        active = true;
-        status = null;
-        commits = PureMap.singleton<TID.TID, Commit>(rev, signedCommit);
-        records = PureMap.empty<CID.CID, DagCbor.Value>();
-        nodes = mstHandler.getNodes();
-        blobs = PureMap.empty<CID.CID, BlobRef.BlobRef>();
-      };
-      let (newRepositories, isNewKey) = PureMap.insert(
-        repositories,
-        DIDModule.comparePlcDID,
-        id,
-        newRepo,
-      );
-      if (not isNewKey) {
-        return #err("Repository with DID " # DID.Plc.toText(id) # " already exists");
-      };
-      repositories := newRepositories;
-      #ok({
-        newRepo with
-        did = id;
       });
     };
 
     public func createRecord(
-      request : CreateRecord.Request
+      request : CreateRecordRequest
     ) : async* Result.Result<CreateRecord.Response, Text> {
-
-      let ?repo = PureMap.get(repositories, DIDModule.comparePlcDID, request.repo) else return #err("Repository not found: " # DID.Plc.toText(request.repo));
 
       let rKey : Text = switch (request.rkey) {
         case (?rkey) {

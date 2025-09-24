@@ -21,7 +21,7 @@ import DagPb "mo:dag-pb@0";
 
 module {
 
-  public class Handler(nodes_ : PureMap.Map<Text, MST.Node>) {
+  public class MerkleSearchTree(nodes_ : PureMap.Map<Text, MST.Node>) {
     var nodes = nodes_;
 
     public func getCID(node : MST.Node, key : [Nat8]) : ?CID.CID {

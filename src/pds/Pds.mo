@@ -11,44 +11,39 @@ import RepositoryHandler "Handlers/RepositoryHandler";
 import ServerInfoHandler "Handlers/ServerInfoHandler";
 import KeyHandler "Handlers/KeyHandler";
 import AccountHandler "Handlers/AccountHandler";
-import DIDDirectoryHandler "Handlers/DIDDirectoryHandler";
 import BskyHandler "Handlers/BskyHandler";
 import JwtHandler "Handlers/JwtHandler";
 import AuthMiddleware "Middleware/AuthMiddleware";
-import ServerInfo "Types/ServerInfo";
+import ServerInfo "ServerInfo";
 import DID "mo:did@3";
 import TID "mo:tid@1";
 import CID "mo:cid@1";
 import PureMap "mo:core@1/pure/Map";
 import Json "mo:json@1";
-import UploadBlob "Types/Lexicons/Com/Atproto/Repo/UploadBlob";
-import CreateAccount "Types/Lexicons/Com/Atproto/Server/CreateAccount";
+import UploadBlob "../atproto/Types/Lexicons/Com/Atproto/Repo/UploadBlob";
+import CreateAccount "../atproto/Types/Lexicons/Com/Atproto/Server/CreateAccount";
 
-persistent actor {
+persistent actor class Pds(
+  initialData : {
+    plcIdentifier : Text;
+  }
+) {
   transient let tidGenerator = TID.Generator();
 
   var repositoryStableData : RepositoryHandler.StableData = {
-    repositories = PureMap.empty<DID.Plc.DID, RepositoryHandler.RepositoryWithData>();
+    repository = null; // TODO
     blobs = PureMap.empty<CID.CID, RepositoryHandler.BlobWithMetaData>();
   };
   var serverInfoStableData : ServerInfoHandler.StableData = {
     info = null;
+    plcIdentifier = DID.Plc.fromIdentifier(initialData.plcIdentifier);
   };
   var keyHandlerStableData : KeyHandler.StableData = {
     verificationDerivationPath = ["\00"]; // TODO: configure properly
   };
-  var accountStableData : AccountHandler.StableData = {
-    accounts = PureMap.empty<DID.Plc.DID, AccountHandler.AccountData>();
-    sessions = PureMap.empty<Text, AccountHandler.Session>();
-  };
-  var bskyStableData : BskyHandler.StableData = {
-    preferences = PureMap.empty<DID.Plc.DID, BskyHandler.Preferences>();
-  };
 
   // Handlers
   transient var keyHandler = KeyHandler.Handler(keyHandlerStableData);
-  transient var jwtHandler = JwtHandler.Handler(keyHandler);
-  transient var didDirectoryHandler = DIDDirectoryHandler.Handler(keyHandler);
   transient var serverInfoHandler = ServerInfoHandler.Handler(serverInfoStableData);
   transient var repositoryHandler = RepositoryHandler.Handler(
     repositoryStableData,
@@ -56,22 +51,11 @@ persistent actor {
     tidGenerator,
     serverInfoHandler,
   );
-  transient var accountHandler = AccountHandler.Handler(
-    accountStableData,
-    keyHandler,
-    serverInfoHandler,
-    didDirectoryHandler,
-    jwtHandler,
-    repositoryHandler,
-  );
-  transient var bskyHandler = BskyHandler.Handler(bskyStableData);
 
   // Routers
   transient var xrpcRouter = XrpcRouter.Router(
     repositoryHandler,
     serverInfoHandler,
-    accountHandler,
-    bskyHandler,
   );
   transient var wellKnownRouter = WellKnownRouter.Router(
     serverInfoHandler,
@@ -82,13 +66,10 @@ persistent actor {
     keyHandlerStableData := keyHandler.toStableData();
     serverInfoStableData := serverInfoHandler.toStableData();
     repositoryStableData := repositoryHandler.toStableData();
-    accountStableData := accountHandler.toStableData();
-    bskyStableData := bskyHandler.toStableData();
   };
 
   system func postupgrade() {
     keyHandler := KeyHandler.Handler(keyHandlerStableData);
-    jwtHandler := JwtHandler.Handler(keyHandler);
     didDirectoryHandler := DIDDirectoryHandler.Handler(keyHandler);
     serverInfoHandler := ServerInfoHandler.Handler(serverInfoStableData);
     repositoryHandler := RepositoryHandler.Handler(
@@ -97,15 +78,6 @@ persistent actor {
       tidGenerator,
       serverInfoHandler,
     );
-    accountHandler := AccountHandler.Handler(
-      accountStableData,
-      keyHandler,
-      serverInfoHandler,
-      didDirectoryHandler,
-      jwtHandler,
-      repositoryHandler,
-    );
-    bskyHandler := BskyHandler.Handler(bskyStableData);
     xrpcRouter := XrpcRouter.Router(
       repositoryHandler,
       serverInfoHandler,
@@ -137,7 +109,6 @@ persistent actor {
         allowHeaders = [];
         allowMethods = [#get, #post];
       }),
-      AuthMiddleware.new(keyHandler), // Custom auth middleware to extract actorId from Authorization header
       RouterMiddleware.new(routerConfig),
     ];
     errorSerializer = Liminal.defaultJsonErrorSerializer;
