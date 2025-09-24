@@ -6,7 +6,7 @@ import AtUri "../../../../AtUri";
 import Json "mo:json@1";
 import Common "./Common";
 import Result "mo:core@1/Result";
-import JsonDagCborMapper "../../../../../JsonDagCborMapper";
+import JsonDagCborMapper "../../../../JsonDagCborMapper";
 
 module {
 

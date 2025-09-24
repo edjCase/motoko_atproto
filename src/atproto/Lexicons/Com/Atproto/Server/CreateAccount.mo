@@ -3,7 +3,7 @@ import Json "mo:json@1";
 import Result "mo:core@1/Result";
 import DIDDocument "../../../../DIDDocument";
 import DagCbor "mo:dag-cbor@2";
-import JsonDagCborMapper "../../../../../JsonDagCborMapper";
+import JsonDagCborMapper "../../../../JsonDagCborMapper";
 
 module {
 

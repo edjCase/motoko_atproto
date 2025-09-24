@@ -5,26 +5,26 @@ import DynamicArray "mo:xtended-collections@0/DynamicArray";
 import Text "mo:core@1/Text";
 import Sha256 "mo:sha2/Sha256";
 import Array "mo:core@1/Array";
-import MST "../Types/MST";
 import Order "mo:core@1/Order";
 import Iter "mo:core@1/Iter";
 import Nat "mo:core@1/Nat";
 import Nat8 "mo:core@1/Nat8";
 import Char "mo:core@1/Char";
 import Debug "mo:core@1/Debug";
-import CIDBuilder "../CIDBuilder";
+import CIDBuilder "./CIDBuilder";
 import PureMap "mo:core@1/pure/Map";
 import Set "mo:core@1/Set";
 import Runtime "mo:core@1/Runtime";
 import DagCbor "mo:dag-cbor@2";
 import DagPb "mo:dag-pb@0";
+import MerkleNode "MerkleNode";
 
 module {
 
-  public class MerkleSearchTree(nodes_ : PureMap.Map<Text, MST.Node>) {
+  public class MerkleSearchTree(nodes_ : PureMap.Map<Text, MerkleNode.Node>) {
     var nodes = nodes_;
 
-    public func getCID(node : MST.Node, key : [Nat8]) : ?CID.CID {
+    public func getCID(node : MerkleNode.Node, key : [Nat8]) : ?CID.CID {
 
       // Search through entries at this level
       for (i in node.entries.keys()) {
@@ -74,7 +74,7 @@ module {
       rootNodeCID : CID.CID,
       key : [Nat8],
       value : CID.CID,
-    ) : Result.Result<MST.Node, Text> {
+    ) : Result.Result<MerkleNode.Node, Text> {
       if (key.size() == 0) {
         return #err("Key cannot be empty");
       };
@@ -113,14 +113,14 @@ module {
 
       if (keyDepth == nodeDepth) {
         // Add entry at this level
-        let newEntry : MST.TreeEntry = {
+        let newEntry : MerkleNode.TreeEntry = {
           prefixLength = 0; // Will be calculated when compressing
           keySuffix = key;
           valueCID = value;
           subtreeCID = null;
         };
 
-        let entriesBuffer = DynamicArray.fromArray<MST.TreeEntry>(node.entries);
+        let entriesBuffer = DynamicArray.fromArray<MerkleNode.TreeEntry>(node.entries);
         entriesBuffer.insert(insertIndex, newEntry);
         let newEntries = DynamicArray.toArray(entriesBuffer);
 
@@ -135,14 +135,14 @@ module {
         // keyDepth != nodeDepth - For now, add to current level to avoid tree corruption
         // This is a simplified approach that keeps all keys in a flat structure
         // A full MST implementation would need more sophisticated layer management
-        let newEntry : MST.TreeEntry = {
+        let newEntry : MerkleNode.TreeEntry = {
           prefixLength = 0;
           keySuffix = key;
           valueCID = value;
           subtreeCID = null;
         };
 
-        let entriesBuffer = DynamicArray.fromArray<MST.TreeEntry>(node.entries);
+        let entriesBuffer = DynamicArray.fromArray<MerkleNode.TreeEntry>(node.entries);
         entriesBuffer.insert(insertIndex, newEntry);
         let newEntries = DynamicArray.toArray(entriesBuffer);
 
@@ -168,7 +168,7 @@ module {
       rootNodeCID : CID.CID,
       key : [Nat8],
       value : CID.CID,
-    ) : Result.Result<MST.Node, Text> {
+    ) : Result.Result<MerkleNode.Node, Text> {
       if (key.size() == 0) {
         return #err("Key cannot be empty");
       };
@@ -202,9 +202,9 @@ module {
       switch (updateIndex) {
         case (?idx) {
           // Update existing entry
-          let entriesBuffer = DynamicArray.fromArray<MST.TreeEntry>(node.entries);
+          let entriesBuffer = DynamicArray.fromArray<MerkleNode.TreeEntry>(node.entries);
           let existingEntry = entriesBuffer.get(idx);
-          let updatedEntry : MST.TreeEntry = {
+          let updatedEntry : MerkleNode.TreeEntry = {
             existingEntry with
             valueCID = value;
           };
@@ -225,14 +225,14 @@ module {
           };
 
           if (keyDepth == nodeDepth) {
-            let newEntry : MST.TreeEntry = {
+            let newEntry : MerkleNode.TreeEntry = {
               prefixLength = 0;
               keySuffix = key;
               valueCID = value;
               subtreeCID = null;
             };
 
-            let entriesBuffer = DynamicArray.fromArray<MST.TreeEntry>(node.entries);
+            let entriesBuffer = DynamicArray.fromArray<MerkleNode.TreeEntry>(node.entries);
             entriesBuffer.insert(insertIndex, newEntry);
             let newEntries = DynamicArray.toArray(entriesBuffer);
 
@@ -244,14 +244,14 @@ module {
             });
           } else {
             // Simplified approach: add to current level
-            let newEntry : MST.TreeEntry = {
+            let newEntry : MerkleNode.TreeEntry = {
               prefixLength = 0;
               keySuffix = key;
               valueCID = value;
               subtreeCID = null;
             };
 
-            let entriesBuffer = DynamicArray.fromArray<MST.TreeEntry>(node.entries);
+            let entriesBuffer = DynamicArray.fromArray<MerkleNode.TreeEntry>(node.entries);
             entriesBuffer.insert(insertIndex, newEntry);
             let newEntries = DynamicArray.toArray(entriesBuffer);
 
@@ -269,7 +269,7 @@ module {
     public func removeCID(
       rootNodeCID : CID.CID,
       key : [Nat8],
-    ) : Result.Result<MST.Node, Text> {
+    ) : Result.Result<MerkleNode.Node, Text> {
       if (key.size() == 0) {
         return #err("Key cannot be empty");
       };
@@ -290,7 +290,7 @@ module {
         // If we found exact key match and depths match
         if (compareKeys(key, entryKey) == #equal and keyDepth == entryDepth) {
           // Remove this entry
-          let entriesBuffer = DynamicArray.fromArray<MST.TreeEntry>(node.entries);
+          let entriesBuffer = DynamicArray.fromArray<MerkleNode.TreeEntry>(node.entries);
           let _ = entriesBuffer.remove(i);
           let newEntries = DynamicArray.toArray(entriesBuffer);
 
@@ -345,7 +345,7 @@ module {
                       node.entries[i - 1] with
                       subtreeCID = ?newRightCID;
                     };
-                    let entriesBuffer = DynamicArray.fromArray<MST.TreeEntry>(node.entries);
+                    let entriesBuffer = DynamicArray.fromArray<MerkleNode.TreeEntry>(node.entries);
                     entriesBuffer.put(i - 1, updatedEntry);
 
                     #ok({
@@ -378,7 +378,7 @@ module {
                 node.entries[lastIndex] with
                 subtreeCID = ?newRightCID;
               };
-              let entriesBuffer = DynamicArray.fromArray<MST.TreeEntry>(node.entries);
+              let entriesBuffer = DynamicArray.fromArray<MerkleNode.TreeEntry>(node.entries);
               entriesBuffer.put(lastIndex, updatedEntry);
 
               #ok({
@@ -392,23 +392,23 @@ module {
     };
 
     // Store a node and return its CID
-    public func addNode(node : MST.Node) : CID.CID {
+    public func addNode(node : MerkleNode.Node) : CID.CID {
       let cid = CIDBuilder.fromMSTNode(node);
       let key = CID.toText(cid);
       nodes := PureMap.add(nodes, Text.compare, key, node);
       cid;
     };
 
-    public func getNode(cid : CID.CID) : ?MST.Node {
+    public func getNode(cid : CID.CID) : ?MerkleNode.Node {
       let cidText = CID.toText(cid);
       PureMap.get(nodes, Text.compare, cidText);
     };
 
-    public func getNodes() : PureMap.Map<Text, MST.Node> {
+    public func getNodes() : PureMap.Map<Text, MerkleNode.Node> {
       nodes;
     };
 
-    public func getAllCollections(rootNode : MST.Node) : [Text] {
+    public func getAllCollections(rootNode : MerkleNode.Node) : [Text] {
       let collectionSet = Set.empty<Text>();
 
       iterateNodeEntries(
@@ -426,7 +426,7 @@ module {
       Array.fromIter(Set.values(collectionSet));
     };
 
-    public func getCollectionRecords(rootNode : MST.Node, collection : Text) : [(key : Text, CID.CID)] {
+    public func getCollectionRecords(rootNode : MerkleNode.Node, collection : Text) : [(key : Text, CID.CID)] {
       let records = DynamicArray.DynamicArray<(key : Text, CID.CID)>(0);
 
       iterateNodeEntries(
@@ -445,7 +445,7 @@ module {
       DynamicArray.toArray(records);
     };
 
-    public func getAllRecordCIDs(rootNode : MST.Node) : [CID.CID] {
+    public func getAllRecordCIDs(rootNode : MerkleNode.Node) : [CID.CID] {
       let cids = DynamicArray.DynamicArray<CID.CID>(0);
 
       iterateNodeEntries(
@@ -459,11 +459,11 @@ module {
     };
 
     private func iterateNodeEntries(
-      rootNode : MST.Node,
+      rootNode : MerkleNode.Node,
       callback : (entryKey : Text, entryValue : CID.CID) -> (),
     ) : () {
       // Helper function to traverse a node and its subtrees
-      func traverseNode(node : MST.Node, keyPrefix : [Nat8]) : () {
+      func traverseNode(node : MerkleNode.Node, keyPrefix : [Nat8]) : () {
         // Process left subtree first
         switch (node.leftSubtreeCID) {
           case (?leftCID) {
@@ -524,21 +524,21 @@ module {
   public func fromBlockMap(
     rootCID : CID.CID,
     blockMap : PureMap.Map<CID.CID, Blob>,
-  ) : Result.Result<Handler, Text> {
-    let mstHandler = Handler(PureMap.empty<Text, MST.Node>());
-    switch (loadNodeFromBlocks(mstHandler, rootCID, blockMap)) {
+  ) : Result.Result<MerkleSearchTree, Text> {
+    let tree = MerkleSearchTree(PureMap.empty<Text, MerkleNode.Node>());
+    switch (loadNodeFromBlocks(tree, rootCID, blockMap)) {
       case (#err(e)) #err(e);
-      case (#ok) #ok(mstHandler);
+      case (#ok) #ok(tree);
     };
   };
 
   private func loadNodeFromBlocks(
-    mstHandler : Handler,
+    tree : MerkleSearchTree,
     nodeCID : CID.CID,
     blockMap : PureMap.Map<CID.CID, Blob>,
   ) : Result.Result<(), Text> {
     // Check if node already loaded
-    switch (mstHandler.getNode(nodeCID)) {
+    switch (tree.getNode(nodeCID)) {
       case (?_) return #ok;
       case (null) ();
     };
@@ -552,7 +552,7 @@ module {
       case (#v0(_)) #dagPb;
       case (#v1(cidV1)) cidV1.codec;
     };
-    let node : MST.Node = switch (nodeCodec) {
+    let node : MerkleNode.Node = switch (nodeCodec) {
       case (#dagCbor) switch (DagCbor.fromBytes(blockData.vals())) {
         case (#ok(value)) {
           switch (parseMSTNodeFromCbor(value)) {
@@ -577,7 +577,7 @@ module {
     // Recursively load left subtree
     switch (node.leftSubtreeCID) {
       case (?leftCID) {
-        switch (loadNodeFromBlocks(mstHandler, leftCID, blockMap)) {
+        switch (loadNodeFromBlocks(tree, leftCID, blockMap)) {
           case (#err(e)) return #err(e);
           case (#ok(_)) ();
         };
@@ -589,7 +589,7 @@ module {
     for (entry in node.entries.vals()) {
       switch (entry.subtreeCID) {
         case (?subtreeCID) {
-          switch (loadNodeFromBlocks(mstHandler, subtreeCID, blockMap)) {
+          switch (loadNodeFromBlocks(tree, subtreeCID, blockMap)) {
             case (#err(e)) return #err(e);
             case (#ok(_)) ();
           };
@@ -599,21 +599,21 @@ module {
     };
 
     // Store this node
-    ignore mstHandler.addNode(node);
+    ignore tree.addNode(node);
     #ok;
   };
 
-  private func parseMSTNodeFromCbor(value : DagCbor.Value) : Result.Result<MST.Node, Text> {
+  private func parseMSTNodeFromCbor(value : DagCbor.Value) : Result.Result<MerkleNode.Node, Text> {
     switch (value) {
       case (#map(fields)) {
         var leftSubtreeCID : ?CID.CID = null;
-        var entries : [MST.TreeEntry] = [];
+        var entries : [MerkleNode.TreeEntry] = [];
 
         for ((key, val) in fields.vals()) {
           switch (key, val) {
             case ("l", #cid(cid)) leftSubtreeCID := ?cid;
             case ("e", #array(entryArray)) {
-              let entriesBuffer = DynamicArray.DynamicArray<MST.TreeEntry>(entryArray.size());
+              let entriesBuffer = DynamicArray.DynamicArray<MerkleNode.TreeEntry>(entryArray.size());
 
               for (entryVal in entryArray.vals()) {
                 switch (parseTreeEntryFromCbor(entryVal)) {
@@ -637,11 +637,11 @@ module {
     };
   };
 
-  private func parseMSTNodeFromPb(value : DagPb.Node) : Result.Result<MST.Node, Text> {
+  private func parseMSTNodeFromPb(value : DagPb.Node) : Result.Result<MerkleNode.Node, Text> {
     Runtime.trap("MST Protobuf parsing not implemented yet: " # debug_show (value));
   };
 
-  private func parseTreeEntryFromCbor(value : DagCbor.Value) : Result.Result<MST.TreeEntry, Text> {
+  private func parseTreeEntryFromCbor(value : DagCbor.Value) : Result.Result<MerkleNode.TreeEntry, Text> {
     switch (value) {
       case (#map(fields)) {
         var prefixLength : Nat = 0;
@@ -758,7 +758,7 @@ module {
   };
 
   // Reconstruct full key from compressed entries
-  private func reconstructKey(entries : [MST.TreeEntry], index : Nat) : [Nat8] {
+  private func reconstructKey(entries : [MerkleNode.TreeEntry], index : Nat) : [Nat8] {
     if (index >= entries.size()) {
       return [];
     };
@@ -785,7 +785,7 @@ module {
   };
 
   // Compress keys by removing common prefixes
-  private func compressKeys(entries : [MST.TreeEntry]) : [MST.TreeEntry] {
+  private func compressKeys(entries : [MerkleNode.TreeEntry]) : [MerkleNode.TreeEntry] {
     if (entries.size() <= 1) {
       // Ensure single entry has prefixLength = 0
       if (entries.size() == 1) {
@@ -801,7 +801,7 @@ module {
     // First, reconstruct all full keys from input entries
     let fullKeys = Array.tabulate<[Nat8]>(entries.size(), func(i) = reconstructKey(entries, i));
 
-    let compressed = DynamicArray.DynamicArray<MST.TreeEntry>(entries.size());
+    let compressed = DynamicArray.DynamicArray<MerkleNode.TreeEntry>(entries.size());
 
     // First entry keeps full key
     compressed.add({

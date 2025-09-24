@@ -19,7 +19,7 @@ persistent actor {
     };
   };
 
-  var pdsMap : PureMap.empty<Principal, PdsInfo>();
+  var pdsMap = PureMap.empty<Principal, PdsInfo>();
 
   public shared ({ caller }) func deploy() : async Result.Result<(), Text> {
     let pds = await Pds.Pds();
@@ -29,7 +29,7 @@ persistent actor {
     let pdsInfo = {
       deployer = caller;
       deployedAt = Time.now();
-      #initializing;
+      status = #initializing;
     };
     pdsMap := PureMap.put(
       pdsMap,

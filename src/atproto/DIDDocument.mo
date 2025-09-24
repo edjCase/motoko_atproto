@@ -4,6 +4,7 @@ import Array "mo:core@1/Array";
 import Text "mo:core@1/Text";
 import AtUri "./AtUri";
 
+// TODO move to DID library
 module {
 
   public type DIDDocument = {

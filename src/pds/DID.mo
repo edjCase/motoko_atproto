@@ -1,8 +1,8 @@
 import Text "mo:core@1/Text";
 import PlcDID "mo:did@3/Plc";
 import DID "mo:did@3";
-import AtUri "./Types/AtUri";
-import DIDDocument "Types/DIDDocument";
+import AtUri "../atproto/AtUri";
+import DIDDocument "../atproto/DIDDocument";
 import Order "mo:core@1/Order";
 
 module {

@@ -8,20 +8,13 @@ import CORSMiddleware "mo:liminal@1/Middleware/CORS";
 import Liminal "mo:liminal@1";
 import Router "mo:liminal@1/Router";
 import RepositoryHandler "Handlers/RepositoryHandler";
-import ServerInfoHandler "Handlers/ServerInfoHandler";
 import KeyHandler "Handlers/KeyHandler";
-import AccountHandler "Handlers/AccountHandler";
-import BskyHandler "Handlers/BskyHandler";
-import JwtHandler "Handlers/JwtHandler";
-import AuthMiddleware "Middleware/AuthMiddleware";
 import ServerInfo "ServerInfo";
 import DID "mo:did@3";
 import TID "mo:tid@1";
 import CID "mo:cid@1";
 import PureMap "mo:core@1/pure/Map";
 import Json "mo:json@1";
-import UploadBlob "../atproto/Types/Lexicons/Com/Atproto/Repo/UploadBlob";
-import CreateAccount "../atproto/Types/Lexicons/Com/Atproto/Server/CreateAccount";
 
 persistent actor class Pds(
   initialData : {
@@ -44,7 +37,6 @@ persistent actor class Pds(
 
   // Handlers
   transient var keyHandler = KeyHandler.Handler(keyHandlerStableData);
-  transient var serverInfoHandler = ServerInfoHandler.Handler(serverInfoStableData);
   transient var repositoryHandler = RepositoryHandler.Handler(
     repositoryStableData,
     keyHandler,
@@ -71,7 +63,6 @@ persistent actor class Pds(
   system func postupgrade() {
     keyHandler := KeyHandler.Handler(keyHandlerStableData);
     didDirectoryHandler := DIDDirectoryHandler.Handler(keyHandler);
-    serverInfoHandler := ServerInfoHandler.Handler(serverInfoStableData);
     repositoryHandler := RepositoryHandler.Handler(
       repositoryStableData,
       keyHandler,
@@ -157,13 +148,5 @@ persistent actor class Pds(
     // Convert to JSON
     let json = DIDDirectoryHandler.requestToJson(requestInfo.request);
     #ok((DID.Plc.toText(requestInfo.did), Json.stringify(json, null)));
-  };
-
-  public func uploadBlob(request : UploadBlob.Request) : async Result.Result<UploadBlob.Response, Text> {
-    repositoryHandler.uploadBlob(request);
-  };
-
-  public func createAccount(request : CreateAccount.Request) : async Result.Result<CreateAccount.Response, Text> {
-    await* accountHandler.create(request);
   };
 };

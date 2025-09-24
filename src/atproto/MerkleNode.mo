@@ -4,6 +4,7 @@ import Nat "mo:core@1/Nat";
 import Text "mo:core@1/Text";
 
 module {
+
   public type Node = {
     leftSubtreeCID : ?CID.CID;
     entries : [TreeEntry];
@@ -33,5 +34,4 @@ module {
   public func pathToKey(path : Text) : [Nat8] {
     Text.encodeUtf8(path) |> Blob.toArray(_);
   };
-
 };

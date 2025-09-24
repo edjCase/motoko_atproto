@@ -3,7 +3,6 @@ import CID "mo:cid@1";
 import TID "mo:tid@1";
 import DagCbor "mo:dag-cbor@2";
 import AtUri "./AtUri";
-import DIDModule "../DID"
 
 module {
 

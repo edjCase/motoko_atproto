@@ -6,7 +6,7 @@ import AtUri "../../../../AtUri";
 import Json "mo:json@1";
 import Result "mo:core@1/Result";
 import Array "mo:core@1/Array";
-import JsonDagCborMapper "../../../../../JsonDagCborMapper";
+import JsonDagCborMapper "../../../../JsonDagCborMapper";
 import Common "./Common";
 import List "mo:core@1/List";
 import Iter "mo:core@1/Iter";

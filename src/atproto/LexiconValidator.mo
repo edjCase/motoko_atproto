@@ -1,6 +1,6 @@
 import DagCbor "mo:dag-cbor@2";
 import Result "mo:core@1/Result";
-import RepoCommon "./Types/Lexicons/Com/Atproto/Repo/Common";
+import RepoCommon "./Lexicons/Com/Atproto/Repo/Common";
 
 module {
   public func validateRecord(

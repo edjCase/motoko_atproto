@@ -1,19 +1,9 @@
 {
   "canisters": {
-    "pds": {
-      "main": "src/pds/main.mo",
+    "pdsFactory": {
+      "main": "src/pdsFactory/main.mo",
       "type": "motoko",
       "args": "--enhanced-orthogonal-persistence"
-    },
-    "frontend": {
-      "dependencies": [
-        "pds"
-      ],
-      "source": [
-        "src/frontend/dist"
-      ],
-      "type": "assets",
-      "workspace": "frontend"
     }
   },
   "defaults": {

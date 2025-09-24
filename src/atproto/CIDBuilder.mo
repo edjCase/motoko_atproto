@@ -1,5 +1,5 @@
 import CID "mo:cid@1";
-import Commit "Types/Commit";
+import Commit "Commit";
 import DID "mo:did@3";
 import TID "mo:tid@1";
 import DagCbor "mo:dag-cbor@2";
@@ -8,7 +8,7 @@ import BaseX "mo:base-x-encoder@2";
 import Text "mo:core@1/Text";
 import Array "mo:core@1/Array";
 import Runtime "mo:core@1/Runtime";
-import MST "Types/MST";
+import MerkleNode "MerkleNode";
 import Nat8 "mo:core@1/Nat8";
 import Order "mo:core@1/Order";
 import Blob "mo:core@1/Blob";
@@ -59,7 +59,7 @@ module {
     fromDagCbor(#map(cborMap));
   };
 
-  public func fromMSTNode(node : MST.Node) : CID.CID {
+  public func fromMSTNode(node : MerkleNode.Node) : CID.CID {
     // Convert left CID
     let leftCbor : DagCbor.Value = switch (node.leftSubtreeCID) {
       case (null) #null_;
@@ -68,9 +68,9 @@ module {
 
     // Convert entries array
     let entriesCbor = node.entries
-    |> Array.map<MST.TreeEntry, DagCbor.Value>(
+    |> Array.map<MerkleNode.TreeEntry, DagCbor.Value>(
       _,
-      func(entry : MST.TreeEntry) : DagCbor.Value {
+      func(entry : MerkleNode.TreeEntry) : DagCbor.Value {
         let keyCbor = entry.keySuffix
         |> Array.map<Nat8, DagCbor.Value>(_, func(byte : Nat8) : DagCbor.Value = #int(Nat8.toNat(byte)));
 

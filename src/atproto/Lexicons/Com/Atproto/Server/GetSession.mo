@@ -1,6 +1,6 @@
 import DagCbor "mo:dag-cbor@2";
 import Json "mo:json@1";
-import JsonDagCborMapper "../../../../../JsonDagCborMapper";
+import JsonDagCborMapper "../../../../JsonDagCborMapper";
 import DIDDocument "../../../../../Types/DIDDocument";
 
 module {
