@@ -34,6 +34,10 @@ module {
       let serverInfo = serverInfoHandler.get();
       routeContext.buildResponse(#ok, #text(serverInfo.hostname));
     };
-  };
 
+    public func getAtprotoDid<system>(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
+      let serverInfo = serverInfoHandler.get();
+      routeContext.buildResponse(#ok, #text(DID.Plc.toText(serverInfo.plcDid)));
+    };
+  };
 };

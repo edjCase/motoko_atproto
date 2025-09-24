@@ -123,6 +123,7 @@ persistent actor {
       Router.postAsyncUpdate("/xrpc/{nsid}", xrpcRouter.routePost),
       Router.getAsyncUpdate("/.well-known/did.json", wellKnownRouter.getDidDocument),
       Router.getUpdate("/.well-known/ic-domains", wellKnownRouter.getIcDomains),
+      Router.getUpdate("/.well-known/atproto-did", wellKnownRouter.getAtprotoDid),
     ];
   };
 
