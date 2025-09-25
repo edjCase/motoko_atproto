@@ -134,7 +134,7 @@ module {
     ]);
   };
 
-  public func buildPlcRequest(
+  func buildPlcRequest(
     request : CreatePlcRequest,
     keyHandler : KeyHandler.Handler,
   ) : async* Result.Result<PlcRequestInfo, Text> {

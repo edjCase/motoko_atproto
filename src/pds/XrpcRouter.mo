@@ -1,8 +1,9 @@
 import Text "mo:core@1/Text";
 import Array "mo:core@1/Array";
-import Repository "./Types/Repository";
+import Repository "../atproto/Repository";
 import RepositoryHandler "Handlers/RepositoryHandler";
 import ServerInfoHandler "Handlers/ServerInfoHandler";
+import KeyHandler "Handlers/KeyHandler";
 import RouteContext "mo:liminal@1/RouteContext";
 import Route "mo:liminal@1/Route";
 import Serde "mo:serde";
@@ -14,32 +15,35 @@ import Json "mo:json@1";
 import Result "mo:core@1/Result";
 import Nat "mo:core@1/Nat";
 import TextX "mo:xtended-text@2/TextX";
-import DescribeRepo "./Types/Lexicons/Com/Atproto/Repo/DescribeRepo";
-import CreateRecord "./Types/Lexicons/Com/Atproto/Repo/CreateRecord";
-import GetRecord "./Types/Lexicons/Com/Atproto/Repo/GetRecord";
-import PutRecord "./Types/Lexicons/Com/Atproto/Repo/PutRecord";
-import DeleteRecord "./Types/Lexicons/Com/Atproto/Repo/DeleteRecord";
-import UploadBlob "./Types/Lexicons/Com/Atproto/Repo/UploadBlob";
-import ListBlobs "./Types/Lexicons/Com/Atproto/Sync/ListBlobs";
-import ApplyWrites "./Types/Lexicons/Com/Atproto/Repo/ApplyWrites";
-import GetProfile "./Types/Lexicons/App/Bsky/Actor/GetProfile";
-import GetProfiles "./Types/Lexicons/App/Bsky/Actor/GetProfiles";
-import GetPreferences "./Types/Lexicons/App/Bsky/Actor/GetPreferences";
-import PutPreferences "./Types/Lexicons/App/Bsky/Actor/PutPreferences";
-import GetServices "./Types/Lexicons/App/Bsky/Labeler/GetServices";
-import ActorDefs "./Types/Lexicons/App/Bsky/Actor/Defs";
-import ResolveHandle "./Types/Lexicons/Com/Atproto/Identity/ResolveHandle";
+import DescribeRepo "../atproto/Lexicons/Com/Atproto/Repo/DescribeRepo";
+import CreateRecord "../atproto/Lexicons/Com/Atproto/Repo/CreateRecord";
+import GetRecord "../atproto/Lexicons/Com/Atproto/Repo/GetRecord";
+import PutRecord "../atproto/Lexicons/Com/Atproto/Repo/PutRecord";
+import DeleteRecord "../atproto/Lexicons/Com/Atproto/Repo/DeleteRecord";
+import UploadBlob "../atproto/Lexicons/Com/Atproto/Repo/UploadBlob";
+import ListBlobs "../atproto/Lexicons/Com/Atproto/Sync/ListBlobs";
+import ApplyWrites "../atproto/Lexicons/Com/Atproto/Repo/ApplyWrites";
+import GetProfile "../atproto/Lexicons/App/Bsky/Actor/GetProfile";
+import GetProfiles "../atproto/Lexicons/App/Bsky/Actor/GetProfiles";
+import GetPreferences "../atproto/Lexicons/App/Bsky/Actor/GetPreferences";
+import PutPreferences "../atproto/Lexicons/App/Bsky/Actor/PutPreferences";
+import GetServices "../atproto/Lexicons/App/Bsky/Labeler/GetServices";
+import ActorDefs "../atproto/Lexicons/App/Bsky/Actor/Defs";
+import ResolveHandle "../atproto/Lexicons/Com/Atproto/Identity/ResolveHandle";
 import DynamicArray "mo:xtended-collections@0/DynamicArray";
 import Runtime "mo:core@1/Runtime";
-import ServerInfo "Types/ServerInfo";
+import ServerInfo "ServerInfo";
 import DagCbor "mo:dag-cbor@2";
 import Debug "mo:core@1/Debug";
+import AtUri "../atproto/AtUri";
+import DIDModule "./DID";
 
 module {
 
   public class Router(
     repositoryHandler : RepositoryHandler.Handler,
     serverInfoHandler : ServerInfoHandler.Handler,
+    keyHandler : KeyHandler.Handler,
   ) {
 
     public func routeGet<system>(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
@@ -71,9 +75,6 @@ module {
         case ("com.atproto.identity.resolvehandle") resolveHandle(routeContext);
         case ("app.bsky.actor.getprofile") getProfile(routeContext);
         case ("app.bsky.actor.getprofiles") getProfiles(routeContext);
-        case ("app.bsky.actor.getpreferences") getPreferences(routeContext);
-        case ("app.bsky.actor.putpreferences") putPreferences(routeContext);
-        case ("app.bsky.labeler.getservices") getServices(routeContext);
         case (_) {
           routeContext.buildResponse(
             #badRequest,
@@ -102,12 +103,38 @@ module {
       let response = switch (await* repositoryHandler.applyWrites(request)) {
         case (#ok(response)) response;
         case (#err(e)) return routeContext.buildResponse(
-          #badRequest, // TODO
+          #internalServerError, // TODO how to tell?
           #error(#message("Failed to apply writes: " # e)),
         );
       };
-
-      let responseJson = ApplyWrites.toJson(response);
+      let serverInfo = serverInfoHandler.get();
+      let results = Array.map(
+        response.results,
+        func(r : RepositoryHandler.WriteResult) : ApplyWrites.WriteResult {
+          switch (r) {
+            case (#create(c)) #create({
+              c with uri = {
+                authority = #plc(serverInfo.plcIdentifier);
+                collection = ?{
+                  id = c.collection;
+                  recordKey = ?c.rkey;
+                };
+              };
+            });
+            case (#update(u)) #update({
+              u with uri = {
+                authority = #plc(serverInfo.plcIdentifier);
+                collection = ?{
+                  id = u.collection;
+                  recordKey = ?u.rkey;
+                };
+              };
+            });
+            case (#delete(d)) #delete(d);
+          };
+        },
+      );
+      let responseJson = ApplyWrites.toJson({ response with results = results });
       routeContext.buildResponse(
         #ok,
         #json(responseJson),
@@ -122,22 +149,15 @@ module {
         // ("termsOfService", #Text(serverInfo.termsOfService)), // TODO?
       ];
 
-      let contactCandid = switch (serverInfo.contactEmailAddress) {
-        case (null) [];
-        case (?email) [
-          ("email", #Text(email)),
-        ];
-      };
-
       routeContext.buildResponse(
         #ok,
         #content(
           #Record([
-            ("did", #Text(DID.Plc.toText(serverInfo.plcDid))),
+            ("did", #Text(DID.Plc.toText(serverInfo.plcIdentifier))),
             ("availableUserDomains", #Array([#Text("." # serverInfo.hostname)])),
             ("inviteCodeRequired", #Bool(true)),
             ("links", #Record(linksCandid)),
-            ("contact", #Record(contactCandid)),
+            ("contact", #Record([])),
           ])
         ),
       );
@@ -157,7 +177,7 @@ module {
         );
       };
       let serverInfo = serverInfoHandler.get();
-      if (repo != serverInfo.plcDid) {
+      if (repo != serverInfo.plcIdentifier) {
         return routeContext.buildResponse(
           #notFound,
           #error(#message("Repository not found: " # repoText)),
@@ -170,10 +190,22 @@ module {
 
       let verificationKey : DID.Key.DID = switch (await* keyHandler.getPublicKey(#verification)) {
         case (#ok(did)) did;
-        case (#err(e)) return #err("Failed to get verification public key: " # e);
+        case (#err(e)) return routeContext.buildResponse(
+          #internalServerError,
+          #error(#message("Failed to get verification public key: " # e)),
+        );
       };
-      let alsoKnownAs = [AtUri.toText({ authority = #plc(serverInfo.plcDid); collection = null })];
-      let didDoc = DIDModule.generateDIDDocument(#plc(request.repo), alsoKnownAs, verificationKey);
+      let alsoKnownAs = [
+        AtUri.toText({
+          authority = #plc(serverInfo.plcIdentifier);
+          collection = null;
+        })
+      ];
+      let didDoc = DIDModule.generateDIDDocument(
+        #plc(serverInfo.plcIdentifier),
+        alsoKnownAs,
+        verificationKey,
+      );
 
       let handleIsCorrect = true; // TODO?
 
@@ -192,46 +224,28 @@ module {
     };
 
     func listRepos(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
-      let limit = switch (routeContext.getQueryParam("limit")) {
-        case (null) 100; // Default limit
-        case (?limitText) {
-          switch (Nat.fromText(limitText)) {
-            case (?limit) limit;
-            case (null) return routeContext.buildResponse(
-              #badRequest,
-              #error(#message("Invalid limit parameter: " # limitText)),
-            );
-          };
+
+      let serverInfo = serverInfoHandler.get();
+      let repository = repositoryHandler.get();
+      var fields : [(Text, Serde.Candid)] = [
+        ("did", #Text(DID.Plc.toText(serverInfo.plcIdentifier))),
+        ("head", #Text(CID.toText(repository.head))),
+        ("rev", #Nat64(TID.toNat64(repository.rev))),
+        ("active", #Bool(repository.active)),
+      ];
+
+      switch (repository.status) {
+        case (null) ();
+        case (?status) {
+          fields := Array.concat(fields, [("status", #Text(status))]);
         };
       };
-      // TODO: pagination/cursor
-      let repos = repositoryHandler.getAll(limit);
-      let reposCandid = Array.map<Repository.Repository, Serde.Candid>(
-        repos,
-        func(repo : Repository.Repository) : Serde.Candid {
-          var fields : [(Text, Serde.Candid)] = [
-            ("did", #Text(DID.Plc.toText(repo.did))),
-            ("head", #Text(CID.toText(repo.head))),
-            ("rev", #Nat64(TID.toNat64(repo.rev))),
-            ("active", #Bool(repo.active)),
-          ];
-
-          switch (repo.status) {
-            case (null) ();
-            case (?status) {
-              fields := Array.concat(fields, [("status", #Text(status))]);
-            };
-          };
-
-          #Record(fields);
-        },
-      );
 
       routeContext.buildResponse(
         #ok,
         #content(
           #Record([
-            ("repos", #Array(reposCandid)),
+            ("repos", #Array([#Record(fields)])),
           ])
         ),
       );
@@ -255,7 +269,17 @@ module {
           );
         };
       };
-      let responseJson = CreateRecord.toJson(response);
+      let serverInfo = serverInfoHandler.get();
+      let uri : AtUri.AtUri = {
+        authority = #plc(serverInfo.plcIdentifier);
+        collection = ?{
+          id = request.collection;
+          recordKey = ?response.rkey;
+        };
+      };
+      let responseJson = CreateRecord.toJson({
+        response with uri = uri;
+      });
       routeContext.buildResponse(
         #ok,
         #json(responseJson),
@@ -279,7 +303,15 @@ module {
           );
         };
       };
-      let responseJson = PutRecord.toJson(response);
+      let serverInfo = serverInfoHandler.get();
+      let uri : AtUri.AtUri = {
+        authority = #plc(serverInfo.plcIdentifier);
+        collection = ?{
+          id = request.collection;
+          recordKey = ?request.rkey;
+        };
+      };
+      let responseJson = PutRecord.toJson({ response with uri = uri });
       routeContext.buildResponse(
         #ok,
         #json(responseJson),
@@ -328,7 +360,18 @@ module {
         );
       };
 
-      let responseJson = GetRecord.toJson(response);
+      let serverInfo = serverInfoHandler.get();
+      let uri : AtUri.AtUri = {
+        authority = #plc(serverInfo.plcIdentifier);
+        collection = ?{
+          id = request.collection;
+          recordKey = ?request.rkey;
+        };
+      };
+      let responseJson = GetRecord.toJson({
+        response with uri = uri;
+        cid = ?response.cid;
+      });
       routeContext.buildResponse(
         #ok,
         #json(responseJson),
@@ -443,6 +486,14 @@ module {
         );
       };
 
+      let serverInfo = serverInfoHandler.get();
+      if (did != serverInfo.plcIdentifier) {
+        return routeContext.buildResponse(
+          #notFound,
+          #error(#message("Repository not found: " # didText)),
+        );
+      };
+
       let limitText = routeContext.getQueryParam("limit");
       let limitOrNull = switch (getNatOrnull(limitText)) {
         case (#ok(limit)) limit;
@@ -453,7 +504,7 @@ module {
       };
 
       let sinceText = routeContext.getQueryParam("since");
-      let sinceOrNull = switch (sinceText) {
+      let sinceOrNull : ?TID.TID = switch (sinceText) {
         case (null) null; // No 'since' parameter means all blobs
         case (?sinceText) switch (TID.fromText(sinceText)) {
           case (#ok(tid)) ?tid;
@@ -466,8 +517,7 @@ module {
 
       let cursorTextOrNull = routeContext.getQueryParam("cursor");
 
-      let request : ListBlobs.Request = {
-        did = did;
+      let request = {
         since = sinceOrNull;
         limit = limitOrNull;
         cursor = cursorTextOrNull;
@@ -511,22 +561,17 @@ module {
 
     func getProfileInternal(idOrHandle : Text) : ?ActorDefs.ProfileViewDetailed {
       let serverInfo = serverInfoHandler.get();
-      let account = switch (DID.Plc.fromText(idOrHandle)) {
-        case (#ok(did)) switch (accountHandler.get(did)) {
-          case (?account) account;
-          case (null) return null;
+      switch (DID.Plc.fromText(idOrHandle)) {
+        case (#ok(did)) {
+          if (did != serverInfo.plcIdentifier) return null;
         };
         case (#err(_)) {
-          let ?name = ServerInfo.getAccountNameFromHandle(serverInfo, idOrHandle) else return null;
-          switch (accountHandler.getByName(name)) {
-            case (?account) account;
-            case (null) return null;
-          };
+          let prefix = ServerInfo.getPrefixFromHandle(serverInfo, idOrHandle);
+          if (serverInfo.handlePrefix != prefix) return null;
         };
       };
 
-      let recordRequest : GetRecord.Request = {
-        repo = account.id;
+      let recordRequest = {
         collection = "app.bsky.actor.profile";
         rkey = "self";
         cid = null;
@@ -541,7 +586,7 @@ module {
         case (?record) {
           let avatar : ?Text = switch (DagCbor.get(record.value, "avatar")) {
             case (?#text(avatarUrl)) ?avatarUrl;
-            case (?#map(avatarMap)) buildAvatarUrlFromObject(avatarMap, account.id);
+            case (?#map(avatarMap)) buildAvatarUrlFromObject(avatarMap, serverInfo.plcIdentifier);
             case (null) null;
             case (_) {
               Debug.print("Invalid avatar type in profile record: " # debug_show (record.value));
@@ -572,8 +617,8 @@ module {
       };
 
       ?{
-        did = account.id;
-        handle = ServerInfo.buildHandleFromAccountName(serverInfo, account.name);
+        did = serverInfo.plcIdentifier;
+        handle = ServerInfo.buildHandle(serverInfo);
         avatar = avatar;
         displayName = displayName;
         banner = null; // TODO
@@ -662,139 +707,6 @@ module {
       );
     };
 
-    func getPreferences(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
-      let ?actorId = getRequestActorId(routeContext) else return routeContext.buildResponse(
-        #unauthorized,
-        #empty,
-      );
-      let preferences = bskyHandler.getPreferences(actorId);
-      let preferenceItems = DynamicArray.DynamicArray<ActorDefs.PreferenceItem>(16);
-
-      switch (preferences.adultContent) {
-        case (null) ();
-        case (?p) preferenceItems.add(#adultContentPref(p));
-      };
-      switch (preferences.contentLabel) {
-        case (null) ();
-        case (?p) preferenceItems.add(#contentLabelPref(p));
-      };
-      switch (preferences.savedFeeds) {
-        case (null) ();
-        case (?p) preferenceItems.add(#savedFeedsPref(p));
-      };
-      switch (preferences.savedFeedsV2) {
-        case (null) ();
-        case (?p) preferenceItems.add(#savedFeedsPrefV2(p));
-      };
-      switch (preferences.personalDetails) {
-        case (null) ();
-        case (?p) preferenceItems.add(#personalDetailsPref(p));
-      };
-      switch (preferences.feedView) {
-        case (null) ();
-        case (?p) preferenceItems.add(#feedViewPref(p));
-      };
-      switch (preferences.threadView) {
-        case (null) ();
-        case (?p) preferenceItems.add(#threadViewPref(p));
-      };
-      switch (preferences.interests) {
-        case (null) ();
-        case (?p) preferenceItems.add(#interestsPref(p));
-      };
-      switch (preferences.mutedWords) {
-        case (null) ();
-        case (?p) preferenceItems.add(#mutedWordsPref(p));
-      };
-      switch (preferences.hiddenPosts) {
-        case (null) ();
-        case (?p) preferenceItems.add(#hiddenPostsPref(p));
-      };
-      switch (preferences.bskyAppState) {
-        case (null) ();
-        case (?p) preferenceItems.add(#bskyAppStatePref(p));
-      };
-      switch (preferences.labelers) {
-        case (null) ();
-        case (?p) preferenceItems.add(#labelersPref(p));
-      };
-      switch (preferences.postInteractionSettings) {
-        case (null) ();
-        case (?p) preferenceItems.add(#postInteractionSettingsPref(p));
-      };
-      switch (preferences.verification) {
-        case (null) ();
-        case (?p) preferenceItems.add(#verificationPrefs(p));
-      };
-
-      let response : GetPreferences.Response = {
-        preferences = DynamicArray.toArray(preferenceItems);
-      };
-
-      let responseJson = GetPreferences.toJson(response);
-      routeContext.buildResponse(
-        #ok,
-        #json(responseJson),
-      );
-    };
-
-    func putPreferences(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
-      let ?actorId = getRequestActorId(routeContext) else return routeContext.buildResponse(
-        #unauthorized,
-        #empty,
-      );
-      let request = switch (parseRequestFromBody(routeContext, PutPreferences.fromJson)) {
-        case (#ok(req)) req;
-        case (#err(e)) return routeContext.buildResponse(
-          #badRequest,
-          #error(#message(e)),
-        );
-      };
-      bskyHandler.putPreferences(actorId, request.preferences);
-      routeContext.buildResponse(
-        #ok,
-        #empty,
-      );
-    };
-
-    func getServices(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
-      // TODO
-      // Parse query parameters
-      // let ?didsParam = routeContext.getQueryParam("dids") else return routeContext.buildResponse(
-      //   #badRequest,
-      //   #error(#message("Missing required query parameter: dids")),
-      // );
-
-      // let detailed = switch (routeContext.getQueryParam("detailed")) {
-      //   case (null) ?false;
-      //   case (?detailedText) switch (Text.toLower(detailedText)) {
-      //     case ("true" or "" or "1") ?true; // TODO bool parser?
-      //     case ("false" or "0") ?false;
-      //     case (_) return routeContext.buildResponse(
-      //       #badRequest,
-      //       #error(#message("Invalid detailed parameter, expected 'true' or 'false'")),
-      //     );
-      //   };
-      // };
-
-      // // Split DIDs by comma
-      // let dids = Text.split(didsParam, #char(','));
-      // let didsArray = Array.fromIter(dids);
-
-      // TODO: Implement actual labeler service lookup
-      let mockViews : [GetServices.LabelerViewUnion] = [];
-
-      let response : GetServices.Response = {
-        views = mockViews;
-      };
-
-      let responseJson = GetServices.toJson(response);
-      routeContext.buildResponse(
-        #ok,
-        #json(responseJson),
-      );
-    };
-
     func resolveHandle(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
       // Parse query parameters for the handle parameter
       let ?handleParam = routeContext.getQueryParam("handle") else return routeContext.buildResponse(
@@ -803,22 +715,15 @@ module {
       );
       let serverInfo = serverInfoHandler.get();
 
-      let ?name = ServerInfo.getAccountNameFromHandle(serverInfo, handleParam) else return routeContext.buildResponse(
+      let prefix = ServerInfo.getPrefixFromHandle(serverInfo, handleParam);
+
+      if (serverInfo.handlePrefix != prefix) return routeContext.buildResponse(
         #notFound,
         #error(#message("Handle not found: " # handleParam)),
       );
 
-      // Resolve handle to DID using AccountHandler
-      let account = switch (accountHandler.getByName(name)) {
-        case (?account) account;
-        case (null) return routeContext.buildResponse(
-          #notFound,
-          #error(#message("Handle not found: " # handleParam)),
-        );
-      };
-
       let response : ResolveHandle.Response = {
-        did = account.id;
+        did = serverInfo.plcIdentifier;
       };
 
       let responseJson = ResolveHandle.toJson(response);
@@ -858,19 +763,6 @@ module {
       switch (parser(parsedJson)) {
         case (#ok(req)) #ok(req);
         case (#err(e)) return #err("Invalid request: " # e);
-      };
-    };
-
-    func getRequestActorId(routeContext : RouteContext.RouteContext) : ?DID.Plc.DID {
-      switch (routeContext.getIdentity()) {
-        case (null) null;
-        case (?identity) switch (identity.getId()) {
-          case (null) null;
-          case (?id) switch (DID.Plc.fromText(id)) {
-            case (#ok(did)) ?did;
-            case (#err(_)) null; // Invalid DID in identity
-          };
-        };
       };
     };
   };
