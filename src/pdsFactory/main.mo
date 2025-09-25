@@ -9,7 +9,7 @@ import Principal "mo:core@1/Principal";
 persistent actor {
 
   public type PdsInfo = {
-    deployer : Principal;
+    owner : Principal;
     deployedAt : Time.Time;
     status : InitializationStatus;
   };
@@ -34,6 +34,9 @@ persistent actor {
     canisterId : ?Principal,
     initializeRequest : PdsInterface.InitializeRequest,
   ) : async Result.Result<(), Text> {
+    if (caller == Principal.anonymous()) {
+      return #err("Anonymous caller is not allowed to deploy a PDS");
+    };
     let installArgs = switch (canisterId) {
       case (?canisterId) #install(canisterId);
       case (null) #new({
@@ -45,7 +48,7 @@ persistent actor {
         };
       });
     };
-    let pds = await (system Pds.Pds)(installArgs)({
+    let pds = await (with cycles = 500_000_000_000) (system Pds.Pds)(installArgs)({
       owner = caller;
     });
 
@@ -53,7 +56,7 @@ persistent actor {
 
     let pdsPrincipal = Principal.fromActor(pds);
     let pdsInfo = {
-      deployer = caller;
+      owner = caller;
       deployedAt = Time.now();
       status = #initializing;
     };
@@ -80,13 +83,13 @@ persistent actor {
     };
   };
 
-  public shared ({ caller }) func initialize(
+  public shared ({ caller }) func retryFailedInitialization(
     pdsPrincipal : Principal,
     initializeRequest : PdsInterface.InitializeRequest,
   ) : async Result.Result<(), Text> {
     let ?pdsInfo = PureMap.get(pdsMap, Principal.compare, pdsPrincipal) else return #err("PDS not found");
-    if (pdsInfo.deployer != caller) {
-      return #err("Only the initial deployer can initialize the PDS");
+    if (pdsInfo.owner != caller) {
+      return #err("Only the owner can retry failed initialization the PDS");
     };
     switch (pdsInfo.status) {
       case (#initialized(_)) return #err("PDS is already initialized");

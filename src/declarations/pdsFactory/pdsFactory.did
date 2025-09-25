@@ -1,0 +1,34 @@
+type Result = 
+ variant {
+   err: text;
+   ok;
+ };
+type PlcService = 
+ record {
+   endpoint: text;
+   id: text;
+   "type": text;
+ };
+type PlcKind = 
+ variant {
+   car: blob;
+   id: text;
+   new: CreatePlcRequest;
+ };
+type InitializeRequest = 
+ record {
+   handlePrefix: opt text;
+   hostname: text;
+   plc: PlcKind;
+ };
+type CreatePlcRequest = 
+ record {
+   alsoKnownAs: vec text;
+   services: vec PlcService;
+ };
+service : {
+  deploy: (canisterId: opt principal, initializeRequest:
+   InitializeRequest) -> (Result);
+  retryFailedInitialization: (pdsPrincipal: principal, initializeRequest:
+   InitializeRequest) -> (Result);
+}
