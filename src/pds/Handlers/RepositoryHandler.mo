@@ -364,13 +364,7 @@ module {
       let serverInfo = serverInfoHandler.get();
 
       // Create record path
-      let path = AtUri.toText({
-        authority = #plc(serverInfo.plcIdentifier);
-        collection = ?{
-          id = request.collection;
-          recordKey = ?rKey;
-        };
-      });
+      let path = request.collection # "/" # rKey;
       let pathKey = MerkleNode.pathToKey(path);
 
       let mst = MerkleSearchTree.MerkleSearchTree(repository.nodes);
@@ -858,7 +852,7 @@ module {
       });
     };
 
-    public func listRecords(request : ListRecordsRequest) : Result.Result<ListRecordsResponse, Text> {
+    public func listRecords(request : ListRecordsRequest) : ListRecordsResponse {
       let repository = getRepository();
       let mst = MerkleSearchTree.MerkleSearchTree(repository.nodes);
 
@@ -934,10 +928,10 @@ module {
         null;
       };
 
-      #ok({
+      {
         cursor = nextCursor;
         records = resultRecords;
-      });
+      };
     };
 
     public func uploadBlob(request : UploadBlobRequest) : Result.Result<UploadBlobResponse, Text> {

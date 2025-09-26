@@ -6,9 +6,9 @@ import Text "mo:core@1/Text";
 import Blob "mo:core@1/Blob";
 import Array "mo:core@1/Array";
 import PureMap "mo:core@1/pure/Map";
-import MST "../src/pds/Types/MST";
-import MSTHandler "../src/pds/Handlers/MSTHandler";
-import CIDBuilder "../src/pds/CIDBuilder";
+import MerkleNode "../src/atproto/MerkleNode";
+import MerkleSearchTree "../src/atproto/MerkleSearchTree";
+import CIDBuilder "../src/atproto/CIDBuilder";
 import { test } "mo:test";
 import Sha256 "mo:sha2@0/Sha256";
 import Nat "mo:core@1/Nat";
@@ -27,26 +27,26 @@ func createTestCID(content : Text) : CID.CID {
 };
 
 test(
-  "MST Handler - Basic Operations",
+  "MerkleSearchTree - Basic Operations",
   func() {
-    // Create empty MST handler
-    let handler = MSTHandler.Handler(PureMap.empty<Text, MST.Node>());
+    // Create empty MerkleSearchTree
+    let mst = MerkleSearchTree.MerkleSearchTree(PureMap.empty<Text, MerkleNode.Node>());
 
     // Create initial empty node
-    let emptyNode : MST.Node = {
+    let emptyNode : MerkleNode.Node = {
       leftSubtreeCID = null;
       entries = [];
     };
-    let rootCID = handler.addNode(emptyNode);
+    let rootCID = mst.addNode(emptyNode);
 
     // Test adding first record
     let key1 = Text.encodeUtf8("app.bsky.feed.post/record1");
     let value1 = createTestCID("value1");
 
-    switch (handler.addCID(rootCID, Blob.toArray(key1), value1)) {
+    switch (mst.addCID(rootCID, Blob.toArray(key1), value1)) {
       case (#ok(newNode)) {
         // Test retrieving the record
-        switch (handler.getCID(newNode, Blob.toArray(key1))) {
+        switch (mst.getCID(newNode, Blob.toArray(key1))) {
           case (?retrievedCID) {
             if (CID.toText(retrievedCID) != CID.toText(value1)) {
               Runtime.trap("Retrieved CID doesn't match original");
@@ -65,14 +65,14 @@ test(
 );
 
 test(
-  "MST Handler - Key Validation",
+  "MerkleSearchTree - Key Validation",
   func() {
-    let handler = MSTHandler.Handler(PureMap.empty<Text, MST.Node>());
-    let emptyNode : MST.Node = {
+    let mst = MerkleSearchTree.MerkleSearchTree(PureMap.empty<Text, MerkleNode.Node>());
+    let emptyNode : MerkleNode.Node = {
       leftSubtreeCID = null;
       entries = [];
     };
-    let rootCID = handler.addNode(emptyNode);
+    let rootCID = mst.addNode(emptyNode);
     let testValue = createTestCID("test");
 
     // Test valid keys
@@ -84,7 +84,7 @@ test(
 
     for (key in validKeys.vals()) {
       let keyBytes = Text.encodeUtf8(key);
-      switch (handler.addCID(rootCID, Blob.toArray(keyBytes), testValue)) {
+      switch (mst.addCID(rootCID, Blob.toArray(keyBytes), testValue)) {
         case (#ok(_)) {};
         case (#err(msg)) Runtime.trap("Valid key rejected: " # key # " - " # msg);
       };
@@ -103,7 +103,7 @@ test(
 
     for (key in invalidKeys.vals()) {
       let keyBytes = Text.encodeUtf8(key);
-      switch (handler.addCID(rootCID, Blob.toArray(keyBytes), testValue)) {
+      switch (mst.addCID(rootCID, Blob.toArray(keyBytes), testValue)) {
         case (#ok(_)) Runtime.trap("Invalid key accepted: " # key);
         case (#err(_)) {};
       };
@@ -112,9 +112,9 @@ test(
 );
 
 test(
-  "MST Handler - Depth Calculation (ATProto Compatible)",
+  "MerkleSearchTree - Depth Calculation (ATProto Compatible)",
   func() {
-    let handler = MSTHandler.Handler(PureMap.empty<Text, MST.Node>());
+    let mst = MerkleSearchTree.MerkleSearchTree(PureMap.empty<Text, MerkleNode.Node>());
 
     // Test known depth values that should match ATProto behavior
     // These test vectors are based on ATProto's 2-bit leading zero counting
@@ -130,14 +130,14 @@ test(
       let keyBytes = Text.encodeUtf8(key);
 
       // Test by creating a simple tree and verifying the key gets placed at correct level
-      let emptyNode : MST.Node = {
+      let emptyNode : MerkleNode.Node = {
         leftSubtreeCID = null;
         entries = [];
       };
-      let rootCID = handler.addNode(emptyNode);
+      let rootCID = mst.addNode(emptyNode);
       let testValue = createTestCID("test");
 
-      switch (handler.addCID(rootCID, Blob.toArray(keyBytes), testValue)) {
+      switch (mst.addCID(rootCID, Blob.toArray(keyBytes), testValue)) {
         case (#ok(newNode)) {
           // Verify the node structure reflects correct depth placement
           if (newNode.entries.size() == 0) {
@@ -153,9 +153,9 @@ test(
 );
 
 test(
-  "MST Handler - Key Compression",
+  "MerkleSearchTree - Key Compression",
   func() {
-    let handler = MSTHandler.Handler(PureMap.empty<Text, MST.Node>());
+    let mst = MerkleSearchTree.MerkleSearchTree(PureMap.empty<Text, MerkleNode.Node>());
 
     // Test with completely different keys first to avoid depth conflicts
     let key1 = Text.encodeUtf8("a/1");
@@ -165,18 +165,18 @@ test(
     let value2 = createTestCID("value2");
 
     // Start with empty tree
-    let emptyNode : MST.Node = {
+    let emptyNode : MerkleNode.Node = {
       leftSubtreeCID = null;
       entries = [];
     };
-    var currentCID = handler.addNode(emptyNode);
+    var currentCID = mst.addNode(emptyNode);
     var currentNode = emptyNode;
 
     // Add first key
-    switch (handler.addCID(currentCID, Blob.toArray(key1), value1)) {
+    switch (mst.addCID(currentCID, Blob.toArray(key1), value1)) {
       case (#ok(newNode)) {
         currentNode := newNode;
-        currentCID := handler.addNode(newNode);
+        currentCID := mst.addNode(newNode);
       };
       case (#err(msg)) {
         Runtime.trap("Failed to add first key: " # msg);
@@ -184,10 +184,10 @@ test(
     };
 
     // Add second key
-    switch (handler.addCID(currentCID, Blob.toArray(key2), value2)) {
+    switch (mst.addCID(currentCID, Blob.toArray(key2), value2)) {
       case (#ok(newNode)) {
         currentNode := newNode;
-        currentCID := handler.addNode(newNode);
+        currentCID := mst.addNode(newNode);
       };
       case (#err(msg)) {
         Runtime.trap("Failed to add second key: " # msg);
@@ -195,7 +195,7 @@ test(
     };
 
     // Test retrieval of both keys
-    switch (handler.getCID(currentNode, Blob.toArray(key1))) {
+    switch (mst.getCID(currentNode, Blob.toArray(key1))) {
       case (?retrievedCID) {
         if (CID.toText(retrievedCID) != CID.toText(value1)) {
           Runtime.trap("First key value mismatch");
@@ -206,7 +206,7 @@ test(
       };
     };
 
-    switch (handler.getCID(currentNode, Blob.toArray(key2))) {
+    switch (mst.getCID(currentNode, Blob.toArray(key2))) {
       case (?retrievedCID) {
         if (CID.toText(retrievedCID) != CID.toText(value2)) {
           Runtime.trap("Second key value mismatch");
@@ -220,27 +220,27 @@ test(
 );
 
 test(
-  "MST Handler - Tree Structure",
+  "MerkleSearchTree - Tree Structure",
   func() {
-    let handler = MSTHandler.Handler(PureMap.empty<Text, MST.Node>());
+    let mst = MerkleSearchTree.MerkleSearchTree(PureMap.empty<Text, MerkleNode.Node>());
 
-    var currentNode : MST.Node = {
+    var currentNode : MerkleNode.Node = {
       leftSubtreeCID = null;
       entries = [];
     };
-    var currentCID = handler.addNode(currentNode);
+    var currentCID = mst.addNode(currentNode);
 
     // Add first key
     let key1 = Text.encodeUtf8("a/1");
     let value1 = createTestCID("value1");
 
-    switch (handler.addCID(currentCID, Blob.toArray(key1), value1)) {
+    switch (mst.addCID(currentCID, Blob.toArray(key1), value1)) {
       case (#ok(newNode)) {
         currentNode := newNode;
-        currentCID := handler.addNode(newNode);
+        currentCID := mst.addNode(newNode);
 
         // Verify we can retrieve first key
-        switch (handler.getCID(currentNode, Blob.toArray(key1))) {
+        switch (mst.getCID(currentNode, Blob.toArray(key1))) {
           case (?_) {}; // Good
           case (null) Runtime.trap("Lost first key after adding it");
         };
@@ -252,18 +252,18 @@ test(
     let key2 = Text.encodeUtf8("b/2");
     let value2 = createTestCID("value2");
 
-    switch (handler.addCID(currentCID, Blob.toArray(key2), value2)) {
+    switch (mst.addCID(currentCID, Blob.toArray(key2), value2)) {
       case (#ok(newNode)) {
         currentNode := newNode;
-        currentCID := handler.addNode(newNode);
+        currentCID := mst.addNode(newNode);
 
         // Check both keys are still retrievable
-        switch (handler.getCID(currentNode, Blob.toArray(key1))) {
+        switch (mst.getCID(currentNode, Blob.toArray(key1))) {
           case (?_) {}; // Good
           case (null) Runtime.trap("Lost first key after adding second key");
         };
 
-        switch (handler.getCID(currentNode, Blob.toArray(key2))) {
+        switch (mst.getCID(currentNode, Blob.toArray(key2))) {
           case (?_) {}; // Good
           case (null) Runtime.trap("Cannot retrieve second key");
         };
@@ -275,23 +275,23 @@ test(
     let key3 = Text.encodeUtf8("c/3");
     let value3 = createTestCID("value3");
 
-    switch (handler.addCID(currentCID, Blob.toArray(key3), value3)) {
+    switch (mst.addCID(currentCID, Blob.toArray(key3), value3)) {
       case (#ok(newNode)) {
         currentNode := newNode;
-        currentCID := handler.addNode(newNode);
+        currentCID := mst.addNode(newNode);
 
         // Check all three keys are retrievable
-        switch (handler.getCID(currentNode, Blob.toArray(key1))) {
+        switch (mst.getCID(currentNode, Blob.toArray(key1))) {
           case (?_) {}; // Good
           case (null) Runtime.trap("Lost key a/1 after adding c/3");
         };
 
-        switch (handler.getCID(currentNode, Blob.toArray(key2))) {
+        switch (mst.getCID(currentNode, Blob.toArray(key2))) {
           case (?_) {}; // Good
           case (null) Runtime.trap("Lost key b/2 after adding c/3");
         };
 
-        switch (handler.getCID(currentNode, Blob.toArray(key3))) {
+        switch (mst.getCID(currentNode, Blob.toArray(key3))) {
           case (?_) {}; // Good
           case (null) Runtime.trap("Cannot retrieve key c/3");
         };
@@ -302,24 +302,24 @@ test(
 );
 
 test(
-  "MST Handler - Deterministic Construction",
+  "MerkleSearchTree - Deterministic Construction",
   func() {
-    let handler = MSTHandler.Handler(PureMap.empty<Text, MST.Node>());
+    let mst = MerkleSearchTree.MerkleSearchTree(PureMap.empty<Text, MerkleNode.Node>());
 
     // Use valid ATProto key format but keep them simple
     let key1 = "test/a";
     let key2 = "test/b";
 
-    var node : MST.Node = { leftSubtreeCID = null; entries = [] };
-    var cid = handler.addNode(node);
+    var node : MerkleNode.Node = { leftSubtreeCID = null; entries = [] };
+    var cid = mst.addNode(node);
 
     // Add first key
     let key1Bytes = Text.encodeUtf8(key1);
     let value1CID = createTestCID(key1);
-    switch (handler.addCID(cid, Blob.toArray(key1Bytes), value1CID)) {
+    switch (mst.addCID(cid, Blob.toArray(key1Bytes), value1CID)) {
       case (#ok(newNode)) {
         node := newNode;
-        cid := handler.addNode(newNode);
+        cid := mst.addNode(newNode);
 
         // Verify node has one entry
         assert (node.entries.size() == 1);
@@ -328,7 +328,7 @@ test(
     };
 
     // Verify first key is retrievable
-    switch (handler.getCID(node, Blob.toArray(key1Bytes))) {
+    switch (mst.getCID(node, Blob.toArray(key1Bytes))) {
       case (?_) {}; // Good
       case (null) Runtime.trap("First key not retrievable after adding");
     };
@@ -336,10 +336,10 @@ test(
     // Add second key
     let key2Bytes = Text.encodeUtf8(key2);
     let value2CID = createTestCID(key2);
-    switch (handler.addCID(cid, Blob.toArray(key2Bytes), value2CID)) {
+    switch (mst.addCID(cid, Blob.toArray(key2Bytes), value2CID)) {
       case (#ok(newNode)) {
         node := newNode;
-        cid := handler.addNode(newNode);
+        cid := mst.addNode(newNode);
 
         // Verify node has two entries
         assert (node.entries.size() == 2);
@@ -348,12 +348,12 @@ test(
     };
 
     // Verify both keys are retrievable
-    switch (handler.getCID(node, Blob.toArray(key1Bytes))) {
+    switch (mst.getCID(node, Blob.toArray(key1Bytes))) {
       case (?_) {}; // Good
       case (null) Runtime.trap("First key lost after adding second");
     };
 
-    switch (handler.getCID(node, Blob.toArray(key2Bytes))) {
+    switch (mst.getCID(node, Blob.toArray(key2Bytes))) {
       case (?_) {}; // Good
       case (null) Runtime.trap("Second key not retrievable");
     };
@@ -361,38 +361,38 @@ test(
 );
 
 test(
-  "MST Handler - Error Cases",
+  "MerkleSearchTree - Error Cases",
   func() {
-    let handler = MSTHandler.Handler(PureMap.empty<Text, MST.Node>());
+    let mst = MerkleSearchTree.MerkleSearchTree(PureMap.empty<Text, MerkleNode.Node>());
     let testValue = createTestCID("test");
 
     // Test with non-existent root CID
     let fakeCID = createTestCID("fake");
     let testKey = Text.encodeUtf8("app.bsky.feed.post/test");
 
-    switch (handler.addCID(fakeCID, Blob.toArray(testKey), testValue)) {
+    switch (mst.addCID(fakeCID, Blob.toArray(testKey), testValue)) {
       case (#ok(_)) Runtime.trap("Should have failed with non-existent root CID");
       case (#err(msg)) {};
     };
 
     // Test empty key
-    let emptyNode : MST.Node = {
+    let emptyNode : MerkleNode.Node = {
       leftSubtreeCID = null;
       entries = [];
     };
-    let rootCID = handler.addNode(emptyNode);
+    let rootCID = mst.addNode(emptyNode);
 
-    switch (handler.addCID(rootCID, [], testValue)) {
+    switch (mst.addCID(rootCID, [], testValue)) {
       case (#ok(_)) Runtime.trap("Should have failed with empty key");
       case (#err(msg)) {};
     };
 
     // Test duplicate key addition
     let validKey = Text.encodeUtf8("app.bsky.feed.post/test");
-    switch (handler.addCID(rootCID, Blob.toArray(validKey), testValue)) {
+    switch (mst.addCID(rootCID, Blob.toArray(validKey), testValue)) {
       case (#ok(newNode)) {
-        let newRootCID = handler.addNode(newNode);
-        switch (handler.addCID(newRootCID, Blob.toArray(validKey), testValue)) {
+        let newRootCID = mst.addNode(newNode);
+        switch (mst.addCID(newRootCID, Blob.toArray(validKey), testValue)) {
           case (#ok(_)) Runtime.trap("Should have failed with duplicate key");
           case (#err(msg)) {};
         };
@@ -403,9 +403,9 @@ test(
 );
 
 test(
-  "MST Handler - ATProto Test Vectors",
+  "MerkleSearchTree - ATProto Test Vectors",
   func() {
-    let handler = MSTHandler.Handler(PureMap.empty<Text, MST.Node>());
+    let mst = MerkleSearchTree.MerkleSearchTree(PureMap.empty<Text, MerkleNode.Node>());
 
     // Use the exact test vectors from ATProto interop tests
     // These keys have known layer placements in the ATProto specification
@@ -418,21 +418,21 @@ test(
       ("com.example.record/3jqfcqzm3fx2j", "F"), // level 2
     ];
 
-    var currentNode : MST.Node = {
+    var currentNode : MerkleNode.Node = {
       leftSubtreeCID = null;
       entries = [];
     };
-    var currentCID = handler.addNode(currentNode);
+    var currentCID = mst.addNode(currentNode);
 
     // Add records in the same order as ATProto tests
     for ((key, content) in atprotoTestVectors.vals()) {
       let keyBytes = Text.encodeUtf8(key);
       let valueCID = createTestCID(content);
 
-      switch (handler.addCID(currentCID, Blob.toArray(keyBytes), valueCID)) {
+      switch (mst.addCID(currentCID, Blob.toArray(keyBytes), valueCID)) {
         case (#ok(newNode)) {
           currentNode := newNode;
-          currentCID := handler.addNode(newNode);
+          currentCID := mst.addNode(newNode);
         };
         case (#err(msg)) {
           Runtime.trap("Failed to add ATProto test vector " # key # ": " # msg);
@@ -444,7 +444,7 @@ test(
     var retrievedCount = 0;
     for ((key, expectedContent) in atprotoTestVectors.vals()) {
       let keyBytes = Text.encodeUtf8(key);
-      switch (handler.getCID(currentNode, Blob.toArray(keyBytes))) {
+      switch (mst.getCID(currentNode, Blob.toArray(keyBytes))) {
         case (?retrievedCID) {
           let expectedCID = createTestCID(expectedContent);
           if (CID.toText(retrievedCID) == CID.toText(expectedCID)) {
@@ -464,9 +464,9 @@ test(
 );
 
 test(
-  "MST Handler - Fanout Behavior Verification",
+  "MerkleSearchTree - Fanout Behavior Verification",
   func() {
-    let handler = MSTHandler.Handler(PureMap.empty<Text, MST.Node>());
+    let mst = MerkleSearchTree.MerkleSearchTree(PureMap.empty<Text, MerkleNode.Node>());
 
     // Test that demonstrates ~4 fanout behavior with 2-bit leading zeros
     // Generate many keys and verify tree structure
@@ -491,21 +491,21 @@ test(
       "com.example.test/3",
     ];
 
-    var currentNode : MST.Node = {
+    var currentNode : MerkleNode.Node = {
       leftSubtreeCID = null;
       entries = [];
     };
-    var currentCID = handler.addNode(currentNode);
+    var currentCID = mst.addNode(currentNode);
 
     // Add all keys
     for (key in keys.vals()) {
       let keyBytes = Text.encodeUtf8(key);
       let valueCID = createTestCID(key);
 
-      switch (handler.addCID(currentCID, Blob.toArray(keyBytes), valueCID)) {
+      switch (mst.addCID(currentCID, Blob.toArray(keyBytes), valueCID)) {
         case (#ok(newNode)) {
           currentNode := newNode;
-          currentCID := handler.addNode(newNode);
+          currentCID := mst.addNode(newNode);
         };
         case (#err(msg)) {
           Runtime.trap("Failed to add key for fanout test: " # key # " - " # msg);
@@ -516,14 +516,14 @@ test(
     // Verify all keys are retrievable (demonstrates tree integrity)
     for (key in keys.vals()) {
       let keyBytes = Text.encodeUtf8(key);
-      switch (handler.getCID(currentNode, Blob.toArray(keyBytes))) {
+      switch (mst.getCID(currentNode, Blob.toArray(keyBytes))) {
         case (?_) {};
         case (null) Runtime.trap("Lost key in fanout test: " # key);
       };
     };
 
     // For our simplified implementation, verify the tree can handle many keys
-    // (A full MST implementation would have better fanout, but this tests basic functionality)
+    // (A full MerkleNode implementation would have better fanout, but this tests basic functionality)
     if (currentNode.entries.size() == 0) {
       Runtime.trap("Tree should contain entries after adding keys");
     };
@@ -531,16 +531,16 @@ test(
 );
 
 test(
-  "MST Handler - Record Removal",
+  "MerkleSearchTree - Record Removal",
   func() {
-    let handler = MSTHandler.Handler(PureMap.empty<Text, MST.Node>());
+    let mst = MerkleSearchTree.MerkleSearchTree(PureMap.empty<Text, MerkleNode.Node>());
 
     // Create initial node with multiple records
-    var currentNode : MST.Node = {
+    var currentNode : MerkleNode.Node = {
       leftSubtreeCID = null;
       entries = [];
     };
-    var currentCID = handler.addNode(currentNode);
+    var currentCID = mst.addNode(currentNode);
 
     let keys = [
       "app.bsky.feed.post/record1",
@@ -553,10 +553,10 @@ test(
       let keyBytes = Text.encodeUtf8(key);
       let valueCID = createTestCID(key);
 
-      switch (handler.addCID(currentCID, Blob.toArray(keyBytes), valueCID)) {
+      switch (mst.addCID(currentCID, Blob.toArray(keyBytes), valueCID)) {
         case (#ok(newNode)) {
           currentNode := newNode;
-          currentCID := handler.addNode(newNode);
+          currentCID := mst.addNode(newNode);
         };
         case (#err(msg)) Runtime.trap("Failed to add key " # key # ": " # msg);
       };
@@ -564,13 +564,13 @@ test(
 
     // Test removing middle record
     let removeKey = Text.encodeUtf8("app.bsky.feed.post/record2");
-    switch (handler.removeCID(currentCID, Blob.toArray(removeKey))) {
+    switch (mst.removeCID(currentCID, Blob.toArray(removeKey))) {
       case (#ok(updatedNode)) {
         currentNode := updatedNode;
-        currentCID := handler.addNode(updatedNode);
+        currentCID := mst.addNode(updatedNode);
 
         // Verify removed record is not retrievable
-        switch (handler.getCID(currentNode, Blob.toArray(removeKey))) {
+        switch (mst.getCID(currentNode, Blob.toArray(removeKey))) {
           case (?_) Runtime.trap("Removed record should not be retrievable");
           case (null) {}; // Good
         };
@@ -579,7 +579,7 @@ test(
         for (key in keys.vals()) {
           if (key != "app.bsky.feed.post/record2") {
             let keyBytes = Text.encodeUtf8(key);
-            switch (handler.getCID(currentNode, Blob.toArray(keyBytes))) {
+            switch (mst.getCID(currentNode, Blob.toArray(keyBytes))) {
               case (?_) {}; // Good
               case (null) Runtime.trap("Remaining record lost: " # key);
             };
@@ -591,7 +591,7 @@ test(
 
     // Test removing non-existent record
     let nonExistentKey = Text.encodeUtf8("app.bsky.feed.post/nonexistent");
-    switch (handler.removeCID(currentCID, Blob.toArray(nonExistentKey))) {
+    switch (mst.removeCID(currentCID, Blob.toArray(nonExistentKey))) {
       case (#ok(_)) Runtime.trap("Should not succeed removing non-existent record");
       case (#err(_)) {}; // Expected
     };
@@ -599,15 +599,15 @@ test(
 );
 
 test(
-  "MST Handler - Collection Operations",
+  "MerkleSearchTree - Collection Operations",
   func() {
-    let handler = MSTHandler.Handler(PureMap.empty<Text, MST.Node>());
+    let mst = MerkleSearchTree.MerkleSearchTree(PureMap.empty<Text, MerkleNode.Node>());
 
-    var currentNode : MST.Node = {
+    var currentNode : MerkleNode.Node = {
       leftSubtreeCID = null;
       entries = [];
     };
-    var currentCID = handler.addNode(currentNode);
+    var currentCID = mst.addNode(currentNode);
 
     // Add records from multiple collections
     let testData = [
@@ -624,17 +624,17 @@ test(
       let keyBytes = Text.encodeUtf8(key);
       let valueCID = createTestCID(key);
 
-      switch (handler.addCID(currentCID, Blob.toArray(keyBytes), valueCID)) {
+      switch (mst.addCID(currentCID, Blob.toArray(keyBytes), valueCID)) {
         case (#ok(newNode)) {
           currentNode := newNode;
-          currentCID := handler.addNode(newNode);
+          currentCID := mst.addNode(newNode);
         };
         case (#err(msg)) Runtime.trap("Failed to add " # key # ": " # msg);
       };
     };
 
     // Test getAllCollections
-    let collections = handler.getAllCollections(currentNode);
+    let collections = mst.getAllCollections(currentNode);
     let expectedCollections = ["app.bsky.feed.post", "app.bsky.follow", "com.example.custom"];
 
     if (collections.size() != expectedCollections.size()) {
@@ -653,18 +653,18 @@ test(
     };
 
     // Test getCollectionRecords for specific collections
-    let feedRecords = handler.getCollectionRecords(currentNode, "app.bsky.feed.post");
+    let feedRecords = mst.getCollectionRecords(currentNode, "app.bsky.feed.post");
     if (feedRecords.size() != 2) {
       Runtime.trap("Expected 2 feed records, got: " # debug_show (feedRecords.size()));
     };
 
-    let customRecords = handler.getCollectionRecords(currentNode, "com.example.custom");
+    let customRecords = mst.getCollectionRecords(currentNode, "com.example.custom");
     if (customRecords.size() != 3) {
       Runtime.trap("Expected 3 custom records, got: " # debug_show (customRecords.size()));
     };
 
     // Test empty collection
-    let emptyRecords = handler.getCollectionRecords(currentNode, "nonexistent.collection");
+    let emptyRecords = mst.getCollectionRecords(currentNode, "nonexistent.collection");
     if (emptyRecords.size() != 0) {
       Runtime.trap("Expected 0 records for nonexistent collection");
     };
@@ -672,34 +672,34 @@ test(
 );
 
 test(
-  "MST Handler - Block Map Loading",
+  "MerkleSearchTree - Block Map Loading",
   func() {
     // Test fromBlockMap functionality
-    let originalHandler = MSTHandler.Handler(PureMap.empty<Text, MST.Node>());
+    let originalMerkleSearchTree = MerkleSearchTree.MerkleSearchTree(PureMap.empty<Text, MerkleNode.Node>());
 
-    // Create a simple MST structure
-    var currentNode : MST.Node = {
+    // Create a simple MerkleNode structure
+    var currentNode : MerkleNode.Node = {
       leftSubtreeCID = null;
       entries = [];
     };
-    var currentCID = originalHandler.addNode(currentNode);
+    var currentCID = originalMerkleSearchTree.addNode(currentNode);
 
     let testKey = Text.encodeUtf8("app.bsky.feed.post/test");
     let testValue = createTestCID("test-value");
 
-    switch (originalHandler.addCID(currentCID, Blob.toArray(testKey), testValue)) {
+    switch (originalMerkleSearchTree.addCID(currentCID, Blob.toArray(testKey), testValue)) {
       case (#ok(newNode)) {
         currentNode := newNode;
-        currentCID := originalHandler.addNode(newNode);
+        currentCID := originalMerkleSearchTree.addNode(newNode);
       };
-      case (#err(msg)) Runtime.trap("Failed to create test MST: " # msg);
+      case (#err(msg)) Runtime.trap("Failed to create test MerkleNode: " # msg);
     };
 
-    // Create a block map with the MST node
+    // Create a block map with the MerkleNode node
     var blockMap = PureMap.empty<CID.CID, Blob>();
 
-    // Convert MST node to CBOR for block map
-    let nodeEntries = Array.map<MST.TreeEntry, DagCbor.Value>(
+    // Convert MerkleNode node to CBOR for block map
+    let nodeEntries = Array.map<MerkleNode.TreeEntry, DagCbor.Value>(
       currentNode.entries,
       func(entry) = #map([
         ("p", #int(entry.prefixLength)),
@@ -718,20 +718,20 @@ test(
     blockMap := PureMap.add(blockMap, CIDBuilder.compare, currentCID, nodeBytes);
 
     // Test loading from block map
-    switch (MSTHandler.fromBlockMap(currentCID, blockMap)) {
-      case (#ok(loadedHandler)) {
-        // Verify the loaded handler works correctly
-        let ?loadedNode = loadedHandler.getNode(currentCID) else {
+    switch (MerkleSearchTree.fromBlockMap(currentCID, blockMap)) {
+      case (#ok(loadedMerkleSearchTree)) {
+        // Verify the loaded mst works correctly
+        let ?loadedNode = loadedMerkleSearchTree.getNode(currentCID) else {
           Runtime.trap("Failed to get loaded node");
         };
 
-        switch (loadedHandler.getCID(loadedNode, Blob.toArray(testKey))) {
+        switch (loadedMerkleSearchTree.getCID(loadedNode, Blob.toArray(testKey))) {
           case (?retrievedCID) {
             if (CID.toText(retrievedCID) != CID.toText(testValue)) {
-              Runtime.trap("Loaded MST returned wrong CID");
+              Runtime.trap("Loaded MerkleNode returned wrong CID");
             };
           };
-          case (null) Runtime.trap("Failed to retrieve key from loaded MST");
+          case (null) Runtime.trap("Failed to retrieve key from loaded MerkleNode");
         };
       };
       case (#err(msg)) Runtime.trap("Failed to load from block map: " # msg);
@@ -740,21 +740,21 @@ test(
 );
 
 test(
-  "MST Handler - Edge Cases and Boundary Conditions",
+  "MerkleSearchTree - Edge Cases and Boundary Conditions",
   func() {
-    let handler = MSTHandler.Handler(PureMap.empty<Text, MST.Node>());
+    let mst = MerkleSearchTree.MerkleSearchTree(PureMap.empty<Text, MerkleNode.Node>());
 
-    let emptyNode : MST.Node = {
+    let emptyNode : MerkleNode.Node = {
       leftSubtreeCID = null;
       entries = [];
     };
-    let rootCID = handler.addNode(emptyNode);
+    let rootCID = mst.addNode(emptyNode);
     let testValue = createTestCID("test");
 
     // Test maximum key length (256 bytes)
     let longSuffix = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"; // 247 chars
     let maxKey = Text.encodeUtf8("collection/" # longSuffix); // 10 + 247 = 257 chars
-    switch (handler.addCID(rootCID, Blob.toArray(maxKey), testValue)) {
+    switch (mst.addCID(rootCID, Blob.toArray(maxKey), testValue)) {
       case (#ok(_)) Runtime.trap("Should reject key longer than 256 bytes");
       case (#err(_)) {}; // Expected
     };
@@ -770,7 +770,7 @@ test(
 
     let validKey255 = Text.encodeUtf8(collectionPart # separator # suffix244);
 
-    switch (handler.addCID(rootCID, Blob.toArray(validKey255), testValue)) {
+    switch (mst.addCID(rootCID, Blob.toArray(validKey255), testValue)) {
       case (#ok(_)) {}; // Should work
       case (#err(msg)) Runtime.trap("Valid 255-byte key rejected: " # msg);
     };
@@ -779,7 +779,7 @@ test(
     let suffix245 = suffix244 # "a"; // Add one more 'a' for 256 total
     let validKey256 = Text.encodeUtf8(collectionPart # separator # suffix245);
 
-    switch (handler.addCID(rootCID, Blob.toArray(validKey256), testValue)) {
+    switch (mst.addCID(rootCID, Blob.toArray(validKey256), testValue)) {
       case (#ok(_)) {}; // Should work
       case (#err(msg)) Runtime.trap("Valid 256-byte key rejected: " # msg);
     }; // Test keys with special characters
@@ -793,7 +793,7 @@ test(
 
     for (key in specialKeys.vals()) {
       let keyBytes = Text.encodeUtf8(key);
-      switch (handler.addCID(rootCID, Blob.toArray(keyBytes), testValue)) {
+      switch (mst.addCID(rootCID, Blob.toArray(keyBytes), testValue)) {
         case (#ok(_)) {}; // Should work
         case (#err(msg)) Runtime.trap("Valid special key rejected: " # key # " - " # msg);
       };
@@ -801,11 +801,11 @@ test(
 
     // Test duplicate key insertion
     let dupKey = Text.encodeUtf8("test.collection/duplicate");
-    switch (handler.addCID(rootCID, Blob.toArray(dupKey), testValue)) {
+    switch (mst.addCID(rootCID, Blob.toArray(dupKey), testValue)) {
       case (#ok(newNode)) {
-        let newCID = handler.addNode(newNode);
+        let newCID = mst.addNode(newNode);
         // Try to add same key again
-        switch (handler.addCID(newCID, Blob.toArray(dupKey), testValue)) {
+        switch (mst.addCID(newCID, Blob.toArray(dupKey), testValue)) {
           case (#ok(_)) Runtime.trap("Should reject duplicate key");
           case (#err(_)) {}; // Expected
         };
@@ -816,15 +816,15 @@ test(
 );
 
 test(
-  "MST Handler - Large Scale Operations",
+  "MerkleSearchTree - Large Scale Operations",
   func() {
-    let handler = MSTHandler.Handler(PureMap.empty<Text, MST.Node>());
+    let mst = MerkleSearchTree.MerkleSearchTree(PureMap.empty<Text, MerkleNode.Node>());
 
-    var currentNode : MST.Node = {
+    var currentNode : MerkleNode.Node = {
       leftSubtreeCID = null;
       entries = [];
     };
-    var currentCID = handler.addNode(currentNode);
+    var currentCID = mst.addNode(currentNode);
 
     // Add a large number of records to test performance and stability
     let numRecords = 50;
@@ -837,10 +837,10 @@ test(
       let keyBytes = Text.encodeUtf8(key);
       let valueCID = createTestCID("value" # debug_show (i));
 
-      switch (handler.addCID(currentCID, Blob.toArray(keyBytes), valueCID)) {
+      switch (mst.addCID(currentCID, Blob.toArray(keyBytes), valueCID)) {
         case (#ok(newNode)) {
           currentNode := newNode;
-          currentCID := handler.addNode(newNode);
+          currentCID := mst.addNode(newNode);
           addedKeys := Array.concat(addedKeys, [key]);
         };
         case (#err(msg)) Runtime.trap("Failed to add record " # debug_show (i) # ": " # msg);
@@ -850,14 +850,14 @@ test(
     // Verify all records are retrievable
     for (key in addedKeys.vals()) {
       let keyBytes = Text.encodeUtf8(key);
-      switch (handler.getCID(currentNode, Blob.toArray(keyBytes))) {
+      switch (mst.getCID(currentNode, Blob.toArray(keyBytes))) {
         case (?_) {}; // Good
         case (null) Runtime.trap("Lost record in large scale test: " # key);
       };
     };
 
     // Test getAllRecordCIDs with many records
-    let allCIDs = handler.getAllRecordCIDs(currentNode);
+    let allCIDs = mst.getAllRecordCIDs(currentNode);
     if (allCIDs.size() != numRecords) {
       Runtime.trap(
         "getAllRecordCIDs returned wrong count. Expected: " #
@@ -868,15 +868,15 @@ test(
 );
 
 test(
-  "MST Handler - Key Reconstruction Edge Cases",
+  "MerkleSearchTree - Key Reconstruction Edge Cases",
   func() {
-    let handler = MSTHandler.Handler(PureMap.empty<Text, MST.Node>());
+    let mst = MerkleSearchTree.MerkleSearchTree(PureMap.empty<Text, MerkleNode.Node>());
 
-    var currentNode : MST.Node = {
+    var currentNode : MerkleNode.Node = {
       leftSubtreeCID = null;
       entries = [];
     };
-    var currentCID = handler.addNode(currentNode);
+    var currentCID = mst.addNode(currentNode);
 
     // Test keys with very similar prefixes to stress compression
     let similarKeys = [
@@ -891,10 +891,10 @@ test(
       let keyBytes = Text.encodeUtf8(key);
       let valueCID = createTestCID(key);
 
-      switch (handler.addCID(currentCID, Blob.toArray(keyBytes), valueCID)) {
+      switch (mst.addCID(currentCID, Blob.toArray(keyBytes), valueCID)) {
         case (#ok(newNode)) {
           currentNode := newNode;
-          currentCID := handler.addNode(newNode);
+          currentCID := mst.addNode(newNode);
         };
         case (#err(msg)) Runtime.trap("Failed to add similar key " # key # ": " # msg);
       };
@@ -905,7 +905,7 @@ test(
       let keyBytes = Text.encodeUtf8(key);
       let expectedCID = createTestCID(key);
 
-      switch (handler.getCID(currentNode, Blob.toArray(keyBytes))) {
+      switch (mst.getCID(currentNode, Blob.toArray(keyBytes))) {
         case (?retrievedCID) {
           if (CID.toText(retrievedCID) != CID.toText(expectedCID)) {
             Runtime.trap("Wrong CID for similar key " # key);

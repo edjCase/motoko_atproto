@@ -21,6 +21,7 @@ import Principal "mo:core@1/Principal";
 import CAR "mo:car@1";
 import CarUtil "CarUtil";
 import PdsInterface "./PdsInterface";
+import DateTime "mo:datetime@1/DateTime";
 
 shared ({ caller = deployer }) persistent actor class Pds(
   initData : {
@@ -119,6 +120,28 @@ shared ({ caller = deployer }) persistent actor class Pds(
 
   public func http_request_update(request : Liminal.RawUpdateHttpRequest) : async Liminal.RawUpdateHttpResponse {
     await* app.http_request_update(request);
+  };
+
+  public shared ({ caller }) func post(message : Text) : async Result.Result<(), Text> {
+    if (caller != owner) {
+      return #err("Only the owner can post to this PDS");
+    };
+    let now = DateTime.now();
+    let createRecordRequest : RepositoryHandler.CreateRecordRequest = {
+      collection = "app.bsky.feed.post";
+      rkey = null;
+      record = #map([
+        ("$type", #text("app.bsky.feed.post")),
+        ("text", #text(message)),
+        ("createdAt", #text(now.toTextFormatted(#iso))),
+      ]);
+      validate = null;
+      swapCommit = null;
+    };
+    switch (await* repositoryHandler.createRecord(createRecordRequest)) {
+      case (#ok(_)) #ok;
+      case (#err(e)) #err("Failed to post: " # e);
+    };
   };
 
   // Candid API methods

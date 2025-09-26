@@ -5,8 +5,9 @@ import PureMap "mo:core@1/pure/Map";
 import Result "mo:core@1/Result";
 import Error "mo:core@1/Error";
 import Principal "mo:core@1/Principal";
+import Iter "mo:core@1/Iter";
 
-persistent actor {
+persistent actor PdsFactory {
 
   public type PdsInfo = {
     owner : Principal;
@@ -30,10 +31,41 @@ persistent actor {
 
   var pdsMap = PureMap.empty<Principal, PdsInfo>();
 
+  public shared ({ caller }) func getDeployedInstances() : async [Principal] {
+    pdsMap
+    |> PureMap.entries(_)
+    |> Iter.filterMap(
+      _,
+      func((id, info) : (Principal, PdsInfo)) : ?Principal {
+        if (info.owner != caller) {
+          return null;
+        };
+        ?id;
+      },
+    )
+    |> Iter.toArray(_);
+  };
+
+  public shared ({ caller }) func upgrade(pdsPrincipal : Principal) : async Result.Result<(), Text> {
+    let ?pdsInfo = PureMap.get(pdsMap, Principal.compare, pdsPrincipal) else return #err("PDS not found");
+    if (pdsInfo.owner != caller) {
+      return #err("Only the owner can upgrade the PDS");
+    };
+    try {
+      let pdsActor = actor (Principal.toText(pdsPrincipal)) : Pds.Pds;
+      ignore await (with cycles = 1_000_000_000_000) (system Pds.Pds)(#upgrade(pdsActor))({
+        owner = caller;
+      });
+      #ok;
+    } catch (e) {
+      #err("Upgrade failed: " # Error.message(e));
+    };
+  };
+
   public shared ({ caller }) func deploy(
     canisterId : ?Principal,
     initializeRequest : PdsInterface.InitializeRequest,
-  ) : async Result.Result<(), Text> {
+  ) : async Result.Result<Principal, Text> {
     if (caller == Principal.anonymous()) {
       return #err("Anonymous caller is not allowed to deploy a PDS");
     };
@@ -42,13 +74,13 @@ persistent actor {
       case (null) #new({
         settings = ?{
           compute_allocation = null;
-          controllers = ?[caller];
+          controllers = ?[caller, Principal.fromActor(PdsFactory)];
           freezing_threshold = null;
           memory_allocation = null;
         };
       });
     };
-    let pds = await (with cycles = 500_000_000_000) (system Pds.Pds)(installArgs)({
+    let pds = await (with cycles = 1_200_000_000_000) (system Pds.Pds)(installArgs)({
       owner = caller;
     });
 
@@ -78,7 +110,7 @@ persistent actor {
       },
     );
     switch (status) {
-      case (#initialized(_)) #ok;
+      case (#initialized(_)) #ok(pdsPrincipal);
       case (#initializationFailed(failure)) #err("PDS deployed but initialization failed: " # failure.reason);
     };
   };

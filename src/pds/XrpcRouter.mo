@@ -30,6 +30,7 @@ import PutPreferences "../atproto/Lexicons/App/Bsky/Actor/PutPreferences";
 import GetServices "../atproto/Lexicons/App/Bsky/Labeler/GetServices";
 import ActorDefs "../atproto/Lexicons/App/Bsky/Actor/Defs";
 import ResolveHandle "../atproto/Lexicons/Com/Atproto/Identity/ResolveHandle";
+import ListRecords "../atproto/Lexicons/Com/Atproto/Repo/ListRecords";
 import DynamicArray "mo:xtended-collections@0/DynamicArray";
 import Runtime "mo:core@1/Runtime";
 import ServerInfo "ServerInfo";
@@ -421,10 +422,90 @@ module {
     };
 
     func listRecords(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
-      // TODO: Implement record listing with MST traversal
+      let repoId = switch (routeContext.getQueryParam("repo")) {
+        case (?repoText) switch (DID.Plc.fromText(repoText)) {
+          case (#ok(did)) did;
+          case (#err(e)) return routeContext.buildResponse(
+            #badRequest,
+            #error(#message("Invalid repo DID: " # e)),
+          );
+        };
+        case (null) return routeContext.buildResponse(
+          #badRequest,
+          #error(#message("Missing required query parameter: repo")),
+        );
+      };
+      let collection = switch (routeContext.getQueryParam("collection")) {
+        case (?collection) collection;
+        case (null) return routeContext.buildResponse(
+          #badRequest,
+          #error(#message("Missing required query parameter: collection")),
+        );
+      };
+      let limitOrNull = switch (routeContext.getQueryParam("limit")) {
+        case (null) null;
+        case (?limitText) switch (Nat.fromText(limitText)) {
+          case (?n) if (n > 0 and n <= 100) ?n else return routeContext.buildResponse(
+            #badRequest,
+            #error(#message("Invalid 'limit' parameter, must be between 1 and 100")),
+          );
+          case (null) return routeContext.buildResponse(
+            #badRequest,
+            #error(#message("Invalid 'limit' parameter, must be a valid positive integer")),
+          );
+        };
+      };
+      let cursorTextOrNull = routeContext.getQueryParam("cursor");
+      let reverseOrNull = switch (routeContext.getQueryParam("reverse")) {
+        case (null) null;
+        case (?reverseText) switch (Text.toLower(reverseText)) {
+          case ("true") ?true;
+          case ("false") ?false;
+          case (_) return routeContext.buildResponse(
+            #badRequest,
+            #error(#message("Invalid 'reverse' parameter, must be 'true' or 'false'")),
+          );
+        };
+      };
+
+      let serverInfo = serverInfoHandler.get();
+      if (repoId != serverInfo.plcIdentifier) {
+        return routeContext.buildResponse(
+          #notFound,
+          #error(#message("Repository not found: " # DID.Plc.toText(repoId))),
+        );
+      };
+
+      let listRecordsResponse = repositoryHandler.listRecords({
+        collection = collection;
+        limit = limitOrNull;
+        cursor = cursorTextOrNull;
+        reverse = reverseOrNull;
+        rkeyStart = null;
+        rkeyEnd = null;
+      });
+      let responseJson = ListRecords.toJson({
+        listRecordsResponse with records = Array.map(
+          listRecordsResponse.records,
+          func(r : RepositoryHandler.ListRecord) : ListRecords.ListRecord {
+            let uri : AtUri.AtUri = {
+              authority = #plc(serverInfo.plcIdentifier);
+              collection = ?{
+                id = r.collection;
+                recordKey = ?r.rkey;
+              };
+            };
+            {
+              uri = uri;
+              cid = r.cid;
+              value = r.value;
+            };
+          },
+        );
+      });
       routeContext.buildResponse(
-        #notImplemented,
-        #error(#message("listRecords not implemented yet")),
+        #ok,
+        #json(responseJson),
       );
     };
 
