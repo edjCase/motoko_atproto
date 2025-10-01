@@ -240,12 +240,12 @@ module {
       data;
     };
 
-    private func getRepository() : RepositoryWithData {
+    private func getRepository() : Repository.Repository {
       let ?data = dataOrNull else Runtime.trap("Repository not initialized");
       data.repository;
     };
 
-    private func setRepository(repository : RepositoryWithData) : () {
+    private func setRepository(repository : Repository.Repository) : () {
       let data = getDataOrTrap();
       dataOrNull := ?{
         data with
@@ -253,7 +253,7 @@ module {
       };
     };
 
-    public func initialize(existingRepository : ?RepositoryWithData) : async* Result.Result<(), Text> {
+    public func initialize(existingRepository : ?Repository.Repository) : async* Result.Result<(), Text> {
       if (dataOrNull != null) {
         return #err("Repository already initialized");
       };
@@ -261,15 +261,9 @@ module {
       let repository = switch (existingRepository) {
         case (?repository) repository;
         case (null) {
-          let mstHandler = MerkleSearchTree.MerkleSearchTree(PureMap.empty<Text, MerkleNode.Node>());
-          // First node is empty
-          let newMST : MerkleNode.Node = {
-            leftSubtreeCID = null;
-            entries = [];
-          };
+          let mst = MerkleSearchTree.empty();
           let rev = tidGenerator.next();
-          let newMSTCID = mstHandler.addNode(newMST);
-          let signedCommit = switch (await* createCommit(rev, newMSTCID, null)) {
+          let signedCommit = switch (await* createCommit(rev, mst.root, null)) {
             case (#ok(commit)) commit;
             case (#err(e)) return #err("Failed to create commit: " # e);
           };
@@ -281,7 +275,7 @@ module {
             status = null;
             commits = PureMap.singleton<TID.TID, Commit>(rev, signedCommit);
             records = PureMap.empty<CID.CID, DagCbor.Value>();
-            nodes = mstHandler.getNodes();
+            nodes = mst.nodes;
             blobs = PureMap.empty<CID.CID, BlobRef>();
           };
         };
@@ -297,17 +291,16 @@ module {
 
     public func getAllCollections() : [Text] {
       let repository = getRepository();
-      let mst = MerkleSearchTree.MerkleSearchTree(repository.nodes);
-
-      // Get current commit to find root node
-      let ?currentCommit = PureMap.get(
-        repository.commits,
-        TID.compare,
-        repository.rev,
-      ) else Runtime.trap("No commits found in repository");
-      let ?rootNode = mst.getNode(currentCommit.data) else Runtime.trap("Failed to get root MST node");
-
-      mst.getAllCollections(rootNode);
+      let mst = Repository.buildMerkleSearchTree(repository);
+      let collections = Set.empty<Text>();
+      for ((key, _) in MerkleSearchTree.entries(mst)) {
+        let parts = Iter.toArray(Text.split(key, #char('/')));
+        // TODO how to handle invalid keys here? if size is < 2?
+        if (parts.size() >= 2) {
+          Set.add(collections, Text.compare, parts[0]);
+        };
+      };
+      Iter.toArray(Set.values(collections));
     };
 
     public func createRecord(
@@ -356,36 +349,23 @@ module {
 
       // Create record path
       let path = request.collection # "/" # rKey;
-      let pathKey = MerkleNode.pathToKey(path);
 
-      let mst = MerkleSearchTree.MerkleSearchTree(repository.nodes);
-
-      // Get current MST root from the latest commit
-      let ?currentCommit = PureMap.get<TID.TID, Commit>(
-        repository.commits,
-        TID.compare,
-        repository.rev,
-      ) else Runtime.trap("No commits found in repository");
-
-      // Use the commit's data field as the root node CID
-      let rootNodeCID = currentCommit.data;
+      let mst = Repository.buildMerkleSearchTree(repository);
 
       // Add to MST
-      let newNode = switch (mst.addCID(rootNodeCID, pathKey, recordCID)) {
+      let newMst = switch (MerkleSearchTree.add(mst, path, recordCID)) {
         case (#ok(mst)) mst;
         case (#err(e)) return #err("Failed to add to MST: " # debug_show (e));
       };
 
-      // Store the new root node in the MST handler
-      let newNodeCID = mst.addNode(newNode);
       // Create new commit
       let newRev = tidGenerator.next();
 
       let signedCommit = switch (
         await* createCommit(
           newRev,
-          newNodeCID,
-          ?rootNodeCID,
+          newMst.root,
+          ?mst.root,
         )
       ) {
         case (#ok(commit)) commit;
@@ -407,7 +387,7 @@ module {
         rev = newRev;
         commits = updatedCommits;
         records = updatedRecords;
-        nodes = mst.getNodes();
+        nodes = mst.nodes;
       });
 
       #ok({
@@ -423,18 +403,11 @@ module {
 
     public func getRecord(request : GetRecordRequest) : ?GetRecordResponse {
       let path = request.collection # "/" # request.rkey;
-      let pathKey = MerkleNode.pathToKey(path);
       let repository = getRepository();
 
-      let mst = MerkleSearchTree.MerkleSearchTree(repository.nodes);
+      let mst = Repository.buildMerkleSearchTree(repository);
 
-      // Get the current commit to find the MST root
-      let ?currentCommit = PureMap.get(repository.commits, TID.compare, repository.rev) else return null;
-
-      // Get the root MST node from the commit's data field
-      let ?rootNode = mst.getNode(currentCommit.data) else return null;
-
-      let ?recordCID = mst.getCID(rootNode, pathKey) else return null;
+      let ?recordCID = MerkleSearchTree.get(mst, path) else return null;
       let ?value = PureMap.get(repository.records, CIDBuilder.compare, recordCID) else return null;
       ?{
         cid = recordCID;
@@ -459,27 +432,20 @@ module {
         case (null) ();
       };
 
+      let mst = Repository.buildMerkleSearchTree(repository);
+
       // Validate swapRecord if provided (for putRecord, ensure current record matches or doesn't exist)
       switch (request.swapRecord) {
         case (?expectedRecordCID) {
           // Check if record currently exists
           let path = request.collection # "/" # request.rkey;
-          let pathKey = MerkleNode.pathToKey(path);
-          let tempMstHandler = MerkleSearchTree.MerkleSearchTree(repository.nodes);
-          let ?currentCommit = PureMap.get<TID.TID, Commit>(repository.commits, TID.compare, repository.rev) else return #err("No commits found in repository");
-          let ?rootNode = tempMstHandler.getNode(currentCommit.data) else return #err("MST root node not found for swap validation");
-
-          switch (tempMstHandler.getCID(rootNode, pathKey)) {
-            case (?currentRecordCID) {
-              // Record exists, check if it matches expected CID
-              if (currentRecordCID != expectedRecordCID) {
-                return #err("Swap record failed: expected " # CID.toText(expectedRecordCID) # " but current record is " # CID.toText(currentRecordCID));
-              };
-            };
-            case (null) {
-              // Record doesn't exist but swap expects it to
-              return #err("Swap record failed: expected record " # CID.toText(expectedRecordCID) # " but record does not exist");
-            };
+          let ?currentRecordCID = MerkleSearchTree.get(mst, path) else {
+            // Record doesn't exist but swap expects it to
+            return #err("Swap record failed: expected record " # CID.toText(expectedRecordCID) # " but record does not exist");
+          };
+          // Record exists, check if it matches expected CID
+          if (currentRecordCID != expectedRecordCID) {
+            return #err("Swap record failed: expected " # CID.toText(expectedRecordCID) # " but current record is " # CID.toText(currentRecordCID));
           };
         };
         case (null) ();
@@ -500,36 +466,20 @@ module {
 
       // Create record path
       let path = request.collection # "/" # request.rkey;
-      let pathKey = MerkleNode.pathToKey(path);
 
-      let mst = MerkleSearchTree.MerkleSearchTree(repository.nodes);
-
-      // Get current MST root from the latest commit
-      let ?currentCommit = PureMap.get<TID.TID, Commit>(
-        repository.commits,
-        TID.compare,
-        repository.rev,
-      ) else Runtime.trap("No commits found in repository");
-
-      // Use the commit's data field as the root node CID
-      let rootNodeCID = currentCommit.data;
-
-      // Update MST (this will replace existing record or add new one)
-      let newNode = switch (mst.upsertCID(rootNodeCID, pathKey, recordCID)) {
+      let newMst = switch (MerkleSearchTree.add(mst, path, recordCID)) {
         case (#ok(mst)) mst;
         case (#err(e)) return #err("Failed to update MST: " # e);
       };
 
-      // Store the new root node in the MST handler
-      let newNodeCID = mst.addNode(newNode);
       // Create new commit
       let newRev = tidGenerator.next();
 
       let signedCommit = switch (
         await* createCommit(
           newRev,
-          newNodeCID,
-          ?rootNodeCID,
+          newMst.root,
+          ?mst.root,
         )
       ) {
         case (#ok(commit)) commit;
@@ -551,7 +501,7 @@ module {
         rev = newRev;
         commits = updatedCommits;
         records = updatedRecords;
-        nodes = mst.getNodes();
+        nodes = mst.nodes;
       });
 
       #ok({
@@ -577,27 +527,16 @@ module {
         case (null) ();
       };
 
+      let mst = Repository.buildMerkleSearchTree(repository);
       // Validate swapRecord if provided (for deleteRecord, ensure current record matches)
       switch (request.swapRecord) {
         case (?expectedRecordCID) {
           // Check if record currently exists and matches expected CID
           let path = request.collection # "/" # request.rkey;
-          let pathKey = MerkleNode.pathToKey(path);
-          let tempMstHandler = MerkleSearchTree.MerkleSearchTree(repository.nodes);
-          let ?currentCommit = PureMap.get<TID.TID, Commit>(repository.commits, TID.compare, repository.rev) else return #err("No commits found in repository");
-          let ?rootNode = tempMstHandler.getNode(currentCommit.data) else return #err("MST root node not found for swap validation");
-
-          switch (tempMstHandler.getCID(rootNode, pathKey)) {
-            case (?currentRecordCID) {
-              // Record exists, check if it matches expected CID
-              if (currentRecordCID != expectedRecordCID) {
-                return #err("Swap record failed: expected " # CID.toText(expectedRecordCID) # " but current record is " # CID.toText(currentRecordCID));
-              };
-            };
-            case (null) {
-              // Record doesn't exist but swap expects it to
-              return #err("Swap record failed: expected record " # CID.toText(expectedRecordCID) # " but record does not exist");
-            };
+          let ?currentRecordCID = MerkleSearchTree.get(mst, path) else return #err("Swap record failed: expected record " # CID.toText(expectedRecordCID) # " but record does not exist");
+          // Record exists, check if it matches expected CID
+          if (currentRecordCID != expectedRecordCID) {
+            return #err("Swap record failed: expected " # CID.toText(expectedRecordCID) # " but current record is " # CID.toText(currentRecordCID));
           };
         };
         case (null) ();
@@ -605,39 +544,21 @@ module {
 
       // Create record path
       let path = request.collection # "/" # request.rkey;
-      let pathKey = MerkleNode.pathToKey(path);
-
-      let mst = MerkleSearchTree.MerkleSearchTree(repository.nodes);
-
-      // Get current MST root from the latest commit
-      let ?currentCommit = PureMap.get<TID.TID, Commit>(
-        repository.commits,
-        TID.compare,
-        repository.rev,
-      ) else Runtime.trap("No commits found in repository");
-
-      let currentNodeCID = currentCommit.data;
-
-      // Check if record exists before trying to delete
-      let ?rootNode = mst.getNode(currentCommit.data) else Runtime.trap("MST root node not found in repository. Repository may be corrupted or incompletely loaded. Root CID: " # CID.toText(currentCommit.data));
-      let ?_ = mst.getCID(rootNode, pathKey) else return #err("Record not found at path: " # path);
 
       // Remove from MST
-      let newNode = switch (mst.removeCID(currentCommit.data, pathKey)) {
+      let newMst = switch (MerkleSearchTree.remove(mst, path)) {
         case (#ok(mst)) mst;
         case (#err(e)) return #err("Failed to remove from MST: " # debug_show (e));
       };
 
-      // Store the new root node in the MST handler
-      let newNodeCID = mst.addNode(newNode);
       // Create new commit
       let newRev = tidGenerator.next();
 
       let signedCommit = switch (
         await* createCommit(
           newRev,
-          newNodeCID,
-          ?currentNodeCID,
+          newMst.root,
+          ?mst.root,
         )
       ) {
         case (#ok(commit)) commit;
@@ -658,7 +579,7 @@ module {
         head = commitCID;
         rev = newRev;
         commits = updatedCommits;
-        nodes = mst.getNodes();
+        nodes = mst.nodes;
       });
 
       #ok({
@@ -682,15 +603,9 @@ module {
 
       var updatedRecords = repository.records;
       var updatedBlobs = repository.blobs;
-      let mst = MerkleSearchTree.MerkleSearchTree(repository.nodes);
-      var currentNodeCID = repository.head;
+      var mst = Repository.buildMerkleSearchTree(repository);
 
-      // Get current MST root from the latest commit
-      let ?currentCommit = PureMap.get<TID.TID, Commit>(
-        repository.commits,
-        TID.compare,
-        repository.rev,
-      ) else Runtime.trap("No commits found in repository");
+      let originalMstRoot = mst.root;
 
       // Process all write operations and collect results
       let results = List.empty<WriteResult>();
@@ -724,15 +639,12 @@ module {
 
             // Create record path for MST
             let path = createOp.collection # "/" # rKey;
-            let pathKey = MerkleNode.pathToKey(path);
 
             // Add to MST
-            let newNode = switch (mst.addCID(currentCommit.data, pathKey, recordCID)) {
+            mst := switch (MerkleSearchTree.add(mst, path, recordCID)) {
               case (#ok(mst)) mst;
               case (#err(e)) return #err("Failed to add to MST: " # debug_show (e));
             };
-
-            currentNodeCID := CIDBuilder.fromMSTNode(newNode);
 
             #create({
               collection = createOp.collection;
@@ -762,15 +674,11 @@ module {
 
             // Create record path for MST
             let path = updateOp.collection # "/" # updateOp.rkey;
-            let pathKey = MerkleNode.pathToKey(path);
-
             // Update MST (this will replace existing record)
-            let newNode = switch (mst.addCID(currentNodeCID, pathKey, recordCID)) {
+            mst := switch (MerkleSearchTree.add(mst, path, recordCID)) {
               case (#ok(mst)) mst;
               case (#err(e)) return #err("Failed to update MST: " # debug_show (e));
             };
-
-            currentNodeCID := CIDBuilder.fromMSTNode(newNode);
 
             #update({
               collection = updateOp.collection;
@@ -782,19 +690,12 @@ module {
           case (#delete(deleteOp)) {
             // Create record path for MST
             let path = deleteOp.collection # "/" # deleteOp.rkey;
-            let pathKey = MerkleNode.pathToKey(path);
-
-            // Check if record exists before trying to delete
-            let ?rootNode = mst.getNode(currentNodeCID) else return #err("Failed to get root node from MST");
-            let ?_ = mst.getCID(rootNode, pathKey) else return #err("Record not found at path: " # path);
 
             // Remove from MST
-            let newNode = switch (mst.removeCID(currentNodeCID, pathKey)) {
+            mst := switch (MerkleSearchTree.remove(mst, path)) {
               case (#ok(mst)) mst;
               case (#err(e)) return #err("Failed to remove from MST: " # debug_show (e));
             };
-
-            currentNodeCID := CIDBuilder.fromMSTNode(newNode);
 
             #delete({});
           };
@@ -807,8 +708,8 @@ module {
       let signedCommit = switch (
         await* createCommit(
           newRev,
-          currentNodeCID,
-          ?currentCommit.data,
+          mst.root,
+          ?originalMstRoot,
         )
       ) {
         case (#ok(commit)) commit;
@@ -830,7 +731,7 @@ module {
         rev = newRev;
         commits = updatedCommits;
         records = updatedRecords;
-        nodes = mst.getNodes();
+        nodes = mst.nodes;
         blobs = updatedBlobs;
       });
 
@@ -845,33 +746,28 @@ module {
 
     public func listRecords(request : ListRecordsRequest) : ListRecordsResponse {
       let repository = getRepository();
-      let mst = MerkleSearchTree.MerkleSearchTree(repository.nodes);
-
-      // Get current commit to find root node
-      let ?currentCommit = PureMap.get(
-        repository.commits,
-        TID.compare,
-        repository.rev,
-      ) else Runtime.trap("No commits found in repository");
-      let ?rootNode = mst.getNode(currentCommit.data) else Runtime.trap("Failed to get root MST node");
+      let mst = Repository.buildMerkleSearchTree(repository);
 
       // TODO optimize for reverse/limit/cursor
-      let collectionRecords = mst.getCollectionRecords(rootNode, request.collection);
-
+      let collectionPrefix = request.collection # "/";
       // Convert to ListRecord format
-      let records = collectionRecords
-      |> Array.map<(key : Text, CID.CID), ListRecord>(
+      let records = MerkleSearchTree.entries(mst)
+      |> Iter.filterMap<(key : Text, CID.CID), ListRecord>(
         _,
-        func((key, cid) : (key : Text, CID.CID)) : ListRecord {
+        func((key, cid) : (key : Text, CID.CID)) : ?ListRecord {
           let ?value : ?DagCbor.Value = PureMap.get(repository.records, CIDBuilder.compare, cid) else Runtime.trap("Record not found: " # CID.toText(cid));
-          {
+          // Check if collection matches
+          let ?rkey = Text.stripStart(key, #text(collectionPrefix)) else return null;
+
+          ?{
             collection = request.collection;
             rkey = key;
             cid = cid;
             value = value;
           };
         },
-      );
+      )
+      |> Iter.toArray(_);
 
       // Apply reverse ordering if requested
       let orderedRecords = switch (request.reverse) {

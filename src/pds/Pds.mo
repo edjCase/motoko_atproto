@@ -150,7 +150,7 @@ shared ({ caller = deployer }) persistent actor class Pds(
       return #err("Only the owner or deployer can initialize the PDS");
     };
     // TODO prevent re-initialization?
-    let (plcIndentifier, repository) : (DID.Plc.DID, ?RepositoryHandler.RepositoryWithData) = switch (request.plc) {
+    let (plcIndentifier, repository) : (DID.Plc.DID, ?RepositoryHandler.Repository) = switch (request.plc) {
       case (#new(createRequest)) {
         switch (await* didDirectoryHandler.create(createRequest)) {
           case (#ok(did)) (did, null);

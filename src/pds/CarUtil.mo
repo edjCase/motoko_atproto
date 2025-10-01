@@ -18,7 +18,7 @@ import Blob "mo:core@1/Blob";
 import Int "mo:core@1/Int";
 
 module {
-  public func buildRepository(request : CAR.File) : Result.Result<(DID.Plc.DID, RepositoryHandler.RepositoryWithData), Text> {
+  public func buildRepository(request : CAR.File) : Result.Result<(DID.Plc.DID, RepositoryHandler.Repository), Text> {
     let roots = request.header.roots;
     if (roots.size() == 0) {
       return #err("CAR file has no root CIDs");

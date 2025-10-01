@@ -120,68 +120,46 @@ module {
     #ok(currentMst);
   };
 
-  public func listCollections(mst : MerkleSearchTree) : [Text] {
-    let collections = Set.empty<Text>();
-    traverseTree(
-      mst,
-      func(key : Text, _ : CID.CID) {
-        let parts = Iter.toArray(Text.split(key, #char('/')));
-        // TODO how to handle invalid keys here? if size is < 2?
-        if (parts.size() >= 2) {
-          Set.add(collections, Text.compare, parts[0]);
-        };
-      },
-    );
-
-    Iter.toArray(Set.values(collections));
-  };
-
-  public func getAll(mst : MerkleSearchTree) : [CID.CID] {
-    let cids = List.empty<CID.CID>();
-
-    traverseTree(
-      mst,
-      func(_ : Text, entryValue : CID.CID) {
-        List.add(cids, entryValue);
-      },
-    );
-
-    List.toArray(cids);
-  };
-
-  public func getByCollection(
-    mst : MerkleSearchTree,
-    collection : Text,
-  ) : [(Text, CID.CID)] {
+  public func entries(mst : MerkleSearchTree) : Iter.Iter<(Text, CID.CID)> {
+    // TODO optimize by not creating list?
     let records = List.empty<(Text, CID.CID)>();
-    let collectionPrefix = collection # "/";
 
-    // TODO optimize by not visiting entire tree?
     traverseTree(
       mst,
       func(key : Text, value : CID.CID) {
-        let rkey = Text.stripStart(key, #text(collectionPrefix));
-        switch (rkey) {
-          case (?r) List.add(records, (r, value));
-          case (null) ();
-        };
+        List.add(records, (key, value));
       },
     );
 
-    List.toArray(records);
+    List.values(records);
   };
 
-  public func getAllKeys(mst : MerkleSearchTree) : [Text] {
+  public func keys(mst : MerkleSearchTree) : Iter.Iter<Text> {
+    // TODO optimize by not creating list?
     let keys = List.empty<Text>();
 
     traverseTree(
       mst,
-      func(key : Text, _ : CID.CID) {
+      func(key : Text, value : CID.CID) {
         List.add(keys, key);
       },
     );
 
-    List.toArray(keys);
+    List.values(keys);
+  };
+
+  public func values(mst : MerkleSearchTree) : Iter.Iter<CID.CID> {
+    // TODO optimize by not creating list?
+    let values = List.empty<CID.CID>();
+
+    traverseTree(
+      mst,
+      func(key : Text, value : CID.CID) {
+        List.add(values, value);
+      },
+    );
+
+    List.values(values);
   };
 
   public func getTreeDepth(mst : MerkleSearchTree) : Nat {
@@ -189,22 +167,6 @@ module {
     calculateTreeDepth(mst, rootNode);
   };
 
-  public func traverseTree(
-    mst : MerkleSearchTree,
-    onEntry : (key : Text, value : CID.CID) -> (),
-  ) {
-    let rootNode = getRootNode(mst);
-    traverseTreeNode(
-      mst,
-      rootNode,
-      func(key : [Nat8], value : CID.CID) {
-        switch (keyToText(key)) {
-          case (?keyText) onEntry(keyText, value);
-          case (null) {};
-        };
-      },
-    );
-  };
   public func fromBlockMap(
     rootCID : CID.CID,
     blockMap : PureMap.Map<CID.CID, Blob>,
@@ -236,6 +198,23 @@ module {
     debugNodeRecursive(mst, rootNode, mst.root, 0, "", buffer);
 
     Text.join("\n", List.values(buffer));
+  };
+
+  private func traverseTree(
+    mst : MerkleSearchTree,
+    onEntry : (key : Text, value : CID.CID) -> (),
+  ) {
+    let rootNode = getRootNode(mst);
+    traverseTreeNode(
+      mst,
+      rootNode,
+      func(key : [Nat8], value : CID.CID) {
+        switch (keyToText(key)) {
+          case (?keyText) onEntry(keyText, value);
+          case (null) {};
+        };
+      },
+    );
   };
 
   private func debugNodeRecursive(
@@ -287,7 +266,7 @@ module {
         case (?cid) {
           switch (getNode(mst, cid)) {
             case (?subtree) {
-              let isLast = i == node.entries.size() - 1;
+              let isLast = i == (node.entries.size() - 1 : Nat);
               let newPrefix = if (depth == 0) {
                 if (isLast) "└─ " else "├─ ";
               } else {
@@ -521,8 +500,9 @@ module {
     } else if (keyDepth < nodeDepth) {
       // Lower depth - goes in subtree
       let subtreeCID = if (pos == 0) node.leftSubtreeCID else {
-        if (pos - 1 < node.entries.size()) {
-          node.entries[pos - 1].subtreeCID;
+        let lastPos : Nat = pos - 1;
+        if (lastPos < node.entries.size()) {
+          node.entries[lastPos].subtreeCID;
         } else {
           null;
         };
