@@ -29,15 +29,8 @@ import Int "mo:core@1/Int";
 
 module {
   public type StableData = {
-    repository : RepositoryWithData;
+    repository : Repository.Repository;
     blobs : PureMap.Map<CID.CID, BlobWithMetaData>;
-  };
-
-  public type RepositoryWithData = Repository.Repository and {
-    commits : PureMap.Map<TID.TID, Commit>;
-    records : PureMap.Map<CID.CID, DagCbor.Value>;
-    nodes : PureMap.Map<Text, MerkleNode.Node>;
-    blobs : PureMap.Map<CID.CID, BlobRef>;
   };
 
   type Commit = {
@@ -360,8 +353,6 @@ module {
         recordCID,
         request.record,
       );
-
-      let serverInfo = serverInfoHandler.get();
 
       // Create record path
       let path = request.collection # "/" # rKey;

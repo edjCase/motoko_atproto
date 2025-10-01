@@ -18,592 +18,807 @@ import Runtime "mo:core@1/Runtime";
 import DagCbor "mo:dag-cbor@2";
 import DagPb "mo:dag-pb@0";
 import MerkleNode "MerkleNode";
+import Int "mo:core@1/Int";
+import List "mo:core@1/List";
 
 module {
 
-  public class MerkleSearchTree(nodes_ : PureMap.Map<Text, MerkleNode.Node>) {
-    var nodes = nodes_;
-
-    public func getCID(node : MerkleNode.Node, key : [Nat8]) : ?CID.CID {
-
-      // Search through entries at this level
-      for (i in node.entries.keys()) {
-        let entry = node.entries[i];
-        let entryKey = reconstructKey(node.entries, i);
-
-        // If we found exact key match (simplified approach - no depth check)
-        if (compareKeys(key, entryKey) == #equal) {
-          return ?entry.valueCID;
-        };
-
-        // If key comes before this entry, check left subtree
-        if (compareKeys(key, entryKey) == #less) {
-          if (i == 0) {
-            return do ? {
-              let leftCID = node.leftSubtreeCID!;
-              let leftNode = getNode(leftCID)!;
-              // If left subtree exists, recursively search in it
-              getCID(leftNode, key)!;
-            };
-          } else {
-            // Check right subtree of previous entry
-            return do ? {
-              let rightCID = node.entries[i - 1].subtreeCID!;
-              let rightNode = getNode(rightCID)!;
-              // Recursively search in the loaded right subtree
-              getCID(rightNode, key)!;
-            };
-          };
-        };
-      };
-
-      // Key is greater than all entries, check rightmost subtree
-      if (node.entries.size() > 0) {
-        do ? {
-          let rightCID = node.entries[node.entries.size() - 1].subtreeCID!;
-          let rightNode = getNode(rightCID)!;
-          // Recursively search in the loaded right subtree
-          getCID(rightNode, key)!;
-        };
-      } else {
-        null;
-      };
-    };
-
-    public func addCID(
-      rootNodeCID : CID.CID,
-      key : [Nat8],
-      value : CID.CID,
-    ) : Result.Result<MerkleNode.Node, Text> {
-      if (key.size() == 0) {
-        return #err("Key cannot be empty");
-      };
-
-      if (not isValidKey(key)) {
-        return #err("Invalid key: " # keyToText(key));
-      };
-      let ?node = getNode(rootNodeCID) else return #err("Node not found: " # CID.toText(rootNodeCID));
-      let keyDepth = calculateDepth(key);
-
-      // Find insertion point
-      var insertIndex = 0;
-      var found = false;
-
-      label f for (i in node.entries.keys()) {
-        let entryKey = reconstructKey(node.entries, i);
-        let comparison = compareKeys(key, entryKey);
-
-        if (comparison == #equal) {
-          return #err("Key already exists: " # keyToText(key));
-        } else if (comparison == #less) {
-          insertIndex := i;
-          found := true;
-          break f;
-        } else {
-          insertIndex := i + 1;
-        };
-      };
-
-      // Check if key belongs at this level (same depth as existing entries or empty node)
-      let nodeDepth = if (node.entries.size() > 0) {
-        calculateDepth(reconstructKey(node.entries, 0));
-      } else {
-        keyDepth; // Empty node takes depth of first key
-      };
-
-      if (keyDepth == nodeDepth) {
-        // Add entry at this level
-        let newEntry : MerkleNode.TreeEntry = {
-          prefixLength = 0; // Will be calculated when compressing
-          keySuffix = key;
-          valueCID = value;
-          subtreeCID = null;
-        };
-
-        let entriesBuffer = DynamicArray.fromArray<MerkleNode.TreeEntry>(node.entries);
-        entriesBuffer.insert(insertIndex, newEntry);
-        let newEntries = DynamicArray.toArray(entriesBuffer);
-
-        // Compress keys
-        let compressedEntries = compressKeys(newEntries);
-
-        return #ok({
-          node with
-          entries = compressedEntries;
-        });
-      } else {
-        // keyDepth != nodeDepth - For now, add to current level to avoid tree corruption
-        // This is a simplified approach that keeps all keys in a flat structure
-        // A full MST implementation would need more sophisticated layer management
-        let newEntry : MerkleNode.TreeEntry = {
-          prefixLength = 0;
-          keySuffix = key;
-          valueCID = value;
-          subtreeCID = null;
-        };
-
-        let entriesBuffer = DynamicArray.fromArray<MerkleNode.TreeEntry>(node.entries);
-        entriesBuffer.insert(insertIndex, newEntry);
-        let newEntries = DynamicArray.toArray(entriesBuffer);
-
-        let compressedEntries = compressKeys(newEntries);
-
-        return #ok({
-          node with
-          entries = compressedEntries;
-        });
-      };
-    };
-
-    // Helper function to convert key bytes to readable text
-    private func keyToText(key : [Nat8]) : Text {
-      switch (Text.decodeUtf8(Blob.fromArray(key))) {
-        case (?text) text;
-        case (null) debug_show (key); // Fallback to debug format if not valid UTF-8
-      };
-    };
-
-    // Upsert (insert or update) a CID in the MST
-    public func upsertCID(
-      rootNodeCID : CID.CID,
-      key : [Nat8],
-      value : CID.CID,
-    ) : Result.Result<MerkleNode.Node, Text> {
-      if (key.size() == 0) {
-        return #err("Key cannot be empty");
-      };
-
-      if (not isValidKey(key)) {
-        return #err("Invalid key: " # keyToText(key));
-      };
-      let ?node = getNode(rootNodeCID) else return #err("Node not found: " # CID.toText(rootNodeCID));
-      let keyDepth = calculateDepth(key);
-
-      // Find insertion/update point
-      var insertIndex = 0;
-      var updateIndex : ?Nat = null;
-
-      label f for (i in node.entries.keys()) {
-        let entryKey = reconstructKey(node.entries, i);
-        let comparison = compareKeys(key, entryKey);
-
-        if (comparison == #equal) {
-          // Key exists, we'll update it
-          updateIndex := ?i;
-          break f;
-        } else if (comparison == #less) {
-          insertIndex := i;
-          break f;
-        } else {
-          insertIndex := i + 1;
-        };
-      };
-
-      switch (updateIndex) {
-        case (?idx) {
-          // Update existing entry
-          let entriesBuffer = DynamicArray.fromArray<MerkleNode.TreeEntry>(node.entries);
-          let existingEntry = entriesBuffer.get(idx);
-          let updatedEntry : MerkleNode.TreeEntry = {
-            existingEntry with
-            valueCID = value;
-          };
-          entriesBuffer.put(idx, updatedEntry);
-          let newEntries = DynamicArray.toArray(entriesBuffer);
-
-          return #ok({
-            node with
-            entries = newEntries;
-          });
-        };
-        case (null) {
-          // Insert new entry (same logic as addCID)
-          let nodeDepth = if (node.entries.size() > 0) {
-            calculateDepth(reconstructKey(node.entries, 0));
-          } else {
-            keyDepth;
-          };
-
-          if (keyDepth == nodeDepth) {
-            let newEntry : MerkleNode.TreeEntry = {
-              prefixLength = 0;
-              keySuffix = key;
-              valueCID = value;
-              subtreeCID = null;
-            };
-
-            let entriesBuffer = DynamicArray.fromArray<MerkleNode.TreeEntry>(node.entries);
-            entriesBuffer.insert(insertIndex, newEntry);
-            let newEntries = DynamicArray.toArray(entriesBuffer);
-
-            let compressedEntries = compressKeys(newEntries);
-
-            return #ok({
-              node with
-              entries = compressedEntries;
-            });
-          } else {
-            // Simplified approach: add to current level
-            let newEntry : MerkleNode.TreeEntry = {
-              prefixLength = 0;
-              keySuffix = key;
-              valueCID = value;
-              subtreeCID = null;
-            };
-
-            let entriesBuffer = DynamicArray.fromArray<MerkleNode.TreeEntry>(node.entries);
-            entriesBuffer.insert(insertIndex, newEntry);
-            let newEntries = DynamicArray.toArray(entriesBuffer);
-
-            let compressedEntries = compressKeys(newEntries);
-
-            return #ok({
-              node with
-              entries = compressedEntries;
-            });
-          };
-        };
-      };
-    };
-
-    public func removeCID(
-      rootNodeCID : CID.CID,
-      key : [Nat8],
-    ) : Result.Result<MerkleNode.Node, Text> {
-      if (key.size() == 0) {
-        return #err("Key cannot be empty");
-      };
-
-      if (not isValidKey(key)) {
-        return #err("Invalid key: " # keyToText(key));
-      };
-
-      let ?node = getNode(rootNodeCID) else return #err("Node not found: " # CID.toText(rootNodeCID));
-
-      let keyDepth = calculateDepth(key);
-
-      // Search through entries at this level
-      for (i in node.entries.keys()) {
-        let entryKey = reconstructKey(node.entries, i);
-        let entryDepth = calculateDepth(entryKey);
-
-        // If we found exact key match and depths match
-        if (compareKeys(key, entryKey) == #equal and keyDepth == entryDepth) {
-          // Remove this entry
-          let entriesBuffer = DynamicArray.fromArray<MerkleNode.TreeEntry>(node.entries);
-          let _ = entriesBuffer.remove(i);
-          let newEntries = DynamicArray.toArray(entriesBuffer);
-
-          // Recompress the keys if any entries remain
-          let compressedEntries = if (newEntries.size() > 0) {
-            compressKeys(newEntries);
-          } else {
-            [];
-          };
-
-          return #ok({
-            node with
-            entries = compressedEntries;
-          });
-        };
-
-        // If key comes before this entry, check left subtree
-        if (compareKeys(key, entryKey) == #less) {
-          if (i == 0) {
-            // Check left subtree of node
-            return switch (node.leftSubtreeCID) {
-              case null #err("Key not found: " # debug_show (key));
-              case (?leftCID) {
-                let ?_ = getNode(leftCID) else return #err("Left node not found");
-                // Recursively remove from left subtree
-                switch (removeCID(leftCID, key)) {
-                  case (#err(msg)) #err(msg);
-                  case (#ok(updatedLeftNode)) {
-                    // Update the left subtree reference
-                    let newLeftCID = addNode(updatedLeftNode);
-                    #ok({
-                      leftSubtreeCID = ?newLeftCID;
-                      entries = node.entries;
-                    });
-                  };
-                };
-              };
-            };
-          } else {
-            // Check right subtree of previous entry
-            return switch (node.entries[i - 1].subtreeCID) {
-              case null #err("Key not found: " # debug_show (key));
-              case (?rightCID) {
-                let ?_ = getNode(rightCID) else return #err("Right node not found");
-                // Recursively remove from right subtree
-                switch (removeCID(rightCID, key)) {
-                  case (#err(msg)) #err(msg);
-                  case (#ok(updatedRightNode)) {
-                    // Update the right subtree reference in the entry
-                    let newRightCID = addNode(updatedRightNode);
-                    let updatedEntry = {
-                      node.entries[i - 1] with
-                      subtreeCID = ?newRightCID;
-                    };
-                    let entriesBuffer = DynamicArray.fromArray<MerkleNode.TreeEntry>(node.entries);
-                    entriesBuffer.put(i - 1, updatedEntry);
-
-                    #ok({
-                      node with
-                      entries = DynamicArray.toArray(entriesBuffer);
-                    });
-                  };
-                };
-              };
-            };
-          };
-        };
-      };
-
-      if (node.entries.size() <= 0) return #err("Key not found: " # debug_show (key));
-
-      // Key is greater than all entries, check rightmost subtree
-      let lastIndex : Nat = node.entries.size() - 1;
-      switch (node.entries[lastIndex].subtreeCID) {
-        case null return #err("Key not found: " # debug_show (key));
-        case (?rightCID) {
-          let ?_ = getNode(rightCID) else return #err("Right node not found");
-          // Recursively remove from rightmost subtree
-          switch (removeCID(rightCID, key)) {
-            case (#err(msg)) #err(msg);
-            case (#ok(updatedRightNode)) {
-              // Update the rightmost subtree reference
-              let newRightCID = addNode(updatedRightNode);
-              let updatedEntry = {
-                node.entries[lastIndex] with
-                subtreeCID = ?newRightCID;
-              };
-              let entriesBuffer = DynamicArray.fromArray<MerkleNode.TreeEntry>(node.entries);
-              entriesBuffer.put(lastIndex, updatedEntry);
-
-              #ok({
-                node with
-                entries = DynamicArray.toArray(entriesBuffer);
-              });
-            };
-          };
-        };
-      };
-    };
-
-    // Store a node and return its CID
-    public func addNode(node : MerkleNode.Node) : CID.CID {
-      let cid = CIDBuilder.fromMSTNode(node);
-      let key = CID.toText(cid);
-      nodes := PureMap.add(nodes, Text.compare, key, node);
-      cid;
-    };
-
-    public func getNode(cid : CID.CID) : ?MerkleNode.Node {
-      let cidText = CID.toText(cid);
-      PureMap.get(nodes, Text.compare, cidText);
-    };
-
-    public func getNodes() : PureMap.Map<Text, MerkleNode.Node> {
-      nodes;
-    };
-
-    public func getAllCollections(rootNode : MerkleNode.Node) : [Text] {
-      let collectionSet = Set.empty<Text>();
-
-      iterateNodeEntries(
-        rootNode,
-        func(entryKey : Text, _ : CID.CID) {
-          let parts = Text.split(entryKey, #char('/'));
-          let partsArray = Iter.toArray(parts);
-
-          // Only consider entries with valid collection format
-          if (partsArray.size() == 2) {
-            Set.add(collectionSet, Text.compare, partsArray[0]);
-          };
-        },
-      );
-      Array.fromIter(Set.values(collectionSet));
-    };
-
-    public func getCollectionRecords(rootNode : MerkleNode.Node, collection : Text) : [(key : Text, CID.CID)] {
-      let records = DynamicArray.DynamicArray<(key : Text, CID.CID)>(0);
-
-      iterateNodeEntries(
-        rootNode,
-        func(entryKey : Text, entryValue : CID.CID) {
-          let parts = Text.split(entryKey, #char('/'));
-          let partsArray = Iter.toArray(parts);
-
-          // Check if this entry belongs to the requested collection
-          if (partsArray.size() == 2 and partsArray[0] == collection) {
-            records.add((partsArray[1], entryValue));
-          };
-        },
-      );
-
-      DynamicArray.toArray(records);
-    };
-
-    public func getAllRecordCIDs(rootNode : MerkleNode.Node) : [CID.CID] {
-      let cids = DynamicArray.DynamicArray<CID.CID>(0);
-
-      iterateNodeEntries(
-        rootNode,
-        func(_ : Text, entryValue : CID.CID) {
-          cids.add(entryValue);
-        },
-      );
-
-      DynamicArray.toArray(cids);
-    };
-
-    private func iterateNodeEntries(
-      rootNode : MerkleNode.Node,
-      callback : (entryKey : Text, entryValue : CID.CID) -> (),
-    ) : () {
-      // Helper function to traverse a node and its subtrees
-      func traverseNode(node : MerkleNode.Node, keyPrefix : [Nat8]) : () {
-        // Process left subtree first
-        switch (node.leftSubtreeCID) {
-          case (?leftCID) {
-            switch (getNode(leftCID)) {
-              case (?leftNode) traverseNode(leftNode, keyPrefix);
-              case null {};
-            };
-          };
-          case null {};
-        };
-
-        // Process entries in this node
-        for (i in node.entries.keys()) {
-          let entry = node.entries[i];
-
-          // Reconstruct full key for this entry
-          let fullKey = if (i == 0) {
-            Array.concat(keyPrefix, entry.keySuffix);
-          } else {
-            // Use prefix compression
-            let prevEntryKey = reconstructKey(node.entries, i - 1);
-            let prevFullKey = Array.concat(keyPrefix, prevEntryKey);
-
-            let prefixLen = entry.prefixLength;
-            let prefix = if (prefixLen > prevFullKey.size()) {
-              prevFullKey;
-            } else {
-              Array.sliceToArray<Nat8>(prevFullKey, 0, prefixLen);
-            };
-            Array.concat(prefix, entry.keySuffix);
-          };
-
-          // Convert to text and call callback
-          switch (Text.decodeUtf8(Blob.fromArray(fullKey))) {
-            case (?keyText) callback(keyText, entry.valueCID);
-            case (null) Runtime.trap("Invalid UTF-8 in key: " # debug_show (fullKey));
-          };
-
-          // Process right subtree of this entry
-          switch (entry.subtreeCID) {
-            case (?rightCID) {
-              switch (getNode(rightCID)) {
-                case (?rightNode) traverseNode(rightNode, fullKey);
-                case (null) {};
-              };
-            };
-            case (null) {};
-          };
-        };
-      };
-
-      // Start traversal from the specific root node
-      traverseNode(rootNode, []);
-    };
-
+  public type MerkleSearchTree = {
+    root : CID.CID;
+    nodes : PureMap.Map<CID.CID, MerkleNode.Node>;
   };
 
+  public func get(
+    mst : MerkleSearchTree,
+    key : Text,
+  ) : ?CID.CID {
+    let node = getRootNode(mst);
+    getCIDRecursive(mst, node, key, calculateDepth(mst, key));
+  };
+
+  // Add a key-value pair
+  public func add(
+    mst : MerkleSearchTree,
+    key : Text,
+    value : CID.CID,
+  ) : Result.Result<MerkleSearchTree, Text> {
+    if (key.size() == 0) return #err("Key cannot be empty");
+    if (key.size() > 256) return #err("Key too long (max 256 bytes)");
+    if (not isValidKey(key)) return #err("Invalid key format");
+
+    let ?node = getRootNode(mst);
+
+    addRecursive(mst, node, key, value, calculateDepth(mst, key));
+  };
+
+  // Remove a key
+  public func remove(
+    mst : MerkleSearchTree,
+    key : Text,
+  ) : Result.Result<MerkleSearchTree, Text> {
+    if (key.size() == 0) return #err("Key cannot be empty");
+    if (not isValidKey(key)) return #err("Invalid key format");
+
+    let node = getRootNode(mst);
+
+    removeRecursive(mst, node, key, calculateDepth(mst, key));
+  };
+
+  // Batch add multiple key-value pairs
+  public func batchAdd(
+    mst : MerkleSearchTree,
+    items : Iter.Iter<(Text, CID.CID)>,
+  ) : Result.Result<MerkleSearchTree, Text> {
+    var currentMst = mst;
+
+    for ((keyText, valueCID) in items.vals()) {
+      let keyBytes = keyToBytes(keyText);
+      switch (add(currentMst, keyBytes, valueCID)) {
+        case (#ok(newMst)) currentMst := newMst;
+        case (#err(e)) return #err("Batch add failed at " # keyText # ": " # e);
+      };
+    };
+
+    #ok(currentMst);
+  };
+
+  // Batch remove multiple keys
+  public func batchRemove(
+    mst : MerkleSearchTree,
+    keys : Iter.Iter<Text>,
+  ) : Result.Result<MerkleSearchTree, Text> {
+    var currentMst = mst;
+
+    for (keyText in keys.vals()) {
+      switch (remove(currentMst, keyText)) {
+        case (#ok(newMst)) currentMst := newMst;
+        case (#err(e)) return #err("Batch remove failed at " # keyText # ": " # e);
+      };
+    };
+
+    #ok(currentMst);
+  };
+
+  public func listCollections(mst : MerkleSearchTree) : [Text] {
+    let collections = Set.empty<Text>();
+    traverseTree(
+      mst,
+      func(key : Text, _ : CID.CID) {
+        let parts = Iter.toArray(Text.split(key, #char('/')));
+        // TODO how to handle invalid keys here? if size is < 2?
+        if (parts.size() >= 2) {
+          Set.add(collections, Text.compare, parts[0]);
+        };
+      },
+    );
+
+    Iter.toArray(Set.values(collections));
+  };
+
+  public func getAll(mst : MerkleSearchTree) : [CID.CID] {
+    let cids = List.empty<CID.CID>();
+
+    traverseTree(
+      mst,
+      func(_ : Text, entryValue : CID.CID) {
+        List.add(cids, entryValue);
+      },
+    );
+
+    List.toArray(cids);
+  };
+
+  public func getByCollection(
+    mst : MerkleSearchTree,
+    collection : Text,
+  ) : [(Text, CID.CID)] {
+    let records = List.empty<(Text, CID.CID)>();
+    let collectionPrefix = collection # "/";
+
+    // TODO optimize by not visiting entire tree?
+    traverseTree(
+      mst,
+      func(key : Text, value : CID.CID) {
+        let rkey = Text.stripStart(key, #text(collectionPrefix));
+        switch (rkey) {
+          case (?r) List.add(records, (r, value));
+          case (null) ();
+        };
+      },
+    );
+
+    List.toArray(records);
+  };
+
+  public func getAllKeys(mst : MerkleSearchTree) : [Text] {
+    let keys = List.empty<Text>(0);
+
+    traverseTree(
+      mst,
+      func(key : Text, _ : CID.CID) {
+        List.add(keys, key);
+      },
+    );
+
+    List.toArray(keys);
+  };
+
+  public func getTreeDepth(mst : MerkleSearchTree) : Nat {
+    let rootNode = getRootNode(mst);
+    calculateTreeDepth(mst, rootNode);
+  };
+
+  public func traverseTree(
+    mst : MerkleSearchTree,
+    onEntry : (key : Text, value : CID.CID) -> (),
+  ) {
+    let rootNode = getRootNode(mst);
+    traverseTreeNode(
+      rootNode,
+      func(key : [Nat8], value : CID.CID) {
+        switch (keyToText(key)) {
+          case (?keyText) onEntry(keyText, value);
+          case (null) {};
+        };
+      },
+    );
+  };
+
+  // Create from block map
   public func fromBlockMap(
     rootCID : CID.CID,
     blockMap : PureMap.Map<CID.CID, Blob>,
   ) : Result.Result<MerkleSearchTree, Text> {
-    let tree = MerkleSearchTree(PureMap.empty<Text, MerkleNode.Node>());
-    switch (loadNodeFromBlocks(tree, rootCID, blockMap)) {
+    let tree = MerkleSearchTree.empty();
+
+    func loadNode(cid : CID.CID) : Result.Result<(), Text> {
+      switch (tree.getNode(cid)) {
+        case (?_) #ok(); // Already loaded
+        case null {
+          let ?blockData = PureMap.get(blockMap, CIDBuilder.compare, cid) else {
+            return #err("Block not found: " # CID.toText(cid));
+          };
+
+          let node = switch (cid) {
+            case (#v0(_)) return #err("CIDv0 not supported");
+            case (#v1(v1)) {
+              switch (v1.codec) {
+                case (#dagCbor) {
+                  switch (DagCbor.fromBytes(blockData.vals())) {
+                    case (#ok(cbor)) {
+                      switch (parseMSTNode(cbor)) {
+                        case (#ok(n)) n;
+                        case (#err(e)) return #err(e);
+                      };
+                    };
+                    case (#err(e)) return #err("CBOR decode error: " # debug_show (e));
+                  };
+                };
+                case (_) return #err("Only dag-cbor supported");
+              };
+            };
+          };
+
+          // Store node
+          ignore tree.addNode(node);
+
+          // Load referenced nodes
+          switch (node.leftSubtreeCID) {
+            case (?cid) {
+              switch (loadNode(cid)) {
+                case (#err(e)) return #err(e);
+                case (#ok()) {};
+              };
+            };
+            case null {};
+          };
+
+          for (entry in node.entries.vals()) {
+            switch (entry.subtreeCID) {
+              case (?cid) {
+                switch (loadNode(cid)) {
+                  case (#err(e)) return #err(e);
+                  case (#ok()) {};
+                };
+              };
+              case null {};
+            };
+          };
+
+          #ok();
+        };
+      };
+    };
+
+    switch (loadNode(rootCID)) {
+      case (#ok()) #ok(tree);
       case (#err(e)) #err(e);
-      case (#ok) #ok(tree);
     };
   };
 
-  private func loadNodeFromBlocks(
-    tree : MerkleSearchTree,
-    nodeCID : CID.CID,
-    blockMap : PureMap.Map<CID.CID, Blob>,
-  ) : Result.Result<(), Text> {
-    // Check if node already loaded
-    switch (tree.getNode(nodeCID)) {
-      case (?_) return #ok;
-      case (null) ();
-    };
+  // PRIVATE HELPER FUNCTIONS
 
-    // Get block data
-    let ?blockData = PureMap.get(blockMap, CIDBuilder.compare, nodeCID) else {
-      return #err("MST node block not found: " # CID.toText(nodeCID));
-    };
+  private func addNode(mst : MerkleSearchTree, node : MerkleNode.Node) : MerkleSearchTree {
+    let newRoot = CIDBuilder.fromMSTNode(node);
+    let newnodes = PureMap.add(mst.nodes, compareCid, newRoot, node);
+    return { root = newRoot; nodes = newnodes };
+  };
 
-    let nodeCodec = switch (nodeCID) {
-      case (#v0(_)) #dagPb;
-      case (#v1(cidV1)) cidV1.codec;
-    };
-    let node : MerkleNode.Node = switch (nodeCodec) {
-      case (#dagCbor) switch (DagCbor.fromBytes(blockData.vals())) {
-        case (#ok(value)) {
-          switch (parseMSTNodeFromCbor(value)) {
-            case (#ok(n)) n;
-            case (#err(e)) return #err("Failed to parse MST node: " # e);
+  private func getRootNode(mst : MerkleSearchTree) : MerkleNode.Node {
+    let ?rootNode = getNode(mst, mst.root) else Runtime.trap("Invalid MST, root node not found");
+    rootNode;
+  };
+
+  private func getNode(mst : MerkleSearchTree, cid : CID.CID) : ?MerkleNode.Node {
+    PureMap.get(mst.nodes, compareCid, cid);
+  };
+
+  private func getCIDRecursive(
+    mst : MerkleSearchTree,
+    node : MerkleNode.Node,
+    key : Text,
+    keyDepth : Nat,
+  ) : ?CID.CID {
+    // Binary search through entries at this level
+    var left = 0;
+    var right = node.entries.size();
+
+    let keyBytes = keyToBytes(key);
+
+    while (left < right) {
+      let mid = (left + right) / 2;
+      let entryKey = reconstructKey(node.entries, mid);
+      let entryDepth = calculateDepth(entryKey);
+
+      switch (compareKeys(keyBytes, entryKey)) {
+        case (#equal) {
+          // Found exact match - but check depth
+          if (keyDepth == entryDepth) {
+            return ?node.entries[mid].valueCID;
+          } else if (keyDepth < entryDepth) {
+            // Key with lower depth would be in subtree
+            return searchSubtree(mst, node, mid, keyBytes, keyDepth);
+          } else {
+            return null // Higher depth key not in tree
           };
         };
-        case (#err(e)) return #err("Failed to decode MST node CBOR: " # debug_show (e));
+        case (#less) right := mid;
+        case (#greater) left := mid + 1;
       };
-      case (#dagPb) switch (DagPb.fromBytes(blockData.vals())) {
-        case (#ok(value)) {
-          switch (parseMSTNodeFromPb(value)) {
-            case (#ok(n)) n;
-            case (#err(e)) return #err("Failed to parse MST node: " # e);
-          };
-        };
-        case (#err(e)) return #err("Failed to decode MST node Protobuf: " # debug_show (e));
-      };
-      case (codec) return #err(debug_show (codec) # " codec not supported for MST nodes");
     };
 
-    // Recursively load left subtree
+    // Not found at this level, check appropriate subtree
+    searchSubtree(mst, node, left, key, keyDepth);
+  };
+
+  private func searchSubtree(
+    mst : MerkleSearchTree,
+    node : MerkleNode.Node,
+    index : Nat,
+    key : [Nat8],
+    keyDepth : Nat,
+  ) : ?CID.CID {
+    let subtreeCID = if (index == 0) {
+      node.leftSubtreeCID;
+    } else if (index > node.entries.size()) {
+      return null;
+    } else {
+      node.entries[index - 1].subtreeCID;
+    };
+
+    switch (subtreeCID) {
+      case (?cid) {
+        switch (getNode(mst, cid)) {
+          case (?subtree) getCIDRecursive(mst, subtree, key, keyDepth);
+          case null null;
+        };
+      };
+      case null null;
+    };
+  };
+
+  private func addRecursive(
+    mst : MerkleSearchTree,
+    node : MerkleNode.Node,
+    key : [Nat8],
+    value : CID.CID,
+    keyDepth : Nat,
+  ) : Result.Result<MerkleSearchTree, Text> {
+    // Find position for new key
+    var insertPos = 0;
+    var exactMatch = false;
+
+    for (i in Nat.range(0, Nat.max(0, node.entries.size()))) {
+      let entryKey = reconstructKey(node.entries, i);
+      let entryDepth = calculateDepth(entryKey);
+
+      switch (compareKeys(key, entryKey)) {
+        case (#equal) {
+          if (keyDepth == entryDepth) {
+            return #err("Key already exists");
+          };
+          exactMatch := true;
+          insertPos := i;
+        };
+        case (#less) {
+          insertPos := i;
+          return insertAtPosition(node, insertPos, key, value, keyDepth);
+        };
+        case (#greater) insertPos := i + 1;
+      };
+    };
+
+    // Insert at end or in appropriate position
+    insertAtPosition(node, insertPos, key, value, keyDepth);
+  };
+
+  private func insertAtPosition(
+    mst : MerkleSearchTree,
+    node : MerkleNode.Node,
+    pos : Nat,
+    key : [Nat8],
+    value : CID.CID,
+    keyDepth : Nat,
+  ) : Result.Result<MerkleSearchTree, Text> {
+    // Determine if key belongs at this level
+    let nodeDepth = if (node.entries.size() > 0) {
+      calculateDepth(reconstructKey(node.entries, 0));
+    } else {
+      keyDepth // Empty node takes first key's depth
+    };
+
+    if (keyDepth == nodeDepth) {
+      // Insert at this level
+      let newEntry : MerkleNode.TreeEntry = {
+        prefixLength = 0; // Will be recalculated
+        keySuffix = key;
+        valueCID = value;
+        subtreeCID = null;
+      };
+
+      let entries = DynamicArray.fromArray<MerkleNode.TreeEntry>(node.entries);
+      entries.insert(pos, newEntry);
+
+      #ok({
+        node with
+        entries = compressEntries(DynamicArray.toArray(entries))
+      });
+    } else if (keyDepth < nodeDepth) {
+      // Lower depth - goes in subtree
+      let subtreeCID = if (pos == 0) node.leftSubtreeCID else {
+        if (pos - 1 < node.entries.size()) {
+          node.entries[pos - 1].subtreeCID;
+        } else {
+          null;
+        };
+      };
+
+      switch (subtreeCID) {
+        case (?cid) {
+          // Recursively add to subtree
+          let ?subtree = getNode(cid) else return #err("Subtree not found");
+          switch (addRecursive(subtree, key, value, keyDepth)) {
+            case (#ok(newSubtree)) {
+              let newCID = addNode(newSubtree);
+              if (pos == 0) {
+                #ok({ node with leftSubtreeCID = ?newCID });
+              } else {
+                let entries = Array.tabulate<MerkleNode.TreeEntry>(
+                  node.entries.size(),
+                  func(i) = if (i == (pos - 1 : Nat)) {
+                    { node.entries[i] with subtreeCID = ?newCID };
+                  } else {
+                    node.entries[i];
+                  },
+                );
+                #ok({ node with entries });
+              };
+            };
+            case (#err(e)) #err(e);
+          };
+        };
+        case null {
+          // Create new subtree
+          let newSubtree : MerkleNode.Node = {
+            leftSubtreeCID = null;
+            entries = [{
+              prefixLength = 0;
+              keySuffix = key;
+              valueCID = value;
+              subtreeCID = null;
+            }];
+          };
+          let newCID = addNode(newSubtree);
+
+          if (pos == 0) {
+            #ok({ node with leftSubtreeCID = ?newCID });
+          } else {
+            let entries = Array.tabulate<MerkleNode.TreeEntry>(
+              node.entries.size(),
+              func(i) = if (i == (pos - 1 : Nat)) {
+                { node.entries[i] with subtreeCID = ?newCID };
+              } else {
+                node.entries[i];
+              },
+            );
+            #ok({ node with entries });
+          };
+        };
+      };
+    } else {
+      // Higher depth key - needs to split existing structure
+      // For simplicity, add at this level for now
+      // A full implementation would need proper splitting logic
+      let newEntry : MerkleNode.TreeEntry = {
+        prefixLength = 0;
+        keySuffix = key;
+        valueCID = value;
+        subtreeCID = null;
+      };
+
+      let entries = Buffer.fromArray<MerkleNode.TreeEntry>(node.entries);
+      entries.insert(pos, newEntry);
+
+      #ok({
+        node with
+        entries = compressEntries(Buffer.toArray(entries))
+      });
+    };
+  };
+
+  private func removeRecursive(
+    mst : MerkleSearchTree,
+    node : MerkleNode.Node,
+    key : [Nat8],
+    keyDepth : Nat,
+  ) : Result.Result<MerkleSearchTree, Text> {
+    // Find the key
+    for (i in Nat.range(0, Nat.max(0, node.entries.size()))) {
+      let entryKey = reconstructKey(node.entries, i);
+      let entryDepth = calculateDepth(entryKey);
+
+      if (compareKeys(key, entryKey) == #equal and keyDepth == entryDepth) {
+        // Found it - remove from this level
+        let entries = DynamicArray.fromArray<MerkleNode.TreeEntry>(node.entries);
+        ignore entries.remove(i);
+
+        // Merge subtrees if needed
+        let newEntries = DynamicArray.toArray(entries);
+        return #ok({
+          node with
+          entries = if (newEntries.size() > 0) compressEntries(newEntries) else []
+        });
+      };
+    };
+
+    // Not at this level - check subtrees
+    var searchPos = 0;
+    label f for (i in Nat.range(0, Nat.max(0, node.entries.size()))) {
+      let entryKey = reconstructKey(node.entries, i);
+      if (compareKeys(key, entryKey) == #less) {
+        searchPos := i;
+        break f;
+      };
+      searchPos := i + 1;
+    };
+
+    let subtreeCID = if (searchPos == 0) {
+      node.leftSubtreeCID;
+    } else if ((searchPos - 1 : Nat) < node.entries.size()) {
+      node.entries[searchPos - 1].subtreeCID;
+    } else {
+      null;
+    };
+
+    switch (subtreeCID) {
+      case (?cid) {
+        let ?subtree = getNode(mst, cid) else return #err("Subtree not found");
+        switch (removeRecursive(mst, subtree, key, keyDepth)) {
+          case (#ok(newSubtree)) {
+            // Check if subtree is now empty
+            if (newSubtree.entries.size() == 0 and newSubtree.leftSubtreeCID == null) {
+              // Remove empty subtree
+              if (searchPos == 0) {
+                #ok({ node with leftSubtreeCID = null });
+              } else {
+                let entries = Array.tabulate<MerkleNode.TreeEntry>(
+                  node.entries.size(),
+                  func(i) = if (i == (searchPos - 1 : Nat)) {
+                    { node.entries[i] with subtreeCID = null };
+                  } else {
+                    node.entries[i];
+                  },
+                );
+                #ok({ node with entries });
+              };
+            } else {
+              // Update subtree reference
+              let newMst = addNode(mst, newSubtree);
+              if (searchPos == 0) {
+                #ok({ node with leftSubtreeCID = ?newMst.root });
+              } else {
+                let entries = Array.tabulate<MerkleNode.TreeEntry>(
+                  node.entries.size(),
+                  func(i) = if (i == (searchPos - 1 : Nat)) {
+                    { node.entries[i] with subtreeCID = ?newMst.root };
+                  } else {
+                    node.entries[i];
+                  },
+                );
+                #ok({ node with entries });
+              };
+            };
+          };
+          case (#err(e)) #err(e);
+        };
+      };
+      case null #err("Key not found");
+    };
+  };
+
+  private func traverseTreeNode(
+    mst : MerkleSearchTree,
+    node : MerkleNode.Node,
+    callback : ([Nat8], CID.CID) -> (),
+  ) {
+    // Process left subtree
     switch (node.leftSubtreeCID) {
-      case (?leftCID) {
-        switch (loadNodeFromBlocks(tree, leftCID, blockMap)) {
-          case (#err(e)) return #err(e);
-          case (#ok(_)) ();
+      case (?cid) {
+        switch (getNode(mst, cid)) {
+          case (?subtree) traverseTreeNode(subtree, callback);
+          case null {};
         };
       };
-      case (null) ();
+      case null {};
     };
 
-    // Recursively load subtrees referenced in entries
+    // Process entries
+    for (i in Nat.range(0, Nat.max(0, node.entries.size()))) {
+      let entry = node.entries[i];
+      let key = reconstructKey(node.entries, i);
+      callback(key, entry.valueCID);
+
+      // Process right subtree
+      switch (entry.subtreeCID) {
+        case (?cid) {
+          switch (getNode(mst, cid)) {
+            case (?subtree) traverseTreeNode(mst, subtree, callback);
+            case null {};
+          };
+        };
+        case null {};
+      };
+    };
+  };
+
+  private func calculateTreeDepth(
+    mst : MerkleSearchTree,
+    node : MerkleNode.Node,
+  ) : Nat {
+    var maxDepth = 1;
+
+    // Check left subtree
+    switch (node.leftSubtreeCID) {
+      case (?cid) {
+        switch (getNode(mst, cid)) {
+          case (?subtree) {
+            let depth = 1 + calculateTreeDepth(mst, subtree);
+            if (depth > maxDepth) maxDepth := depth;
+          };
+          case null {};
+        };
+      };
+      case null {};
+    };
+
+    // Check entry subtrees
     for (entry in node.entries.vals()) {
       switch (entry.subtreeCID) {
-        case (?subtreeCID) {
-          switch (loadNodeFromBlocks(tree, subtreeCID, blockMap)) {
-            case (#err(e)) return #err(e);
-            case (#ok(_)) ();
+        case (?cid) {
+          switch (getNode(mst, cid)) {
+            case (?subtree) {
+              let depth = 1 + calculateTreeDepth(mst, subtree);
+              if (depth > maxDepth) maxDepth := depth;
+            };
+            case null {};
           };
         };
-        case (null) ();
+        case null {};
       };
     };
 
-    // Store this node
-    ignore tree.addNode(node);
-    #ok;
+    maxDepth;
   };
 
-  private func parseMSTNodeFromCbor(value : DagCbor.Value) : Result.Result<MerkleNode.Node, Text> {
+  // Calculate depth using ATProto's 2-bit leading zero counting
+  private func calculateDepth(key : [Nat8]) : Nat {
+    let hash = Sha256.fromArray(#sha256, key);
+    var leadingZeros = 0;
+
+    for (byte in hash.vals()) {
+      if (byte == 0) {
+        leadingZeros += 4; // All 8 bits = 4 two-bit chunks
+      } else if (byte < 4) {
+        leadingZeros += 3; // 0b000000xx
+        return leadingZeros;
+      } else if (byte < 16) {
+        leadingZeros += 2; // 0b0000xxxx
+        return leadingZeros;
+      } else if (byte < 64) {
+        leadingZeros += 1; // 0b00xxxxxx
+        return leadingZeros;
+      } else {
+        return leadingZeros; // No leading zeros in this byte
+      };
+    };
+
+    leadingZeros;
+  };
+
+  // Validate key format
+  private func isValidKey(key : [Nat8]) : Bool {
+    let ?keyText = keyToText(key) else return false;
+    let parts = Iter.toArray(Text.split(keyText, #char('/')));
+
+    if (parts.size() != 2) return false;
+
+    let collection = parts[0];
+    let rkey = parts[1];
+
+    // Check for empty parts or relative paths
+    if (
+      collection == "" or rkey == "" or
+      collection == "." or collection == ".." or
+      rkey == "." or rkey == ".."
+    ) {
+      return false;
+    };
+
+    // Validate characters (A-Za-z0-9.-_~:)
+    for (char in keyText.chars()) {
+      if (not isValidKeyChar(char) and char != '/') {
+        return false;
+      };
+    };
+
+    true;
+  };
+
+  private func isValidKeyChar(c : Char) : Bool {
+    (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z') or (c >= '0' and c <= '9') or c == '.' or c == '-' or c == '_' or c == '~' or c == ':';
+  };
+
+  private func keyToText(key : [Nat8]) : ?Text {
+    Text.decodeUtf8(Blob.fromArray(key));
+  };
+
+  private func keyToBytes(key : Text) : [Nat8] {
+    Blob.toArray(Text.encodeUtf8(key));
+  };
+
+  private func compareKeys(a : [Nat8], b : [Nat8]) : Order.Order {
+    let minLen = Nat.min(a.size(), b.size());
+
+    for (i in Nat.range(0, Nat.max(0, minLen))) {
+      if (a[i] < b[i]) return #less;
+      if (a[i] > b[i]) return #greater;
+    };
+
+    if (a.size() < b.size()) return #less;
+    if (a.size() > b.size()) return #greater;
+    #equal;
+  };
+
+  private func reconstructKey(
+    entries : [MerkleNode.TreeEntry],
+    index : Nat,
+  ) : [Nat8] {
+    if (index >= entries.size()) return [];
+
+    if (index == 0) {
+      return entries[0].keySuffix;
+    };
+
+    let entry = entries[index];
+    let prevKey = reconstructKey(entries, index - 1);
+
+    if (entry.prefixLength == 0) {
+      return entry.keySuffix;
+    };
+
+    if (entry.prefixLength > prevKey.size()) {
+      // Defensive: use what we can
+      return Array.concat(prevKey, entry.keySuffix);
+    };
+
+    let prefix = Array.tabulate<Nat8>(
+      entry.prefixLength,
+      func(i) = prevKey[i],
+    );
+
+    Array.concat(prefix, entry.keySuffix);
+  };
+
+  private func compressEntries(entries : Iter.Iter<MerkleNode.TreeEntry>) : [MerkleNode.TreeEntry] {
+    let ?firstEntry = entries.next() else return [];
+
+    let compressed = List.empty<MerkleNode.TreeEntry>();
+
+    // First entry always has prefixLength = 0
+    List.add(
+      compressed,
+      {
+        firstEntry with
+        prefixLength = 0;
+        keySuffix = firstEntry.keySuffix;
+      },
+    );
+
+    var prevKey = firstEntry.keySuffix;
+
+    // Compress subsequent entries
+    for (entry in entries) {
+      // Find common prefix length
+      let prefix = findCommonPrefix(prevKey, entry.keySuffix);
+
+      // Extract suffix after common prefix
+      let suffix = Array.sliceToArray(entry.keySuffix, prefix.size(), entry.keySuffix.size());
+
+      List.add(
+        compressed,
+        {
+          entry with
+          prefixLength = prefix.size();
+          keySuffix = suffix;
+        },
+      );
+
+      prevKey := entry.keySuffix;
+    };
+
+    List.toArray(compressed);
+  };
+
+  private func findCommonPrefix(a : [Nat8], b : [Nat8]) : [Nat8] {
+    let aChars = a.vals();
+    let bChars = b.vals();
+    var result = DynamicArray.DynamicArray<Nat8>(Nat.min(a.size(), b.size()));
+    label l loop {
+      switch (aChars.next(), bChars.next()) {
+        case (?ac, ?bc) {
+          if (ac == bc) {
+            result.add(ac);
+          } else {
+            break l;
+          };
+        };
+        case _ { break l };
+      };
+    };
+    DynamicArray.toArray(result);
+  };
+
+  private func parseMSTNode(value : DagCbor.Value) : Result.Result<MerkleNode.Node, Text> {
     switch (value) {
       case (#map(fields)) {
         var leftSubtreeCID : ?CID.CID = null;
@@ -616,7 +831,7 @@ module {
               let entriesBuffer = DynamicArray.DynamicArray<MerkleNode.TreeEntry>(entryArray.size());
 
               for (entryVal in entryArray.vals()) {
-                switch (parseTreeEntryFromCbor(entryVal)) {
+                switch (parseTreeEntry(entryVal)) {
                   case (#ok(entry)) entriesBuffer.add(entry);
                   case (#err(e)) return #err("Failed to parse tree entry: " # e);
                 };
@@ -637,11 +852,7 @@ module {
     };
   };
 
-  private func parseMSTNodeFromPb(value : DagPb.Node) : Result.Result<MerkleNode.Node, Text> {
-    Runtime.trap("MST Protobuf parsing not implemented yet: " # debug_show (value));
-  };
-
-  private func parseTreeEntryFromCbor(value : DagCbor.Value) : Result.Result<MerkleNode.TreeEntry, Text> {
+  private func parseTreeEntry(value : DagCbor.Value) : Result.Result<MerkleNode.TreeEntry, Text> {
     switch (value) {
       case (#map(fields)) {
         var prefixLength : Nat = 0;
@@ -671,185 +882,4 @@ module {
       case (_) #err("Tree entry must be a CBOR map");
     };
   };
-
-  // Compare two byte arrays lexically
-  private func compareKeys(a : [Nat8], b : [Nat8]) : Order.Order {
-    let minLen = Nat.min(a.size(), b.size());
-
-    for (i in Nat.range(0, minLen)) {
-      if (a[i] < b[i]) return #less;
-      if (a[i] > b[i]) return #greater;
-    };
-
-    if (a.size() < b.size()) return #less;
-    if (a.size() > b.size()) return #greater;
-    return #equal;
-  };
-
-  private func calculateDepth(key : [Nat8]) : Nat {
-    let hash = Sha256.fromArray(#sha256, key);
-
-    var leadingZeros = 0;
-
-    // Count leading zeros in 2-bit chunks following ATProto specification exactly
-    // This matches the leadingZerosOnHash function in ATProto
-    label f for (byte in hash.vals()) {
-      // Count 2-bit chunks of leading zeros in this byte
-      if (byte < 64) { leadingZeros += 1 }; // First 2 bits are 00 (< 0b01000000)
-      if (byte < 16) { leadingZeros += 1 }; // First 4 bits are 0000 (< 0b00010000)
-      if (byte < 4) { leadingZeros += 1 }; // First 6 bits are 000000 (< 0b00000100)
-      if (byte == 0) {
-        leadingZeros += 1; // All 8 bits are 0 (== 0b00000000)
-      } else {
-        // Stop at first non-zero byte - this is the key difference from the buggy version
-        break f;
-      };
-    };
-
-    leadingZeros;
-  };
-
-  // Validate key format (must be valid repo path)
-  private func isValidKey(key : [Nat8]) : Bool {
-    if (key.size() == 0 or key.size() > 256) {
-      return false;
-    };
-
-    // Convert to text for validation
-    let keyText = switch (Text.decodeUtf8(Blob.fromArray(key))) {
-      case null return false;
-      case (?text) text;
-    };
-
-    // Check path format: collection/record-key
-    let parts = Text.split(keyText, #char('/'));
-    let partsArray = Iter.toArray(parts);
-
-    if (partsArray.size() != 2) {
-      return false;
-    };
-
-    let collection = partsArray[0];
-    let recordKey = partsArray[1];
-
-    if (collection.size() == 0 or recordKey.size() == 0) {
-      return false;
-    };
-
-    // Validate characters (a-zA-Z0-9_\-:.)
-    func isValidChar(c : Char) : Bool {
-      let code = Char.toNat32(c);
-      (code >= 0x30 and code <= 0x39) or // 0-9
-      (code >= 0x41 and code <= 0x5A) or // A-Z
-      (code >= 0x61 and code <= 0x7A) or // a-z
-      code == 0x2D or // -
-      code == 0x3A or // :
-      code == 0x2E or // .
-      code == 0x5F; // _
-    };
-
-    (
-      recordKey.chars()
-      |> Iter.all(_, isValidChar)
-    ) and (
-      collection.chars()
-      |> Iter.all(_, isValidChar)
-    );
-  };
-
-  // Reconstruct full key from compressed entries
-  private func reconstructKey(entries : [MerkleNode.TreeEntry], index : Nat) : [Nat8] {
-    if (index >= entries.size()) {
-      return [];
-    };
-
-    if (index == 0) {
-      return entries[0].keySuffix; // First entry has full key
-    };
-
-    let entry = entries[index];
-    let prefixLen = entry.prefixLength;
-
-    if (prefixLen == 0) {
-      return entry.keySuffix; // No compression
-    };
-
-    let prevKey = reconstructKey(entries, index - 1);
-
-    if (prefixLen > prevKey.size()) {
-      return entry.keySuffix; // Fallback to suffix only
-    };
-
-    let prefix = Array.sliceToArray<Nat8>(prevKey, 0, prefixLen);
-    Array.concat(prefix, entry.keySuffix);
-  };
-
-  // Compress keys by removing common prefixes
-  private func compressKeys(entries : [MerkleNode.TreeEntry]) : [MerkleNode.TreeEntry] {
-    if (entries.size() <= 1) {
-      // Ensure single entry has prefixLength = 0
-      if (entries.size() == 1) {
-        return [{
-          entries[0] with
-          prefixLength = 0;
-          keySuffix = reconstructKey(entries, 0);
-        }];
-      };
-      return entries;
-    };
-
-    // First, reconstruct all full keys from input entries
-    let fullKeys = Array.tabulate<[Nat8]>(entries.size(), func(i) = reconstructKey(entries, i));
-
-    let compressed = DynamicArray.DynamicArray<MerkleNode.TreeEntry>(entries.size());
-
-    // First entry keeps full key
-    compressed.add({
-      entries[0] with
-      prefixLength = 0;
-      keySuffix = fullKeys[0];
-    });
-
-    // Subsequent entries get compressed
-    var i = 1;
-    while (i < entries.size()) {
-      let prevKey = fullKeys[i - 1];
-      let currentKey = fullKeys[i];
-      let prefixLen = commonPrefixLength(prevKey, currentKey);
-
-      let suffix : [Nat8] = if (prefixLen < currentKey.size()) {
-        let suffixLength : Nat = currentKey.size() - prefixLen;
-        Array.tabulate<Nat8>(suffixLength, func(j) = currentKey[prefixLen + j]);
-      } else {
-        [];
-      };
-
-      compressed.add({
-        entries[i] with
-        prefixLength = prefixLen;
-        keySuffix = suffix;
-      });
-
-      i += 1;
-    };
-
-    DynamicArray.toArray(compressed);
-  };
-
-  // Calculate common prefix length between two byte arrays
-  private func commonPrefixLength(a : [Nat8], b : [Nat8]) : Nat {
-    let minLen = Nat.min(a.size(), b.size());
-    var prefixLen = 0;
-
-    label f for (i in Nat.range(0, minLen)) {
-      if (a[i] == b[i]) {
-        prefixLen += 1;
-      } else {
-        break f;
-      };
-    };
-
-    prefixLen;
-  };
-
 };

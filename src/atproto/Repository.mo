@@ -6,7 +6,14 @@ import AtUri "./AtUri";
 
 module {
 
-  public type Repository = {
+  public type Repository = Repository.MetaData and {
+    commits : PureMap.Map<TID.TID, Commit>;
+    records : PureMap.Map<CID.CID, DagCbor.Value>;
+    nodes : PureMap.Map<Text, MerkleNode.Node>;
+    blobs : PureMap.Map<CID.CID, BlobRef>;
+  };
+
+  public type MetaData = {
     head : CID.CID; // CID of current commit
     rev : TID.TID; // TID timestamp
     active : Bool;
