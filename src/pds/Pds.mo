@@ -22,6 +22,7 @@ import CAR "mo:car@1";
 import CarUtil "CarUtil";
 import PdsInterface "./PdsInterface";
 import DateTime "mo:datetime@1/DateTime";
+import Repository "../atproto/Repository";
 
 shared ({ caller = deployer }) persistent actor class Pds(
   initData : {
@@ -150,7 +151,7 @@ shared ({ caller = deployer }) persistent actor class Pds(
       return #err("Only the owner or deployer can initialize the PDS");
     };
     // TODO prevent re-initialization?
-    let (plcIndentifier, repository) : (DID.Plc.DID, ?RepositoryHandler.Repository) = switch (request.plc) {
+    let (plcIndentifier, repository) : (DID.Plc.DID, ?Repository.Repository) = switch (request.plc) {
       case (#new(createRequest)) {
         switch (await* didDirectoryHandler.create(createRequest)) {
           case (#ok(did)) (did, null);

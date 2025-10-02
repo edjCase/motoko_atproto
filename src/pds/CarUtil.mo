@@ -1,6 +1,5 @@
 import Text "mo:core@1/Text";
 import Result "mo:core@1/Result";
-import RepositoryHandler "Handlers/RepositoryHandler";
 import ServerInfo "ServerInfo";
 import DID "mo:did@3";
 import TID "mo:tid@1";
@@ -16,9 +15,10 @@ import BlobRef "../atproto/BlobRef";
 import CIDBuilder "../atproto/CIDBuilder";
 import Blob "mo:core@1/Blob";
 import Int "mo:core@1/Int";
+import Repository "../atproto/Repository";
 
 module {
-  public func buildRepository(request : CAR.File) : Result.Result<(DID.Plc.DID, RepositoryHandler.Repository), Text> {
+  public func buildRepository(request : CAR.File) : Result.Result<(DID.Plc.DID, Repository.Repository), Text> {
     let roots = request.header.roots;
     if (roots.size() == 0) {
       return #err("CAR file has no root CIDs");
@@ -96,14 +96,14 @@ module {
     };
 
     // Create repository
-    let repository = {
+    let repository : Repository.Repository = {
       head = latestCommitCID;
       rev = latestCommit.rev;
       active = true;
       status = null;
       commits = allCommits;
       records = allRecords;
-      nodes = mst.getNodes();
+      nodes = mst.nodes;
       blobs = allBlobs;
     };
     #ok((latestCommit.did, repository));
@@ -119,15 +119,8 @@ module {
     // Get all CID references from MST - need to find root from latest commit
     // This function is called with an MST reconstructed from blocks, so we need to find the root
     // For now, get the first node as root (this may need refinement for complex MSTs)
-    let nodes = mst.getNodes();
-    let ?rootNode = switch (PureMap.entries(nodes) |> _.next()) {
-      case (?(_, node)) ?node;
-      case (null) null;
-    } else return #err("No MST nodes found");
 
-    let allCIDs = mst.getAllRecordCIDs(rootNode);
-
-    for (cid in allCIDs.vals()) {
+    for (cid in MerkleSearchTree.values(mst)) {
       let ?blockData = PureMap.get(blockMap, CIDBuilder.compare, cid) else {
         return #err("Record block not found: " # CID.toText(cid));
       };

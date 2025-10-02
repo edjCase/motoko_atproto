@@ -26,25 +26,13 @@ import Time "mo:core@1/Time";
 import List "mo:core@1/List";
 import Runtime "mo:core@1/Runtime";
 import Int "mo:core@1/Int";
+import Set "mo:core@1/Set";
+import BlobRef "../../atproto/BlobRef";
 
 module {
   public type StableData = {
     repository : Repository.Repository;
     blobs : PureMap.Map<CID.CID, BlobWithMetaData>;
-  };
-
-  type Commit = {
-    did : DID.Plc.DID;
-    version : Nat;
-    data : CID.CID;
-    prev : ?CID.CID;
-    sig : Blob;
-  };
-
-  type BlobRef = {
-    ref : CID.CID;
-    mimeType : Text;
-    size : Nat;
   };
 
   public type BlobWithMetaData = {
@@ -209,7 +197,7 @@ module {
   };
 
   public type UploadBlobResponse = {
-    blob : BlobRef;
+    blob : BlobRef.BlobRef;
   };
 
   public type ListBlobsRequest = {
@@ -258,7 +246,7 @@ module {
         return #err("Repository already initialized");
       };
 
-      let repository = switch (existingRepository) {
+      let repository : Repository.Repository = switch (existingRepository) {
         case (?repository) repository;
         case (null) {
           let mst = MerkleSearchTree.empty();
@@ -273,10 +261,10 @@ module {
             rev = rev;
             active = true;
             status = null;
-            commits = PureMap.singleton<TID.TID, Commit>(rev, signedCommit);
+            commits = PureMap.singleton<TID.TID, Commit.Commit>(rev, signedCommit);
             records = PureMap.empty<CID.CID, DagCbor.Value>();
             nodes = mst.nodes;
-            blobs = PureMap.empty<CID.CID, BlobRef>();
+            blobs = PureMap.empty<CID.CID, BlobRef.BlobRef>();
           };
         };
       };
@@ -303,6 +291,20 @@ module {
       Iter.toArray(Set.values(collections));
     };
 
+    public func getRecord(request : GetRecordRequest) : ?GetRecordResponse {
+      let path = request.collection # "/" # request.rkey;
+      let repository = getRepository();
+
+      let mst = Repository.buildMerkleSearchTree(repository);
+
+      let ?recordCID = MerkleSearchTree.get(mst, path) else return null;
+      let ?value = PureMap.get(repository.records, CIDBuilder.compare, recordCID) else return null;
+      ?{
+        cid = recordCID;
+        value = value;
+      };
+    };
+
     public func createRecord(
       request : CreateRecordRequest
     ) : async* Result.Result<CreateRecordResponse, Text> {
@@ -318,15 +320,9 @@ module {
         case (null) TID.toText(tidGenerator.next());
       };
 
-      // Validate swapCommit if provided
-      switch (request.swapCommit) {
-        case (?expectedCommitCID) {
-          // Check that the current head commit matches the expected CID
-          if (repository.head != expectedCommitCID) {
-            return #err("Swap commit failed: expected " # CID.toText(expectedCommitCID) # " but current head is " # CID.toText(repository.head));
-          };
-        };
-        case (null) ();
+      switch (validateSwapCommit(repository, request.swapCommit)) {
+        case (#ok(())) ();
+        case (#err(e)) return #err(e);
       };
 
       let validationResult : Result.Result<ValidationStatus, Text> = switch (request.validate) {
@@ -340,12 +336,6 @@ module {
       };
 
       let recordCID = CIDBuilder.fromRecord(rKey, request.record);
-      let updatedRecords = PureMap.add(
-        repository.records,
-        CIDBuilder.compare,
-        recordCID,
-        request.record,
-      );
 
       // Create record path
       let path = request.collection # "/" # rKey;
@@ -358,97 +348,50 @@ module {
         case (#err(e)) return #err("Failed to add to MST: " # debug_show (e));
       };
 
-      // Create new commit
-      let newRev = tidGenerator.next();
-
-      let signedCommit = switch (
-        await* createCommit(
-          newRev,
-          newMst.root,
-          ?mst.root,
-        )
-      ) {
-        case (#ok(commit)) commit;
-        case (#err(e)) return #err("Failed to create commit: " # e);
-      };
-
-      // Store new state
-      let commitCID = CIDBuilder.fromCommit(signedCommit);
-      let updatedCommits = PureMap.add<TID.TID, Commit>(
-        repository.commits,
-        TID.compare,
-        newRev,
-        signedCommit,
+      let newRecords = PureMap.add(
+        repository.records,
+        CIDBuilder.compare,
+        recordCID,
+        request.record,
       );
 
-      setRepository({
-        repository with
-        head = commitCID;
-        rev = newRev;
-        commits = updatedCommits;
-        records = updatedRecords;
-        nodes = mst.nodes;
-      });
+      let newRepository = switch (
+        await* commitNewData(
+          repository,
+          mst,
+          newMst,
+          newRecords,
+        )
+      ) {
+        case (#ok(repo)) repo;
+        case (#err(e)) return #err(e);
+      };
 
       #ok({
         cid = recordCID;
         commit = ?{
-          cid = commitCID;
-          rev = newRev;
+          cid = newRepository.head;
+          rev = newRepository.rev;
         };
         rkey = rKey;
         validationStatus = validationStatus;
       });
     };
 
-    public func getRecord(request : GetRecordRequest) : ?GetRecordResponse {
-      let path = request.collection # "/" # request.rkey;
-      let repository = getRepository();
-
-      let mst = Repository.buildMerkleSearchTree(repository);
-
-      let ?recordCID = MerkleSearchTree.get(mst, path) else return null;
-      let ?value = PureMap.get(repository.records, CIDBuilder.compare, recordCID) else return null;
-      ?{
-        cid = recordCID;
-        value = value;
-      };
-    };
-
     public func putRecord(request : PutRecordRequest) : async* Result.Result<PutRecordResponse, Text> {
-      if (Text.size(request.rkey) > 512) {
-        return #err("Record key exceeds maximum length of 512 characters");
-      };
+
       let repository = getRepository();
 
-      // Validate swapCommit if provided
-      switch (request.swapCommit) {
-        case (?expectedCommitCID) {
-          // Check that the current head commit matches the expected CID
-          if (repository.head != expectedCommitCID) {
-            return #err("Swap commit failed: expected " # CID.toText(expectedCommitCID) # " but current head is " # CID.toText(repository.head));
-          };
-        };
-        case (null) ();
+      switch (validateSwapCommit(repository, request.swapCommit)) {
+        case (#ok(())) ();
+        case (#err(e)) return #err(e);
       };
 
       let mst = Repository.buildMerkleSearchTree(repository);
 
-      // Validate swapRecord if provided (for putRecord, ensure current record matches or doesn't exist)
-      switch (request.swapRecord) {
-        case (?expectedRecordCID) {
-          // Check if record currently exists
-          let path = request.collection # "/" # request.rkey;
-          let ?currentRecordCID = MerkleSearchTree.get(mst, path) else {
-            // Record doesn't exist but swap expects it to
-            return #err("Swap record failed: expected record " # CID.toText(expectedRecordCID) # " but record does not exist");
-          };
-          // Record exists, check if it matches expected CID
-          if (currentRecordCID != expectedRecordCID) {
-            return #err("Swap record failed: expected " # CID.toText(expectedRecordCID) # " but current record is " # CID.toText(currentRecordCID));
-          };
-        };
-        case (null) ();
+      switch (validateSwapRecord(mst, request.collection, request.rkey, request.swapRecord)) {
+        case (#ok(())) ();
+        case (#err(e)) return #err(e);
       };
 
       let validationResult : Result.Result<ValidationStatus, Text> = switch (request.validate) {
@@ -462,150 +405,106 @@ module {
       };
 
       let recordCID = CIDBuilder.fromRecord(request.rkey, request.record);
-      let updatedRecords = PureMap.add(repository.records, CIDBuilder.compare, recordCID, request.record);
 
       // Create record path
       let path = request.collection # "/" # request.rkey;
 
+      // Update MST (this will replace existing record)
       let newMst = switch (MerkleSearchTree.add(mst, path, recordCID)) {
         case (#ok(mst)) mst;
-        case (#err(e)) return #err("Failed to update MST: " # e);
+        case (#err(e)) return #err("Failed to update MST: " # debug_show (e));
       };
 
-      // Create new commit
-      let newRev = tidGenerator.next();
-
-      let signedCommit = switch (
-        await* createCommit(
-          newRev,
-          newMst.root,
-          ?mst.root,
-        )
-      ) {
-        case (#ok(commit)) commit;
-        case (#err(e)) return #err("Failed to create commit: " # e);
-      };
-
-      // Store new state
-      let commitCID = CIDBuilder.fromCommit(signedCommit);
-      let updatedCommits = PureMap.add<TID.TID, Commit>(
-        repository.commits,
-        TID.compare,
-        newRev,
-        signedCommit,
+      let newRecords = PureMap.add(
+        repository.records,
+        CIDBuilder.compare,
+        recordCID,
+        request.record,
       );
 
-      setRepository({
-        repository with
-        head = commitCID;
-        rev = newRev;
-        commits = updatedCommits;
-        records = updatedRecords;
-        nodes = mst.nodes;
-      });
+      let newRepository = switch (
+        await* commitNewData(
+          repository,
+          mst,
+          newMst,
+          newRecords,
+        )
+      ) {
+        case (#ok(repo)) repo;
+        case (#err(e)) return #err(e);
+      };
 
       #ok({
         cid = recordCID;
         commit = ?{
-          cid = commitCID;
-          rev = newRev;
+          cid = newRepository.head;
+          rev = newRepository.rev;
         };
         validationStatus = ?validationStatus;
       });
     };
 
     public func deleteRecord(request : DeleteRecordRequest) : async* Result.Result<DeleteRecordResponse, Text> {
+
       let repository = getRepository();
-      // Validate swapCommit if provided
-      switch (request.swapCommit) {
-        case (?expectedCommitCID) {
-          // Check that the current head commit matches the expected CID
-          if (repository.head != expectedCommitCID) {
-            return #err("Swap commit failed: expected " # CID.toText(expectedCommitCID) # " but current head is " # CID.toText(repository.head));
-          };
-        };
-        case (null) ();
+
+      switch (validateSwapCommit(repository, request.swapCommit)) {
+        case (#ok(())) ();
+        case (#err(e)) return #err(e);
       };
 
       let mst = Repository.buildMerkleSearchTree(repository);
-      // Validate swapRecord if provided (for deleteRecord, ensure current record matches)
-      switch (request.swapRecord) {
-        case (?expectedRecordCID) {
-          // Check if record currently exists and matches expected CID
-          let path = request.collection # "/" # request.rkey;
-          let ?currentRecordCID = MerkleSearchTree.get(mst, path) else return #err("Swap record failed: expected record " # CID.toText(expectedRecordCID) # " but record does not exist");
-          // Record exists, check if it matches expected CID
-          if (currentRecordCID != expectedRecordCID) {
-            return #err("Swap record failed: expected " # CID.toText(expectedRecordCID) # " but current record is " # CID.toText(currentRecordCID));
-          };
-        };
-        case (null) ();
+
+      switch (validateSwapRecord(mst, request.collection, request.rkey, request.swapRecord)) {
+        case (#ok(())) ();
+        case (#err(e)) return #err(e);
       };
 
-      // Create record path
       let path = request.collection # "/" # request.rkey;
 
       // Remove from MST
-      let newMst = switch (MerkleSearchTree.remove(mst, path)) {
+      let (newMst, removedValue) = switch (MerkleSearchTree.remove(mst, path)) {
         case (#ok(mst)) mst;
         case (#err(e)) return #err("Failed to remove from MST: " # debug_show (e));
       };
 
-      // Create new commit
-      let newRev = tidGenerator.next();
-
-      let signedCommit = switch (
-        await* createCommit(
-          newRev,
-          newMst.root,
-          ?mst.root,
-        )
-      ) {
-        case (#ok(commit)) commit;
-        case (#err(e)) return #err("Failed to create commit: " # e);
-      };
-
-      // Store new state
-      let commitCID = CIDBuilder.fromCommit(signedCommit);
-      let updatedCommits = PureMap.add<TID.TID, Commit>(
-        repository.commits,
-        TID.compare,
-        newRev,
-        signedCommit,
+      let newRecords = PureMap.remove(
+        repository.records,
+        CIDBuilder.compare,
+        removedValue,
       );
 
-      setRepository({
-        repository with
-        head = commitCID;
-        rev = newRev;
-        commits = updatedCommits;
-        nodes = mst.nodes;
-      });
+      let newRepository = switch (
+        await* commitNewData(
+          repository,
+          mst,
+          newMst,
+          newRecords,
+        )
+      ) {
+        case (#ok(repo)) repo;
+        case (#err(e)) return #err(e);
+      };
 
       #ok({
         commit = ?{
-          cid = commitCID;
-          rev = newRev;
+          cid = newRepository.head;
+          rev = newRepository.rev;
         };
       });
     };
 
     public func applyWrites(request : ApplyWritesRequest) : async* Result.Result<ApplyWritesResponse, Text> {
       let repository = getRepository();
-      // Check swap commit if provided
-      switch (request.swapCommit) {
-        case (?_) {
-          // TODO
-          return #err("Swap commit not implemented yet");
-        };
-        case (null) ();
+
+      switch (validateSwapCommit(repository, request.swapCommit)) {
+        case (#ok(())) ();
+        case (#err(e)) return #err(e);
       };
 
       var updatedRecords = repository.records;
-      var updatedBlobs = repository.blobs;
-      var mst = Repository.buildMerkleSearchTree(repository);
-
-      let originalMstRoot = mst.root;
+      let mst = Repository.buildMerkleSearchTree(repository);
+      var newMst = mst;
 
       // Process all write operations and collect results
       let results = List.empty<WriteResult>();
@@ -641,7 +540,7 @@ module {
             let path = createOp.collection # "/" # rKey;
 
             // Add to MST
-            mst := switch (MerkleSearchTree.add(mst, path, recordCID)) {
+            newMst := switch (MerkleSearchTree.add(newMst, path, recordCID)) {
               case (#ok(mst)) mst;
               case (#err(e)) return #err("Failed to add to MST: " # debug_show (e));
             };
@@ -675,7 +574,7 @@ module {
             // Create record path for MST
             let path = updateOp.collection # "/" # updateOp.rkey;
             // Update MST (this will replace existing record)
-            mst := switch (MerkleSearchTree.add(mst, path, recordCID)) {
+            newMst := switch (MerkleSearchTree.add(newMst, path, recordCID)) {
               case (#ok(mst)) mst;
               case (#err(e)) return #err("Failed to update MST: " # debug_show (e));
             };
@@ -692,8 +591,8 @@ module {
             let path = deleteOp.collection # "/" # deleteOp.rkey;
 
             // Remove from MST
-            mst := switch (MerkleSearchTree.remove(mst, path)) {
-              case (#ok(mst)) mst;
+            newMst := switch (MerkleSearchTree.remove(newMst, path)) {
+              case (#ok((mst, _))) mst;
               case (#err(e)) return #err("Failed to remove from MST: " # debug_show (e));
             };
 
@@ -703,42 +602,22 @@ module {
         List.add(results, result);
       };
 
-      // Create single commit for all operations
-      let newRev = tidGenerator.next();
-      let signedCommit = switch (
-        await* createCommit(
-          newRev,
-          mst.root,
-          ?originalMstRoot,
+      let newRepository = switch (
+        await* commitNewData(
+          repository,
+          mst,
+          newMst,
+          updatedRecords,
         )
       ) {
-        case (#ok(commit)) commit;
-        case (#err(e)) return #err("Failed to create commit: " # e);
+        case (#ok(repo)) repo;
+        case (#err(e)) return #err(e);
       };
-
-      // Store new state
-      let commitCID = CIDBuilder.fromCommit(signedCommit);
-      let updatedCommits = PureMap.add<TID.TID, Commit>(
-        repository.commits,
-        TID.compare,
-        newRev,
-        signedCommit,
-      );
-
-      setRepository({
-        repository with
-        head = commitCID;
-        rev = newRev;
-        commits = updatedCommits;
-        records = updatedRecords;
-        nodes = mst.nodes;
-        blobs = updatedBlobs;
-      });
 
       #ok({
         commit = ?{
-          cid = commitCID;
-          rev = newRev;
+          cid = newRepository.head;
+          rev = newRepository.rev;
         };
         results = List.toArray(results);
       });
@@ -761,7 +640,7 @@ module {
 
           ?{
             collection = request.collection;
-            rkey = key;
+            rkey = rkey;
             cid = cid;
             value = value;
           };
@@ -914,6 +793,86 @@ module {
       dataOrNull;
     };
 
+    private func validateSwapCommit(
+      repository : Repository.Repository,
+      swapCommit : ?CID.CID,
+    ) : Result.Result<(), Text> {
+      // Validate swapCommit if provided
+      switch (swapCommit) {
+        case (?expectedCommitCID) {
+          // Check that the current head commit matches the expected CID
+          if (repository.head != expectedCommitCID) {
+            return #err("Swap commit failed: expected " # CID.toText(expectedCommitCID) # " but current head is " # CID.toText(repository.head));
+          };
+        };
+        case (null) ();
+      };
+      #ok;
+    };
+
+    private func validateSwapRecord(
+      mst : MerkleSearchTree.MerkleSearchTree,
+      collection : Text,
+      rkey : Text,
+      swapRecord : ?CID.CID,
+    ) : Result.Result<(), Text> {
+      // Validate swapRecord if provided
+      switch (swapRecord) {
+        case (?expectedRecordCID) {
+          // Check if record currently exists and matches expected CID
+          let path = collection # "/" # rkey;
+          let ?currentRecordCID = MerkleSearchTree.get(mst, path) else return #err("Swap record failed: expected record " # CID.toText(expectedRecordCID) # " but record does not exist");
+          // Record exists, check if it matches expected CID
+          if (currentRecordCID != expectedRecordCID) {
+            return #err("Swap record failed: expected " # CID.toText(expectedRecordCID) # " but current record is " # CID.toText(currentRecordCID));
+          };
+        };
+        case (null) ();
+      };
+      #ok;
+    };
+
+    private func commitNewData(
+      repository : Repository.Repository,
+      mst : MerkleSearchTree.MerkleSearchTree,
+      newMst : MerkleSearchTree.MerkleSearchTree,
+      newRecords : PureMap.Map<CID.CID, DagCbor.Value>,
+    ) : async* Result.Result<Repository.Repository, Text> {
+
+      // Create new commit
+      let newRev = tidGenerator.next();
+
+      let signedCommit = switch (
+        await* createCommit(
+          newRev,
+          newMst.root,
+          ?mst.root,
+        )
+      ) {
+        case (#ok(commit)) commit;
+        case (#err(e)) return #err("Failed to create commit: " # e);
+      };
+
+      // Store new state
+      let commitCID = CIDBuilder.fromCommit(signedCommit);
+      let updatedCommits = PureMap.add<TID.TID, Commit.Commit>(
+        repository.commits,
+        TID.compare,
+        newRev,
+        signedCommit,
+      );
+
+      let newRepository : Repository.Repository = {
+        repository with
+        head = commitCID;
+        rev = newRev;
+        commits = updatedCommits;
+        nodes = newMst.nodes;
+        records = newRecords;
+      };
+      setRepository(newRepository);
+      #ok(newRepository);
+    };
     private func createCommit(
       rev : TID.TID,
       newNodeCID : CID.CID,

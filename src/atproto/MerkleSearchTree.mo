@@ -78,7 +78,7 @@ module {
   public func remove(
     mst : MerkleSearchTree,
     key : Text,
-  ) : Result.Result<MerkleSearchTree, Text> {
+  ) : Result.Result<(MerkleSearchTree, CID.CID), Text> {
     let keyBytes = keyToBytes(key);
     if (keyBytes.size() == 0) return #err("Key cannot be empty");
     if (not isValidKey(keyBytes)) return #err("Invalid key format");
@@ -107,17 +107,21 @@ module {
   public func removeMany(
     mst : MerkleSearchTree,
     keys : Iter.Iter<Text>,
-  ) : Result.Result<MerkleSearchTree, Text> {
+  ) : Result.Result<(MerkleSearchTree, [CID.CID]), Text> {
     var currentMst = mst;
+    let removedCids = List.empty<CID.CID>();
 
     for (keyText in keys) {
       switch (remove(currentMst, keyText)) {
-        case (#ok(newMst)) currentMst := newMst;
+        case (#ok((newMst, removedValue))) {
+          currentMst := newMst;
+          List.add(removedCids, removedValue);
+        };
         case (#err(e)) return #err("Batch remove failed at " # keyText # ": " # e);
       };
     };
 
-    #ok(currentMst);
+    #ok((currentMst, List.toArray(removedCids)));
   };
 
   public func entries(mst : MerkleSearchTree) : Iter.Iter<(Text, CID.CID)> {
@@ -688,7 +692,7 @@ module {
     nodeCID : CID.CID,
     keyBytes : [Nat8],
     keyDepth : Nat,
-  ) : Result.Result<MerkleSearchTree, Text> {
+  ) : Result.Result<(MerkleSearchTree, CID.CID), Text> {
 
     // Find the key in current node
     for (i in Nat.range(0, Nat.max(1, node.entries.size()))) {
@@ -697,7 +701,7 @@ module {
 
       if (compareKeys(keyBytes, entryKey) == #equal and keyDepth == entryDepth) {
         let entries = DynamicArray.fromArray<MerkleNode.TreeEntry>(node.entries);
-        ignore entries.remove(i);
+        let removedValue = entries.remove(i);
 
         let newEntries = DynamicArray.toArray(entries);
         let updatedNode = {
@@ -705,7 +709,9 @@ module {
           entries = if (newEntries.size() > 0) compressEntries(newEntries.vals()) else []
         };
 
-        return #ok(replaceNode(mst, nodeCID, updatedNode));
+        let newMst = replaceNode(mst, nodeCID, updatedNode);
+
+        return #ok((newMst, removedValue.valueCID));
       };
     };
 
@@ -733,7 +739,7 @@ module {
         let ?subtree = getNode(mst, cid) else return #err("Subtree not found");
 
         switch (removeRecursive(mst, subtree, cid, keyBytes, keyDepth)) {
-          case (#ok(updatedMst)) {
+          case (#ok((updatedMst, removedValue))) {
             let newSubtreeNode = getRootNode(updatedMst);
 
             // Check if subtree is now empty
@@ -741,7 +747,8 @@ module {
               // Remove empty subtree reference
               if (searchPos == 0) {
                 let updatedNode = { node with leftSubtreeCID = null };
-                return #ok(replaceNode(updatedMst, nodeCID, updatedNode));
+                let newMst = replaceNode(updatedMst, nodeCID, updatedNode);
+                return #ok((newMst, removedValue));
               } else {
                 let entries = Array.tabulate<MerkleNode.TreeEntry>(
                   node.entries.size(),
@@ -752,7 +759,8 @@ module {
                   },
                 );
                 let updatedNode = { node with entries };
-                return #ok(replaceNode(updatedMst, nodeCID, updatedNode));
+                let newMst = replaceNode(updatedMst, nodeCID, updatedNode);
+                return #ok((newMst, removedValue));
               };
             } else {
               // Update subtree reference
@@ -760,7 +768,8 @@ module {
                 let updatedNode = {
                   node with leftSubtreeCID = ?updatedMst.root
                 };
-                return #ok(replaceNode(updatedMst, nodeCID, updatedNode));
+                let newMst = replaceNode(updatedMst, nodeCID, updatedNode);
+                return #ok((newMst, removedValue));
               } else {
                 let entries = Array.tabulate<MerkleNode.TreeEntry>(
                   node.entries.size(),
@@ -771,7 +780,8 @@ module {
                   },
                 );
                 let updatedNode = { node with entries };
-                return #ok(replaceNode(updatedMst, nodeCID, updatedNode));
+                let newMst = replaceNode(updatedMst, nodeCID, updatedNode);
+                return #ok((newMst, removedValue));
               };
             };
           };
