@@ -76,13 +76,15 @@ module {
     key : Text,
     value : CID.CID,
   ) : Result.Result<MerkleSearchTree, Text> {
-    let keyBytes = keyToBytes(key);
-    if (keyBytes.size() == 0) return #err("Key cannot be empty");
-    if (keyBytes.size() > 256) return #err("Key too long (max 256 bytes)");
-    if (not isValidKey(keyBytes)) return #err("Invalid key format");
+    addOrUpdateInternal(mst, key, value, true);
+  };
 
-    let node = getRootNode(mst);
-    addRecursive(mst, node, mst.root, keyBytes, value, calculateDepth(keyBytes));
+  public func put(
+    mst : MerkleSearchTree,
+    key : Text,
+    value : CID.CID,
+  ) : Result.Result<MerkleSearchTree, Text> {
+    addOrUpdateInternal(mst, key, value, false);
   };
 
   // Remove a key
@@ -92,7 +94,6 @@ module {
   ) : Result.Result<(MerkleSearchTree, CID.CID), Text> {
     let keyBytes = keyToBytes(key);
     if (keyBytes.size() == 0) return #err("Key cannot be empty");
-    if (not isValidKey(keyBytes)) return #err("Invalid key format");
 
     let node = getRootNode(mst);
     removeRecursive(mst, node, mst.root, keyBytes, calculateDepth(keyBytes));
@@ -367,10 +368,6 @@ module {
     for (i in Nat.range(0, Nat.max(0, node.entries.size()))) {
       let key = reconstructKey(node.entries, i);
 
-      if (not isValidKey(key)) {
-        return #err("Invalid key format");
-      };
-
       let depth = calculateDepth(key);
 
       // Check depth consistency - all keys in node should have same depth
@@ -442,6 +439,28 @@ module {
     #ok(());
   };
 
+  private func addOrUpdateInternal(
+    mst : MerkleSearchTree,
+    key : Text,
+    value : CID.CID,
+    addOnly : Bool,
+  ) : Result.Result<MerkleSearchTree, Text> {
+    let keyBytes = keyToBytes(key);
+    if (keyBytes.size() == 0) return #err("Key cannot be empty");
+    if (keyBytes.size() > 256) return #err("Key too long (max 256 bytes)");
+
+    let node = getRootNode(mst);
+    addRecursive(
+      mst,
+      node,
+      mst.root,
+      keyBytes,
+      value,
+      calculateDepth(keyBytes),
+      addOnly,
+    );
+  };
+
   private func addRecursive(
     mst : MerkleSearchTree,
     node : MerkleNode.Node,
@@ -449,33 +468,33 @@ module {
     key : [Nat8],
     value : CID.CID,
     keyDepth : Nat,
+    addOnly : Bool,
   ) : Result.Result<MerkleSearchTree, Text> {
     // Find position for new key
     var insertPos = 0;
-    var exactMatch = false;
 
-    for (i in Nat.range(0, Nat.max(0, node.entries.size()))) {
+    label f for (i in Nat.range(0, Nat.max(0, node.entries.size()))) {
       let entryKey = reconstructKey(node.entries, i);
       let entryDepth = calculateDepth(entryKey);
 
       switch (compareKeys(key, entryKey)) {
         case (#equal) {
-          if (keyDepth == entryDepth) {
+          if (addOnly and keyDepth == entryDepth) {
             return #err("Key already exists");
           };
-          exactMatch := true;
           insertPos := i;
+          break f;
         };
         case (#less) {
           insertPos := i;
-          return insertAtPosition(mst, node, nodeCID, insertPos, key, value, keyDepth);
+          return insertAtPosition(mst, node, nodeCID, insertPos, key, value, keyDepth, addOnly);
         };
         case (#greater) insertPos := i + 1;
       };
     };
 
     // Insert at end or in appropriate position
-    insertAtPosition(mst, node, nodeCID, insertPos, key, value, keyDepth);
+    insertAtPosition(mst, node, nodeCID, insertPos, key, value, keyDepth, addOnly);
   };
 
   private func insertAtPosition(
@@ -486,6 +505,7 @@ module {
     key : [Nat8],
     value : CID.CID,
     keyDepth : Nat,
+    addOnly : Bool,
   ) : Result.Result<MerkleSearchTree, Text> {
     // Determine if key belongs at this level
     let nodeDepth = if (node.entries.size() > 0) {
@@ -527,7 +547,7 @@ module {
         case (?cid) {
           // Recursively add to subtree
           let ?subtree = getNode(mst, cid) else return #err("Subtree not found");
-          switch (addRecursive(mst, subtree, cid, key, value, keyDepth)) {
+          switch (addRecursive(mst, subtree, cid, key, value, keyDepth, addOnly)) {
             case (#ok(updatedMst)) {
               // updatedMst.root is now the updated subtree's CID
               let newSubtreeCID = updatedMst.root;
@@ -712,7 +732,28 @@ module {
 
       if (compareKeys(keyBytes, entryKey) == #equal and keyDepth == entryDepth) {
         let entries = DynamicArray.fromArray<MerkleNode.TreeEntry>(node.entries);
-        let removedValue = entries.remove(i);
+        let removedEntry = entries.remove(i);
+        switch (entries.getOpt(i)) {
+          case (null) (); // Removed last entry, nothing to adjust
+          case (?nextEntry) {
+            // Adjust next entry's prefixLength and keySuffix
+            let nextKey = reconstructKey(node.entries, i + 1);
+            let (newSuffix, newPrefixLength) = if (i > 0) {
+              // If there's a previous entry, adjust the next entry's suffix
+              let prevKey = reconstructKey(node.entries, i - 1);
+              let prefix = findCommonPrefix(prevKey, nextKey);
+
+              // Extract suffix after common prefix
+              let suffix = Array.sliceToArray(nextKey, prefix.size(), nextKey.size());
+              (suffix, prefix.size());
+            } else {
+              // If there's no previous entry, then should be the full key with no prefixLength
+              let newSuffix = nextKey;
+              (newSuffix, 0);
+            };
+            entries.put(i, { nextEntry with keySuffix = newSuffix; prefixLength = newPrefixLength });
+          };
+        };
 
         let newEntries = DynamicArray.toArray(entries);
         let updatedNode = {
@@ -722,7 +763,7 @@ module {
 
         let newMst = replaceNode(mst, nodeCID, updatedNode);
 
-        return #ok((newMst, removedValue.valueCID));
+        return #ok((newMst, removedEntry.valueCID));
       };
     };
 
@@ -902,39 +943,6 @@ module {
     leadingZeros;
   };
 
-  // Validate key format
-  private func isValidKey(key : [Nat8]) : Bool {
-    let ?keyText = keyToText(key) else return false;
-    let parts = Iter.toArray(Text.split(keyText, #char('/')));
-
-    if (parts.size() != 2) return false;
-
-    let collection = parts[0];
-    let rkey = parts[1];
-
-    // Check for empty parts or relative paths
-    if (
-      collection == "" or rkey == "" or
-      collection == "." or collection == ".." or
-      rkey == "." or rkey == ".."
-    ) {
-      return false;
-    };
-
-    // Validate characters (A-Za-z0-9.-_~:)
-    for (char in keyText.chars()) {
-      if (not isValidKeyChar(char) and char != '/') {
-        return false;
-      };
-    };
-
-    true;
-  };
-
-  private func isValidKeyChar(c : Char) : Bool {
-    (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z') or (c >= '0' and c <= '9') or c == '.' or c == '-' or c == '_' or c == '~' or c == ':';
-  };
-
   private func keyToText(key : [Nat8]) : ?Text {
     Text.decodeUtf8(Blob.fromArray(key));
   };
@@ -985,13 +993,16 @@ module {
 
     Array.concat(prefix, entry.keySuffix);
   };
+
   private func compressEntries(entries : Iter.Iter<MerkleNode.TreeEntry>) : [MerkleNode.TreeEntry] {
     let ?firstEntry = entries.next() else return [];
 
     let compressed = List.empty<MerkleNode.TreeEntry>();
 
     // First entry always has prefixLength = 0
-    assert (firstEntry.prefixLength == 0);
+    if (firstEntry.prefixLength != 0) {
+      Runtime.trap("Invalid state. First entry must have prefixLength of 0");
+    };
     List.add(
       compressed,
       {

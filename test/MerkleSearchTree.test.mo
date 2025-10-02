@@ -85,12 +85,7 @@ test(
     // Test invalid keys
     let invalidKeys = [
       "", // empty
-      "noSlash",
-      "/startsWithSlash",
-      "endsWithSlash/",
-      "app.bsky.feed.post/", // empty record key
-      "/app.bsky.feed.post", // empty collection
-      "invalid@chars/test",
+      "asdfasdfasdjfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfxcvxcvdsfsdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdf", // Too large
     ];
 
     for (key in invalidKeys.vals()) {
@@ -878,6 +873,65 @@ test(
         };
       };
       case (#err(msg)) Runtime.trap("Failed to remove D: " # msg);
+    };
+  },
+);
+
+test(
+  "MerkleSearchTree - Remove Entry with Shared Prefix",
+  func() {
+    var mst = MerkleSearchTree.empty();
+
+    // Create keys where removal will test prefix handling
+    // These keys share a common prefix but diverge at different points
+    let keys = [
+      ("app.bsky.feed/aaaaaa", createTestCID("A")),
+      ("app.bsky.feed/aaaaab", createTestCID("B")),
+      ("app.bsky.feed/aaaaac", createTestCID("C")),
+    ];
+
+    // Add all keys
+    for ((key, value) in keys.vals()) {
+      switch (MerkleSearchTree.add(mst, key, value)) {
+        case (#ok(newMst)) { mst := newMst };
+        case (#err(msg)) Runtime.trap("Failed to add key: " # msg);
+      };
+    };
+
+    // Remove middle entry - this should properly handle the prefix of the next entry
+    switch (MerkleSearchTree.remove(mst, "app.bsky.feed/aaaaab")) {
+      case (#ok((newMst, removedValue))) {
+        mst := newMst;
+        if (removedValue != createTestCID("B")) {
+          Runtime.trap("Removed value doesn't match");
+        };
+
+        // Verify removed key is gone
+        switch (MerkleSearchTree.get(mst, "app.bsky.feed/aaaaab")) {
+          case (?_) Runtime.trap("Removed key still retrievable");
+          case (null) {};
+        };
+
+        // Critical: Verify remaining keys are still retrievable with correct values
+        switch (MerkleSearchTree.get(mst, "app.bsky.feed/aaaaaa")) {
+          case (?v) {
+            if (v != createTestCID("A")) {
+              Runtime.trap("Key A has wrong value after removal");
+            };
+          };
+          case (null) Runtime.trap("Lost key A after removal");
+        };
+
+        switch (MerkleSearchTree.get(mst, "app.bsky.feed/aaaaac")) {
+          case (?v) {
+            if (v != createTestCID("C")) {
+              Runtime.trap("Lost data in key C after removal - prefix bug");
+            };
+          };
+          case (null) Runtime.trap("Lost key C after removal");
+        };
+      };
+      case (#err(msg)) Runtime.trap("Failed to remove key: " # msg);
     };
   },
 );
