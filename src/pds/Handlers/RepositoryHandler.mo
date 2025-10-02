@@ -248,7 +248,15 @@ module {
 
       let repository : Repository.Repository = switch (existingRepository) {
         case (?repository) repository;
-        case (null) Repository.empty(tidGenerator.next());
+        case (null) {
+          let did = serverInfoHandler.get().plcIdentifier;
+          let rev = tidGenerator.next();
+          let signFunc = getSignFunc();
+          switch (await* Repository.empty(did, rev, signFunc)) {
+            case (#ok(repo)) repo;
+            case (#err(e)) return #err("Failed to create new repository: " # e);
+          };
+        };
       };
 
       dataOrNull := ?{
@@ -261,13 +269,13 @@ module {
 
     public func getAllCollections() : [Text] {
       let repository = getRepository();
-      Repository.collectionKeys(repository);
+      Repository.collectionKeys(repository) |> Iter.toArray(_);
     };
 
     public func getRecord(request : GetRecordRequest) : ?GetRecordResponse {
       let repository = getRepository();
 
-      let ?(recordCID, value) = Repository.getRecord(
+      let ?recordData = Repository.getRecord(
         repository,
         {
           collection = request.collection;
@@ -275,8 +283,8 @@ module {
         },
       ) else return null;
       ?{
-        cid = recordCID;
-        value = value;
+        cid = recordData.cid;
+        value = recordData.value;
       };
     };
 
@@ -308,11 +316,21 @@ module {
         case (#ok(status)) status;
         case (#err(e)) return #err("Record validation failed: " # e);
       };
+      let key = {
+        collection = request.collection;
+        recordKey = rKey;
+      };
+      let did = serverInfoHandler.get().plcIdentifier;
+      let rev = tidGenerator.next();
+      let signFunc = getSignFunc();
       let (newRepository, recordCID) = switch (
         await* Repository.createRecord(
           repository,
-          rKey,
+          key,
           request.record,
+          did,
+          rev,
+          signFunc,
         )
       ) {
         case (#ok(repo, cid)) (repo, cid);
@@ -354,6 +372,9 @@ module {
         case (#err(e)) return #err("Record validation failed: " # e);
       };
 
+      let did = serverInfoHandler.get().plcIdentifier;
+      let rev = tidGenerator.next();
+      let signFunc = getSignFunc();
       let (newRepository, recordCID) = switch (
         await* Repository.putRecord(
           repository,
@@ -362,6 +383,9 @@ module {
             recordKey = request.rkey;
           },
           request.record,
+          did,
+          rev,
+          signFunc,
         )
       ) {
         case (#ok(repo, cid)) (repo, cid);
@@ -393,6 +417,9 @@ module {
         case (#err(e)) return #err(e);
       };
 
+      let did = serverInfoHandler.get().plcIdentifier;
+      let rev = tidGenerator.next();
+      let signFunc = getSignFunc();
       let (newRepository, _deletedRecordCID) = switch (
         await* Repository.deleteRecord(
           repository,
@@ -400,6 +427,9 @@ module {
             collection = request.collection;
             recordKey = request.rkey;
           },
+          did,
+          rev,
+          signFunc,
         )
       ) {
         case (#ok(repo, cid)) (repo, cid);
@@ -424,7 +454,7 @@ module {
       };
 
       let writeOperations = List.empty<Repository.WriteOperation>();
-      let validationStatuses = List.empty<?ValidationStatus>();
+      let validationStatuses = List.empty<ValidationStatus>();
       for (writeOp in request.writes.vals()) {
         switch (buildWriteOperation(writeOp, request.validate)) {
           case (#ok((op, validationStatus))) {
@@ -434,10 +464,16 @@ module {
           case (#err(e)) return #err(e);
         };
       };
+      let did = serverInfoHandler.get().plcIdentifier;
+      let rev = tidGenerator.next();
+      let signFunc = getSignFunc();
       let (newRepository, results) = switch (
         await* Repository.applyWrites(
           repository,
-          writeOperations,
+          List.toArray(writeOperations),
+          did,
+          rev,
+          signFunc,
         )
       ) {
         case (#ok(repo, res)) (repo, res);
@@ -452,7 +488,7 @@ module {
           rev = newRepository.rev;
         };
         results = results.vals()
-        |> Iter.zipWith(
+        |> Iter.zipWith<Repository.WriteResult, ValidationStatus, WriteResult>(
           _,
           List.values(validationStatuses),
           func(writeResult : Repository.WriteResult, validationStatus : ValidationStatus) : WriteResult {
@@ -464,22 +500,23 @@ module {
                 validationStatus = validationStatus;
               });
               case (#update(updateRes)) #update({
-                collection = updateRes.collection;
-                rkey = updateRes.rkey;
+                collection = updateRes.key.collection;
+                rkey = updateRes.key.recordKey;
                 cid = updateRes.cid;
                 validationStatus = validationStatus;
               });
               case (#delete(_)) #delete({});
             };
           },
-        );
+        )
+        |> Iter.toArray(_);
       });
     };
 
     private func buildWriteOperation(
       writeOp : WriteOperation,
-      validate : Bool,
-    ) : Result.Result<(WriteOperation, ?ValidationStatus), Text> {
+      validate : ?Bool,
+    ) : Result.Result<(Repository.WriteOperation, ValidationStatus), Text> {
       switch (writeOp) {
         case (#create(createOp)) {
           let rKey : Text = switch (createOp.rkey) {
@@ -505,11 +542,11 @@ module {
             };
             value = createOp.value;
           });
-          #ok((operation, ?validationStatus));
+          #ok((operation, validationStatus));
         };
         case (#update(updateOp)) {
           // Validate record
-          let validationResult : Result.Result<ValidationStatus, Text> = switch (request.validate) {
+          let validationResult : Result.Result<ValidationStatus, Text> = switch (validate) {
             case (?true) LexiconValidator.validateRecord(updateOp.value, updateOp.collection, false);
             case (?false) #ok(#unknown);
             case (null) LexiconValidator.validateRecord(updateOp.value, updateOp.collection, true);
@@ -526,7 +563,7 @@ module {
             };
             value = updateOp.value;
           });
-          #ok((operation, ?validationStatus));
+          #ok((operation, validationStatus));
         };
         case (#delete(deleteOp)) {
           let operation = #delete({
@@ -535,7 +572,7 @@ module {
               recordKey = deleteOp.rkey;
             };
           });
-          #ok((operation, null));
+          #ok((operation, #unknown));
         };
       };
     };
@@ -544,8 +581,6 @@ module {
       let repository = getRepository();
 
       // TODO optimize for reverse/limit/cursor
-      let collectionPrefix = request.collection # "/";
-      // Convert to ListRecord format
       let records = Repository.recordEntriesByCollection(repository, request.collection);
 
       // Apply reverse ordering if requested
@@ -565,8 +600,8 @@ module {
         case (?cursor) {
           // Find the record after the cursor
           var index = 0;
-          label findCursor for (record in orderedRecords.vals()) {
-            let recordUri = record.collection # "/" # record.rkey;
+          label findCursor for ((key, data) in orderedRecords.vals()) {
+            let recordUri = Repository.keyToText(key);
             if (recordUri == cursor) {
               index += 1;
               break findCursor;
@@ -583,35 +618,36 @@ module {
       let resultRecords = if (startIndex >= orderedRecords.size()) {
         [];
       } else {
-        Array.sliceToArray(orderedRecords, startIndex, endIndex);
+        orderedRecords.vals()
+        |> Iter.drop(_, startIndex)
+        |> Iter.take(_, (endIndex - startIndex : Nat))
+        |> Iter.map(
+          _,
+          func((key, data) : (Repository.Key, Repository.RecordData)) : ListRecord {
+            {
+              collection = key.collection;
+              rkey = key.recordKey;
+              cid = data.cid;
+              value = data.value;
+            };
+          },
+        ) |> Iter.toArray(_);
       };
 
       // Generate next cursor
       let nextCursor = if (endIndex < orderedRecords.size()) {
-        let (lastRecordKey, _) = resultRecords[resultRecords.size() - 1];
-        ?Repository.keyToText(lastRecordKey);
+        let lastRecord = resultRecords[resultRecords.size() - 1];
+        ?Repository.keyToText({
+          collection = lastRecord.collection;
+          recordKey = lastRecord.rkey;
+        });
       } else {
         null;
       };
 
-      let records = resultRecords |> Iter.map(
-        _,
-        func((key, value) : (Key, DagCbor.Value)) : ListRecord {
-          {
-            collection = key.collection;
-            rkey = key.recordKey;
-            cid = switch (Repository.getRecord(repository, key)) {
-              case (?(cid, _)) cid;
-              case (null) Runtime.trap("Inconsistent state: record key exists in entries but not in records map");
-            };
-            value = value;
-          };
-        },
-      ) |> Iter.toArray(_);
-
       {
         cursor = nextCursor;
-        records = records;
+        records = resultRecords;
       };
     };
 
@@ -706,6 +742,12 @@ module {
 
     public func toStableData() : ?StableData {
       dataOrNull;
+    };
+
+    private func getSignFunc() : (Blob) -> async* Result.Result<Blob, Text> {
+      func(data : Blob) : async* Result.Result<Blob, Text> {
+        await* keyHandler.sign(#verification, data);
+      };
     };
 
     private func validateSwapCommit(

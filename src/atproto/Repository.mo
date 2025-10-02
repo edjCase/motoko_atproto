@@ -148,7 +148,7 @@ module {
     recordEntries(repository)
     |> Iter.filter(
       _,
-      func((key, data) : (Key, RecordData)) : Bool {
+      func((key, _) : (Key, RecordData)) : Bool {
         key.collection == collection;
       },
     );
