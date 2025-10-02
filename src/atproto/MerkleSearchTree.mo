@@ -51,6 +51,17 @@ module {
     validateNode(mst, rootNode, null);
   };
 
+  public func size(mst : MerkleSearchTree) : Nat {
+    var count = 0;
+    traverseTree(
+      mst,
+      func(key : Text, value : CID.CID) {
+        count += 1;
+      },
+    );
+    count;
+  };
+
   public func get(
     mst : MerkleSearchTree,
     key : Text,

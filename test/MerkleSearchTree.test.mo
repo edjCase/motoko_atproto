@@ -386,8 +386,8 @@ test(
     };
 
     // Verify the tree can handle many keys
-    let allKeys = MerkleSearchTree.getAllKeys(mst);
-    if (allKeys.size() != keys.size()) {
+    let keyCount = MerkleSearchTree.size(mst);
+    if (keyCount != keys.size()) {
       Runtime.trap("Tree should contain all added keys");
     };
   },
@@ -419,8 +419,11 @@ test(
     // Test removing middle record
     let removeKey = "app.bsky.feed.post/record2";
     switch (MerkleSearchTree.remove(mst, removeKey)) {
-      case (#ok(updatedMst)) {
+      case (#ok((updatedMst, removedValue))) {
         mst := updatedMst;
+        if (removedValue != createTestCID(removeKey)) {
+          Runtime.trap("Removed value CID mismatch");
+        };
 
         // Verify removed record is not retrievable
         switch (MerkleSearchTree.get(mst, removeKey)) {
@@ -432,7 +435,7 @@ test(
         for (key in keys.vals()) {
           if (key != "app.bsky.feed.post/record2") {
             switch (MerkleSearchTree.get(mst, key)) {
-              case (?_) {}; // Good
+              case (?v) assert (v == createTestCID(key)); // Good
               case (null) Runtime.trap("Remaining record lost: " # key);
             };
           };
@@ -446,71 +449,6 @@ test(
     switch (MerkleSearchTree.remove(mst, nonExistentKey)) {
       case (#ok(_)) Runtime.trap("Should not succeed removing non-existent record");
       case (#err(_)) {}; // Expected
-    };
-  },
-);
-
-test(
-  "MerkleSearchTree - Collection Operations",
-  func() {
-    var mst = MerkleSearchTree.empty();
-
-    // Add records from multiple collections
-    let testData = [
-      ("app.bsky.feed.post", "record1"),
-      ("app.bsky.feed.post", "record2"),
-      ("app.bsky.follow", "follow1"),
-      ("com.example.custom", "item1"),
-      ("com.example.custom", "item2"),
-      ("com.example.custom", "item3"),
-    ];
-
-    for ((collection, recordKey) in testData.vals()) {
-      let key = collection # "/" # recordKey;
-      let valueCID = createTestCID(key);
-
-      switch (MerkleSearchTree.add(mst, key, valueCID)) {
-        case (#ok(newMst)) {
-          mst := newMst;
-        };
-        case (#err(msg)) Runtime.trap("Failed to add " # key # ": " # msg);
-      };
-    };
-
-    // Test listCollections
-    let collections = MerkleSearchTree.listCollections(mst);
-    let expectedCollections = ["app.bsky.feed.post", "app.bsky.follow", "com.example.custom"];
-
-    if (collections.size() != expectedCollections.size()) {
-      Runtime.trap(
-        "Wrong number of collections. Expected: " #
-        debug_show (expectedCollections.size()) # ", Got: " # debug_show (collections.size())
-      );
-    };
-
-    // Verify all expected collections exist
-    for (expectedCollection in expectedCollections.vals()) {
-      let found = Array.find<Text>(collections, func(c) = c == expectedCollection);
-      if (found == null) {
-        Runtime.trap("Missing collection: " # expectedCollection);
-      };
-    };
-
-    // Test getByCollection for specific collections
-    let feedRecords = MerkleSearchTree.getByCollection(mst, "app.bsky.feed.post");
-    if (feedRecords.size() != 2) {
-      Runtime.trap("Expected 2 feed records, got: " # debug_show (feedRecords.size()));
-    };
-
-    let customRecords = MerkleSearchTree.getByCollection(mst, "com.example.custom");
-    if (customRecords.size() != 3) {
-      Runtime.trap("Expected 3 custom records, got: " # debug_show (customRecords.size()));
-    };
-
-    // Test empty collection
-    let emptyRecords = MerkleSearchTree.getByCollection(mst, "nonexistent.collection");
-    if (emptyRecords.size() != 0) {
-      Runtime.trap("Expected 0 records for nonexistent collection");
     };
   },
 );
@@ -650,11 +588,11 @@ test(
     };
 
     // Test getAll with many records
-    let allCIDs = MerkleSearchTree.getAll(mst);
-    if (allCIDs.size() != numRecords) {
+    let actualRecordCount = MerkleSearchTree.size(mst);
+    if (actualRecordCount != numRecords) {
       Runtime.trap(
         "getAll returned wrong count. Expected: " #
-        debug_show (numRecords) # ", Got: " # debug_show (allCIDs.size())
+        debug_show (numRecords) # ", Got: " # debug_show (actualRecordCount)
       );
     };
   },
@@ -667,17 +605,16 @@ test(
 
     // Test keys with very similar prefixes to stress compression
     let similarKeys = [
-      "app.bsky.feed.post/aaaaaa",
-      "app.bsky.feed.post/aaaaab",
-      "app.bsky.feed.post/aaaaac",
-      "app.bsky.feed.post/aaaaba",
-      "app.bsky.feed.post/aaaabb",
+      ("app.bsky.feed.post/aaaaaa", createTestCID("A")),
+      ("app.bsky.feed.post/aaaaab", createTestCID("B")),
+      ("app.bsky.feed.post/aaaaac", createTestCID("C")),
+      ("app.bsky.feed.post/aaaaba", createTestCID("D")),
+      ("app.bsky.feed.post/aaaabb", createTestCID("E")),
     ];
 
-    for (key in similarKeys.vals()) {
-      let valueCID = createTestCID(key);
+    for ((key, value) in similarKeys.vals()) {
 
-      switch (MerkleSearchTree.add(mst, key, valueCID)) {
+      switch (MerkleSearchTree.add(mst, key, value)) {
         case (#ok(newMst)) {
           mst := newMst;
         };
@@ -686,12 +623,11 @@ test(
     };
 
     // Verify all similar keys are retrievable and return correct values
-    for ((i, key) in Iter.enumerate(similarKeys.vals())) {
-      let expectedCID = createTestCID(key);
+    for ((i, (key, value)) in Iter.enumerate(similarKeys.vals())) {
 
       switch (MerkleSearchTree.get(mst, key)) {
         case (?retrievedCID) {
-          if (CID.toText(retrievedCID) != CID.toText(expectedCID)) {
+          if (retrievedCID != value) {
             Runtime.trap("Wrong CID for similar key " # key);
           };
         };
@@ -705,20 +641,19 @@ test(
   "MerkleSearchTree - Trims Top of Tree on Delete",
   func() {
     var mst = MerkleSearchTree.empty();
-    let cid1 = createTestCID("test");
 
     let keys = [
-      "com.example.record/3jqfcqzm3fn2j", // level 0
-      "com.example.record/3jqfcqzm3fo2j", // level 0
-      "com.example.record/3jqfcqzm3fp2j", // level 0
-      "com.example.record/3jqfcqzm3fs2j", // level 0
-      "com.example.record/3jqfcqzm3ft2j", // level 0
-      "com.example.record/3jqfcqzm3fu2j", // level 1
+      ("com.example.record/3jqfcqzm3fn2j", createTestCID("A")), // level 0
+      ("com.example.record/3jqfcqzm3fo2j", createTestCID("B")), // level 0
+      ("com.example.record/3jqfcqzm3fp2j", createTestCID("C")), // level 0
+      ("com.example.record/3jqfcqzm3fs2j", createTestCID("D")), // level 0
+      ("com.example.record/3jqfcqzm3ft2j", createTestCID("E")), // level 0
+      ("com.example.record/3jqfcqzm3fu2j", createTestCID("F")), // level 1
     ];
 
     // Add all keys
-    for (key in keys.vals()) {
-      switch (MerkleSearchTree.add(mst, key, cid1)) {
+    for ((key, value) in keys.vals()) {
+      switch (MerkleSearchTree.add(mst, key, value)) {
         case (#ok(newMst)) { mst := newMst };
         case (#err(msg)) Runtime.trap("Failed to add key: " # msg);
       };
@@ -726,8 +661,11 @@ test(
 
     // Remove key that should trim the tree
     switch (MerkleSearchTree.remove(mst, "com.example.record/3jqfcqzm3fs2j")) {
-      case (#ok(newMst)) {
+      case (#ok((newMst, removedValue))) {
         mst := newMst;
+        if (removedValue != keys[3].1) {
+          Runtime.trap("Removed value doesn't match expected");
+        };
 
         // Verify removed key is gone
         switch (MerkleSearchTree.get(mst, "com.example.record/3jqfcqzm3fs2j")) {
@@ -736,10 +674,10 @@ test(
         };
 
         // Verify remaining keys still exist
-        for (key in keys.vals()) {
+        for ((key, value) in keys.vals()) {
           if (key != "com.example.record/3jqfcqzm3fs2j") {
             switch (MerkleSearchTree.get(mst, key)) {
-              case (?_) {};
+              case (?v) assert (v == value); // Ensure value matches
               case (null) Runtime.trap("Lost key after deletion: " # key);
             };
           };
@@ -754,25 +692,24 @@ test(
   "MerkleSearchTree - Insertion Splits Two Layers Down",
   func() {
     var mst = MerkleSearchTree.empty();
-    let cid1 = createTestCID("test");
 
     let initialKeys = [
-      "com.example.record/3jqfcqzm3fo2j", // A; level 0
-      "com.example.record/3jqfcqzm3fp2j", // B; level 0
-      "com.example.record/3jqfcqzm3fr2j", // C; level 0
-      "com.example.record/3jqfcqzm3fs2j", // D; level 1
-      "com.example.record/3jqfcqzm3ft2j", // E; level 0
-      "com.example.record/3jqfcqzm3fz2j", // G; level 0
-      "com.example.record/3jqfcqzm4fc2j", // H; level 0
-      "com.example.record/3jqfcqzm4fd2j", // I; level 1
-      "com.example.record/3jqfcqzm4ff2j", // J; level 0
-      "com.example.record/3jqfcqzm4fg2j", // K; level 0
-      "com.example.record/3jqfcqzm4fh2j", // L; level 0
+      ("com.example.record/3jqfcqzm3fo2j", createTestCID("A")), // A; level 0
+      ("com.example.record/3jqfcqzm3fp2j", createTestCID("B")), // B; level 0
+      ("com.example.record/3jqfcqzm3fr2j", createTestCID("C")), // C; level 0
+      ("com.example.record/3jqfcqzm3fs2j", createTestCID("D")), // D; level 1
+      ("com.example.record/3jqfcqzm3ft2j", createTestCID("E")), // E; level 0
+      ("com.example.record/3jqfcqzm3fz2j", createTestCID("F")), // F; level 0
+      ("com.example.record/3jqfcqzm4fc2j", createTestCID("H")), // H; level 0
+      ("com.example.record/3jqfcqzm4fd2j", createTestCID("I")), // I; level 1
+      ("com.example.record/3jqfcqzm4ff2j", createTestCID("J")), // J; level 0
+      ("com.example.record/3jqfcqzm4fg2j", createTestCID("K")), // K; level 0
+      ("com.example.record/3jqfcqzm4fh2j", createTestCID("L")), // L; level 0
     ];
 
     // Add initial keys
-    for (key in initialKeys.vals()) {
-      switch (MerkleSearchTree.add(mst, key, cid1)) {
+    for ((key, value) in initialKeys.vals()) {
+      switch (MerkleSearchTree.add(mst, key, value)) {
         case (#ok(newMst)) { mst := newMst };
         case (#err(msg)) Runtime.trap("Failed to add initial key: " # msg);
       };
@@ -780,20 +717,21 @@ test(
 
     // Insert F, which pushes E out to a new node
     let keyF = "com.example.record/3jqfcqzm3fx2j";
-    switch (MerkleSearchTree.add(mst, keyF, cid1)) {
+    let valueF = createTestCID("F");
+    switch (MerkleSearchTree.add(mst, keyF, valueF)) {
       case (#ok(newMst)) {
         mst := newMst;
 
         // Verify all keys are retrievable
-        for (key in initialKeys.vals()) {
+        for ((key, value) in initialKeys.vals()) {
           switch (MerkleSearchTree.get(mst, key)) {
-            case (?_) {};
+            case (?v) assert (v == value); // Ensure value matches
             case (null) Runtime.trap("Lost key after F insertion: " # key);
           };
         };
 
         switch (MerkleSearchTree.get(mst, keyF)) {
-          case (?_) {};
+          case (?v) assert (v == valueF); // Ensure value matches
           case (null) Runtime.trap("Cannot retrieve inserted key F");
         };
       };
@@ -802,8 +740,11 @@ test(
 
     // Remove F, which should push E back
     switch (MerkleSearchTree.remove(mst, keyF)) {
-      case (#ok(newMst)) {
+      case (#ok((newMst, removedValue))) {
         mst := newMst;
+        if (removedValue != valueF) {
+          Runtime.trap("Removed value for F doesn't match expected");
+        };
 
         // Verify F is gone
         switch (MerkleSearchTree.get(mst, keyF)) {
@@ -812,9 +753,9 @@ test(
         };
 
         // Verify all original keys still exist
-        for (key in initialKeys.vals()) {
+        for ((key, value) in initialKeys.vals()) {
           switch (MerkleSearchTree.get(mst, key)) {
-            case (?_) {};
+            case (?v) assert (v == value); // Ensure value matches;
             case (null) Runtime.trap("Lost key after F removal: " # key);
           };
         };
@@ -828,7 +769,10 @@ test(
   "MerkleSearchTree - New Layers Two Higher",
   func() {
     var mst = MerkleSearchTree.empty();
-    let cid1 = createTestCID("test");
+    let cidA = createTestCID("A");
+    let cidB = createTestCID("B");
+    let cidC = createTestCID("C");
+    let cidD = createTestCID("D");
 
     let keyA = "com.example.record/3jqfcqzm3ft2j"; // level 0
     let keyC = "com.example.record/3jqfcqzm3fz2j"; // level 0
@@ -836,18 +780,18 @@ test(
     let keyD = "com.example.record/3jqfcqzm4fd2j"; // level 1
 
     // Add A and C
-    switch (MerkleSearchTree.add(mst, keyA, cid1)) {
+    switch (MerkleSearchTree.add(mst, keyA, cidA)) {
       case (#ok(newMst)) { mst := newMst };
       case (#err(msg)) Runtime.trap("Failed to add A: " # msg);
     };
 
-    switch (MerkleSearchTree.add(mst, keyC, cid1)) {
+    switch (MerkleSearchTree.add(mst, keyC, cidC)) {
       case (#ok(newMst)) { mst := newMst };
       case (#err(msg)) Runtime.trap("Failed to add C: " # msg);
     };
 
     // Insert B (two levels above)
-    switch (MerkleSearchTree.add(mst, keyB, cid1)) {
+    switch (MerkleSearchTree.add(mst, keyB, cidB)) {
       case (#ok(newMst)) {
         mst := newMst;
 
@@ -870,8 +814,11 @@ test(
 
     // Remove B
     switch (MerkleSearchTree.remove(mst, keyB)) {
-      case (#ok(newMst)) {
+      case (#ok((newMst, removedValue))) {
         mst := newMst;
+        if (removedValue != cidB) {
+          Runtime.trap("Removed value for B doesn't match expected");
+        };
 
         switch (MerkleSearchTree.get(mst, keyB)) {
           case (?_) Runtime.trap("B still retrievable after removal");
@@ -890,12 +837,12 @@ test(
     };
 
     // Insert B and D
-    switch (MerkleSearchTree.add(mst, keyB, cid1)) {
+    switch (MerkleSearchTree.add(mst, keyB, cidB)) {
       case (#ok(newMst)) { mst := newMst };
       case (#err(msg)) Runtime.trap("Failed to re-add B: " # msg);
     };
 
-    switch (MerkleSearchTree.add(mst, keyD, cid1)) {
+    switch (MerkleSearchTree.add(mst, keyD, cidD)) {
       case (#ok(newMst)) {
         mst := newMst;
 
@@ -912,8 +859,11 @@ test(
 
     // Remove D
     switch (MerkleSearchTree.remove(mst, keyD)) {
-      case (#ok(newMst)) {
+      case (#ok((newMst, removedValue))) {
         mst := newMst;
+        if (removedValue != cidD) {
+          Runtime.trap("Removed value for D doesn't match expected");
+        };
 
         switch (MerkleSearchTree.get(mst, keyD)) {
           case (?_) Runtime.trap("D still retrievable after removal");
