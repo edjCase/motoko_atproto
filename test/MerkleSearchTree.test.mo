@@ -225,39 +225,6 @@ test(
 );
 
 test(
-  "MerkleSearchTree - Debug Tree Structure",
-  func() {
-    var mst = MerkleSearchTree.empty();
-
-    // Test with the same keys as the failing test
-    let key1 = "test/a";
-    let key2 = "test/b";
-
-    Debug.print("Testing keys: '" # key1 # "' and '" # key2 # "'");
-
-    // Add first key and examine structure
-    let value1CID = createTestCID(key1);
-    switch (MerkleSearchTree.add(mst, key1, value1CID)) {
-      case (#ok(newMst)) {
-        mst := newMst;
-        Debug.print("After adding first key, successfully added to MST");
-      };
-      case (#err(msg)) Runtime.trap("Failed to add first key: " # msg);
-    };
-
-    // Add second key and examine structure
-    let value2CID = createTestCID(key2);
-    switch (MerkleSearchTree.add(mst, key2, value2CID)) {
-      case (#ok(newMst)) {
-        mst := newMst;
-        Debug.print("After adding second key, successfully added to MST");
-      };
-      case (#err(msg)) Runtime.trap("Failed to add second key: " # msg);
-    };
-  },
-);
-
-test(
   "MerkleSearchTree - Deterministic Construction",
   func() {
     var mst = MerkleSearchTree.empty();
@@ -932,6 +899,56 @@ test(
         };
       };
       case (#err(msg)) Runtime.trap("Failed to remove key: " # msg);
+    };
+  },
+);
+
+test(
+  "MerkleSearchTree - Duplicate entry add fails",
+  func() {
+    var mst = MerkleSearchTree.empty();
+
+    let path = "app.bsky.feed/aaaaaa";
+    let cidA = createTestCID("A");
+
+    switch (MerkleSearchTree.add(mst, path, cidA)) {
+      case (#ok(newMst)) { mst := newMst };
+      case (#err(msg)) Runtime.trap("Failed to add key: " # msg);
+    };
+
+    switch (MerkleSearchTree.add(mst, path, cidA)) {
+      case (#ok(newMst)) Runtime.trap("Duplicate entry added successfully");
+      case (#err(msg)) { /* Expected failure */ };
+    };
+  },
+);
+
+test(
+  "MerkleSearchTree - Duplicate entry put adds and overrides",
+  func() {
+    var mst = MerkleSearchTree.empty();
+
+    let path = "app.bsky.feed/aaaaaa";
+
+    mst := switch (MerkleSearchTree.put(mst, path, createTestCID("A"))) {
+      case (#ok(newMst)) newMst;
+      case (#err(msg)) Runtime.trap("Failed to add key: " # msg);
+    };
+
+    let overrideValue = createTestCID("B");
+
+    mst := switch (MerkleSearchTree.put(mst, path, overrideValue)) {
+      case (#ok(newMst)) newMst;
+      case (#err(msg)) Runtime.trap("Failed to add key: " # msg);
+    };
+
+    switch (MerkleSearchTree.get(mst, path)) {
+      case (?cid) {
+        if (cid != overrideValue) {
+          Runtime.trap("Put did not override existing value");
+        };
+      };
+      case (null) Runtime.trap("Failed to retrieve key after put");
     };
   },
 );

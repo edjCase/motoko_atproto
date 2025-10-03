@@ -87,7 +87,6 @@ module {
     addOrUpdateInternal(mst, key, value, false);
   };
 
-  // Remove a key
   public func remove(
     mst : MerkleSearchTree,
     key : Text,
@@ -99,7 +98,6 @@ module {
     removeRecursive(mst, node, mst.root, keyBytes, calculateDepth(keyBytes));
   };
 
-  // Batch add multiple key-value pairs
   public func addMany(
     mst : MerkleSearchTree,
     items : Iter.Iter<(Text, CID.CID)>,
@@ -245,8 +243,8 @@ module {
     let cidText = CID.toText(nodeCID);
 
     let keyRange = if (node.entries.size() > 0) {
-      let firstKey = reconstructKey(node.entries, 0);
-      let lastKey = reconstructKey(node.entries, node.entries.size() - 1);
+      let firstKey = reconstructKey(node.entries, 0, null);
+      let lastKey = reconstructKey(node.entries, node.entries.size() - 1, null);
       switch (keyToText(firstKey), keyToText(lastKey)) {
         case (?first, ?last) " range:" # first # "-" # last;
         case _ "";
@@ -365,34 +363,45 @@ module {
   ) : Result.Result<(), Text> {
 
     // Validate all keys are properly formatted
-    for (i in Nat.range(0, Nat.max(0, node.entries.size()))) {
-      let key = reconstructKey(node.entries, i);
+    if (node.entries.size() == 0) {
+      // Empty node is valid
+      return #ok;
+    };
+    let firstEntry = node.entries[0];
+    if (firstEntry.prefixLength != 0) {
+      return #err("First entry in node must have prefixLength 0");
+    };
+    var key = firstEntry.keySuffix;
+    let depth = calculateDepth(key);
+    switch (parentDepth) {
+      case (?pd) {
+        if (depth >= pd) {
+          return #err("Child depth must be less than parent depth");
+        };
+      };
+      case null {};
+    };
+    let fullKeys = DynamicArray.DynamicArray<[Nat8]>(node.entries.size());
+    fullKeys.add(key);
+    var prevKey = key;
+    for (i in Nat.range(1, Nat.max(2, node.entries.size()))) {
+      key := reconstructKey(node.entries, i, ?prevKey);
+      fullKeys.add(key);
 
       let depth = calculateDepth(key);
 
       // Check depth consistency - all keys in node should have same depth
-      if (i == 0) {
-        switch (parentDepth) {
-          case (?pd) {
-            if (depth >= pd) {
-              return #err("Child depth must be less than parent depth");
-            };
-          };
-          case null {};
-        };
-      } else {
-        let prevKey = reconstructKey(node.entries, i - 1);
-        let prevDepth = calculateDepth(prevKey);
-        if (depth != prevDepth) {
-          return #err("All entries in a node must have same depth");
-        };
+      let prevDepth = calculateDepth(prevKey);
+      if (depth != prevDepth) {
+        return #err("All entries in a node must have same depth");
       };
+      prevKey := key;
     };
 
     // Validate entries are sorted
     for (i in Nat.range(1, node.entries.size())) {
-      let prevKey = reconstructKey(node.entries, i - 1);
-      let currKey = reconstructKey(node.entries, i);
+      let prevKey = fullKeys.get(i - 1);
+      let currKey = fullKeys.get(i);
 
       if (compareKeys(prevKey, currKey) != #less) {
         return #err("Entries must be sorted");
@@ -401,7 +410,7 @@ module {
 
     // Get node depth for child validation
     let nodeDepth = if (node.entries.size() > 0) {
-      ?calculateDepth(reconstructKey(node.entries, 0));
+      ?calculateDepth(fullKeys.get(0));
     } else {
       null;
     };
@@ -473,14 +482,26 @@ module {
     // Find position for new key
     var insertPos = 0;
 
+    var prevKey : ?[Nat8] = null;
     label f for (i in Nat.range(0, Nat.max(0, node.entries.size()))) {
-      let entryKey = reconstructKey(node.entries, i);
+      let entryKey = reconstructKey(node.entries, i, prevKey);
       let entryDepth = calculateDepth(entryKey);
 
       switch (compareKeys(key, entryKey)) {
         case (#equal) {
-          if (addOnly and keyDepth == entryDepth) {
-            return #err("Key already exists");
+          if (keyDepth == entryDepth) {
+            if (addOnly) return #err("Key already exists");
+            // Update existing entry
+            let entries = Array.tabulate<MerkleNode.TreeEntry>(
+              node.entries.size(),
+              func(j) = if (j == i) {
+                { node.entries[j] with valueCID = value };
+              } else {
+                node.entries[j];
+              },
+            );
+            let updatedNode = { node with entries };
+            return #ok(replaceNode(mst, nodeCID, updatedNode));
           };
           insertPos := i;
           break f;
@@ -491,6 +512,7 @@ module {
         };
         case (#greater) insertPos := i + 1;
       };
+      prevKey := ?entryKey;
     };
 
     // Insert at end or in appropriate position
@@ -509,7 +531,7 @@ module {
   ) : Result.Result<MerkleSearchTree, Text> {
     // Determine if key belongs at this level
     let nodeDepth = if (node.entries.size() > 0) {
-      calculateDepth(reconstructKey(node.entries, 0));
+      calculateDepth(reconstructKey(node.entries, 0, null));
     } else {
       keyDepth // Empty node takes first key's depth
     };
@@ -667,7 +689,7 @@ module {
 
     while (left < right) {
       let mid = (left + right) / 2;
-      let entryKey = reconstructKey(node.entries, mid);
+      let entryKey = reconstructKey(node.entries, mid, null); // TODO prevKeyCache?
       let entryDepth = calculateDepth(entryKey);
 
       switch (compareKeys(keyBytes, entryKey)) {
@@ -725,9 +747,12 @@ module {
     keyDepth : Nat,
   ) : Result.Result<(MerkleSearchTree, CID.CID), Text> {
 
+    let fullKeys = DynamicArray.DynamicArray<[Nat8]>(node.entries.size());
     // Find the key in current node
+    var prevKey = null;
     for (i in Nat.range(0, Nat.max(1, node.entries.size()))) {
-      let entryKey = reconstructKey(node.entries, i);
+      let entryKey = reconstructKey(node.entries, i, prevKey);
+      fullKeys.add(entryKey);
       let entryDepth = calculateDepth(entryKey);
 
       if (compareKeys(keyBytes, entryKey) == #equal and keyDepth == entryDepth) {
@@ -737,19 +762,21 @@ module {
           case (null) (); // Removed last entry, nothing to adjust
           case (?nextEntry) {
             // Adjust next entry's prefixLength and keySuffix
-            let nextKey = reconstructKey(node.entries, i + 1);
-            let (newSuffix, newPrefixLength) = if (i > 0) {
-              // If there's a previous entry, adjust the next entry's suffix
-              let prevKey = reconstructKey(node.entries, i - 1);
-              let prefix = findCommonPrefix(prevKey, nextKey);
+            let nextKey = reconstructKey(node.entries, i + 1, ?entryKey);
+            let (newSuffix, newPrefixLength) = switch (prevKey) {
+              case (?prevKey) {
+                // If there's a previous entry, adjust the next entry's suffix
+                let prefix = findCommonPrefix(prevKey, nextKey);
 
-              // Extract suffix after common prefix
-              let suffix = Array.sliceToArray(nextKey, prefix.size(), nextKey.size());
-              (suffix, prefix.size());
-            } else {
-              // If there's no previous entry, then should be the full key with no prefixLength
-              let newSuffix = nextKey;
-              (newSuffix, 0);
+                // Extract suffix after common prefix
+                let suffix = Array.sliceToArray(nextKey, prefix.size(), nextKey.size());
+                (suffix, prefix.size());
+              };
+              case (null) {
+                // If there's no previous entry, then should be the full key with no prefixLength
+                let newSuffix = nextKey;
+                (newSuffix, 0);
+              };
             };
             entries.put(i, { nextEntry with keySuffix = newSuffix; prefixLength = newPrefixLength });
           };
@@ -770,7 +797,7 @@ module {
     // Find appropriate subtree
     var searchPos = 0;
     label searchLoop for (i in Nat.range(0, Nat.max(1, node.entries.size()))) {
-      let entryKey = reconstructKey(node.entries, i);
+      let entryKey = fullKeys.get(i);
       if (compareKeys(keyBytes, entryKey) == #less) {
         searchPos := i;
         break searchLoop;
@@ -861,9 +888,10 @@ module {
     };
 
     // Process entries
+    var prevKey : ?[Nat8] = null;
     for (i in Nat.range(0, Nat.max(0, node.entries.size()))) {
       let entry = node.entries[i];
-      let key = reconstructKey(node.entries, i);
+      let key = reconstructKey(node.entries, i, prevKey);
       callback(key, entry.valueCID);
 
       // Process right subtree
@@ -876,6 +904,7 @@ module {
         };
         case null {};
       };
+      prevKey := ?key;
     };
   };
 
@@ -967,6 +996,7 @@ module {
   private func reconstructKey(
     entries : [MerkleNode.TreeEntry],
     index : Nat,
+    prevKeyCache : ?[Nat8],
   ) : [Nat8] {
     if (index >= entries.size()) return [];
 
@@ -975,26 +1005,33 @@ module {
     };
 
     let entry = entries[index];
-    let prevKey = reconstructKey(entries, index - 1);
+    let prevKey = switch (prevKeyCache) {
+      case (?k) k;
+      case (null) reconstructKey(entries, index - 1, null);
+    };
 
     if (entry.prefixLength == 0) {
       return entry.keySuffix;
     };
 
     if (entry.prefixLength > prevKey.size()) {
-      // Defensive: use what we can
-      return Array.concat(prevKey, entry.keySuffix);
+      Runtime.trap("Invalid state: prefixLength exceeds previous key length. Expected at most " # Nat.toText(prevKey.size()) # " but got " # Nat.toText(entry.prefixLength));
     };
 
-    let prefix = Array.tabulate<Nat8>(
-      entry.prefixLength,
-      func(i) = prevKey[i],
-    );
+    let fullKey = DynamicArray.DynamicArray<Nat8>(entry.prefixLength + entry.keySuffix.size());
+    for (b in prevKey.vals() |> Iter.take(_, entry.prefixLength)) {
+      fullKey.add(b);
+    };
+    for (b in entry.keySuffix.vals()) {
+      fullKey.add(b);
+    };
 
-    Array.concat(prefix, entry.keySuffix);
+    DynamicArray.toArray(fullKey);
   };
 
-  private func compressEntries(entries : Iter.Iter<MerkleNode.TreeEntry>) : [MerkleNode.TreeEntry] {
+  private func compressEntries(
+    entries : Iter.Iter<MerkleNode.TreeEntry>
+  ) : [MerkleNode.TreeEntry] {
     let ?firstEntry = entries.next() else return [];
 
     let compressed = List.empty<MerkleNode.TreeEntry>();

@@ -55,7 +55,7 @@ module {
       "size",
     ]);
 
-    bench.cols(["1", "10"]);
+    bench.cols(["1", "10", "100"]);
 
     bench.runner(
       func(row, col) {

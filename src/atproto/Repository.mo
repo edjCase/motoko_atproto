@@ -416,7 +416,7 @@ module {
     // Incase the rkey contains slashes, join the rest back
     label l loop {
       let ?part = parts.next() else break l;
-      recordKey #= part;
+      recordKey #= "/" # part;
     };
     ?{
       collection = collection;
