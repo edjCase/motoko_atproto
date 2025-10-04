@@ -68,7 +68,7 @@ module {
   ) : ?CID.CID {
     let node = getRootNode(mst);
     let keyBytes = keyToBytes(key);
-    getRecursive(mst, node, keyBytes, calculateDepth(keyBytes));
+    getRecursive(mst, node, keyBytes);
   };
 
   public func add(
@@ -724,25 +724,14 @@ module {
       let entryKey = reconstructKey(node.entries, mid, null); // TODO prevKeyCache?
 
       switch (compareKeys(keyBytes, entryKey)) {
-        case (#equal) {
-          let entryDepth = calculateDepth(entryKey);
-          // Found exact match - but check depth
-          if (keyDepth == entryDepth) {
-            return ?node.entries[mid].valueCID;
-          } else if (keyDepth < entryDepth) {
-            // Key with lower depth would be in subtree
-            return searchSubtree(mst, node, mid, keyBytes, keyDepth);
-          } else {
-            return null // Higher depth key not in tree
-          };
-        };
+        case (#equal) return ?node.entries[mid].valueCID;
         case (#less) right := mid;
         case (#greater) left := mid + 1;
       };
     };
 
     // Not found at this level, check appropriate subtree
-    searchSubtree(mst, node, left, keyBytes, keyDepth);
+    searchSubtree(mst, node, left, keyBytes);
   };
 
   private func searchSubtree(
@@ -750,7 +739,6 @@ module {
     node : MerkleNode.Node,
     index : Nat,
     key : [Nat8],
-    keyDepth : Nat,
   ) : ?CID.CID {
     let subtreeCID = if (index == 0) {
       node.leftSubtreeCID;
@@ -763,7 +751,7 @@ module {
     switch (subtreeCID) {
       case (?cid) {
         switch (getNode(mst, cid)) {
-          case (?subtree) getRecursive(mst, subtree, key, keyDepth);
+          case (?subtree) getRecursive(mst, subtree, key);
           case null null;
         };
       };
