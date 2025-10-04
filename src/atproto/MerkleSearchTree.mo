@@ -485,10 +485,10 @@ module {
     var prevKey : ?[Nat8] = null;
     label f for (i in Nat.range(0, Nat.max(0, node.entries.size()))) {
       let entryKey = reconstructKey(node.entries, i, prevKey);
-      let entryDepth = calculateDepth(entryKey);
 
       switch (compareKeys(key, entryKey)) {
         case (#equal) {
+          let entryDepth = calculateDepth(entryKey);
           if (keyDepth == entryDepth) {
             if (addOnly) return #err("Key already exists");
             // Update existing entry
@@ -538,19 +538,10 @@ module {
 
     if (keyDepth == nodeDepth) {
       // Insert at this level
-      let newEntry : MerkleNode.TreeEntry = {
-        prefixLength = 0; // Will be recalculated
-        keySuffix = key;
-        valueCID = value;
-        subtreeCID = null;
-      };
-
-      let entries = DynamicArray.fromArray<MerkleNode.TreeEntry>(node.entries);
-      entries.insert(pos, newEntry);
-
+      let newEntries = insertAndCompress(node.entries, pos, key, value);
       let updatedNode = {
         node with
-        entries = compressEntries(entries.vals())
+        entries = newEntries
       };
 
       #ok(replaceNode(mst, nodeCID, updatedNode));
@@ -634,23 +625,65 @@ module {
       // Higher depth key - needs to split existing structure
       // For simplicity, add at this level for now
       // A full implementation would need proper splitting logic
-      let newEntry : MerkleNode.TreeEntry = {
-        prefixLength = 0;
-        keySuffix = key;
-        valueCID = value;
-        subtreeCID = null;
-      };
 
-      let entries = DynamicArray.fromArray<MerkleNode.TreeEntry>(node.entries);
-      entries.insert(pos, newEntry);
+      let newEntries = insertAndCompress(node.entries, pos, key, value);
 
       let updatedNode = {
         node with
-        entries = compressEntries(entries.vals())
+        entries = newEntries
       };
 
       #ok(replaceNode(mst, nodeCID, updatedNode));
     };
+  };
+
+  private func insertAndCompress(
+    entries : [MerkleNode.TreeEntry],
+    pos : Nat,
+    key : [Nat8],
+    value : CID.CID,
+  ) : [MerkleNode.TreeEntry] {
+
+    let prevFullKey = if (pos > 0) {
+      ?reconstructKey(entries, pos - 1, null);
+    } else null;
+
+    let nextFullKey = if (pos < entries.size()) {
+      ?reconstructKey(entries, pos, prevFullKey);
+    } else null;
+
+    let dynamicEntries = DynamicArray.fromArray<MerkleNode.TreeEntry>(entries);
+
+    let newEntry : MerkleNode.TreeEntry = {
+      prefixLength = 0;
+      keySuffix = key;
+      valueCID = value;
+      subtreeCID = null;
+    };
+    dynamicEntries.insert(pos, newEntry);
+
+    // Compress new entry relative to previous
+    switch (prevFullKey) {
+      case (?prevKey) {
+        let prefixLen = findCommonPrefixLength(prevKey, key);
+        let suffix = Array.sliceToArray(key, prefixLen, key.size());
+        dynamicEntries.put(pos, { newEntry with prefixLength = prefixLen; keySuffix = suffix });
+      };
+      case (null) {};
+    };
+
+    // Recompress next entry relative to new key
+    switch (nextFullKey) {
+      case (?nextKey) {
+        let nextEntry = dynamicEntries.get(pos + 1);
+        let prefixLen = findCommonPrefixLength(key, nextKey);
+        let suffix = Array.sliceToArray(nextKey, prefixLen, nextKey.size());
+        dynamicEntries.put(pos + 1, { nextEntry with prefixLength = prefixLen; keySuffix = suffix });
+      };
+      case (null) {};
+    };
+
+    DynamicArray.toArray(dynamicEntries);
   };
 
   private func replaceNode(
@@ -681,7 +714,6 @@ module {
     mst : MerkleSearchTree,
     node : MerkleNode.Node,
     keyBytes : [Nat8],
-    keyDepth : Nat,
   ) : ?CID.CID {
     // Binary search through entries at this level
     var left = 0;
@@ -690,10 +722,10 @@ module {
     while (left < right) {
       let mid = (left + right) / 2;
       let entryKey = reconstructKey(node.entries, mid, null); // TODO prevKeyCache?
-      let entryDepth = calculateDepth(entryKey);
 
       switch (compareKeys(keyBytes, entryKey)) {
         case (#equal) {
+          let entryDepth = calculateDepth(entryKey);
           // Found exact match - but check depth
           if (keyDepth == entryDepth) {
             return ?node.entries[mid].valueCID;
@@ -766,11 +798,11 @@ module {
             let (newSuffix, newPrefixLength) = switch (prevKey) {
               case (?prevKey) {
                 // If there's a previous entry, adjust the next entry's suffix
-                let prefix = findCommonPrefix(prevKey, nextKey);
+                let prefixLength = findCommonPrefixLength(prevKey, nextKey);
 
                 // Extract suffix after common prefix
-                let suffix = Array.sliceToArray(nextKey, prefix.size(), nextKey.size());
-                (suffix, prefix.size());
+                let suffix = Array.sliceToArray(nextKey, prefixLength, nextKey.size());
+                (suffix, prefixLength);
               };
               case (null) {
                 // If there's no previous entry, then should be the full key with no prefixLength
@@ -782,10 +814,10 @@ module {
           };
         };
 
-        let newEntries = DynamicArray.toArray(entries);
+        compressEntries(entries);
         let updatedNode = {
           node with
-          entries = if (newEntries.size() > 0) compressEntries(newEntries.vals()) else []
+          entries = DynamicArray.toArray(entries)
         };
 
         let newMst = replaceNode(mst, nodeCID, updatedNode);
@@ -1030,28 +1062,21 @@ module {
   };
 
   private func compressEntries(
-    entries : Iter.Iter<MerkleNode.TreeEntry>
-  ) : [MerkleNode.TreeEntry] {
-    let ?firstEntry = entries.next() else return [];
+    entries : DynamicArray.DynamicArray<MerkleNode.TreeEntry>
+  ) {
+    if (entries.size() == 0) return;
 
-    let compressed = List.empty<MerkleNode.TreeEntry>();
-
+    let firstEntry = entries.get(0);
     // First entry always has prefixLength = 0
     if (firstEntry.prefixLength != 0) {
       Runtime.trap("Invalid state. First entry must have prefixLength of 0");
     };
-    List.add(
-      compressed,
-      {
-        firstEntry with
-        keySuffix = firstEntry.keySuffix;
-      },
-    );
 
     var prevKey = firstEntry.keySuffix;
 
     // Compress subsequent entries
-    for (entry in entries) {
+    for (i in Nat.range(1, entries.size())) {
+      let entry = entries.get(i);
       // Reconstruct the full key from the entry
       let fullKey = if (entry.prefixLength == 0) {
         entry.keySuffix;
@@ -1064,43 +1089,27 @@ module {
       };
 
       // Find common prefix length with previous key
-      let prefix = findCommonPrefix(prevKey, fullKey);
+      let prefixLength = findCommonPrefixLength(prevKey, fullKey);
 
-      // Extract suffix after common prefix
-      let suffix = Array.sliceToArray(fullKey, prefix.size(), fullKey.size());
-
-      List.add(
-        compressed,
-        {
-          entry with
-          prefixLength = prefix.size();
-          keySuffix = suffix;
-        },
-      );
-
+      if (prefixLength != entry.prefixLength) {
+        // Extract suffix after common prefix
+        let suffix = Array.sliceToArray(fullKey, prefixLength, fullKey.size());
+        // Update entry in place
+        entries.put(i, { entry with prefixLength = prefixLength; keySuffix = suffix });
+      };
       prevKey := fullKey;
     };
-
-    List.toArray(compressed);
   };
 
-  private func findCommonPrefix(a : [Nat8], b : [Nat8]) : [Nat8] {
-    let aChars = a.vals();
-    let bChars = b.vals();
-    var result = DynamicArray.DynamicArray<Nat8>(Nat.min(a.size(), b.size()));
-    label l loop {
-      switch (aChars.next(), bChars.next()) {
-        case (?ac, ?bc) {
-          if (ac == bc) {
-            result.add(ac);
-          } else {
-            break l;
-          };
-        };
-        case _ { break l };
-      };
+  private func findCommonPrefixLength(a : [Nat8], b : [Nat8]) : Nat {
+    let minLen = Nat.min(a.size(), b.size());
+    var i = 0;
+
+    while (i < minLen and a[i] == b[i]) {
+      i += 1;
     };
-    DynamicArray.toArray(result);
+
+    i;
   };
 
   private func parseMSTNode(value : DagCbor.Value) : Result.Result<MerkleNode.Node, Text> {

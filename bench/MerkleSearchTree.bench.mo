@@ -56,6 +56,7 @@ module {
     ]);
 
     bench.cols(["1", "10", "100"]);
+    var mst = MerkleSearchTree.empty();
 
     bench.runner(
       func(row, col) {
@@ -63,7 +64,6 @@ module {
 
         let operation = switch (row) {
           case ("add_single") func(i : Nat) : Result.Result<Any, Text> {
-            var mst = MerkleSearchTree.empty();
             let key = testKeys[i % testKeys.size()];
             let cid = if (i % 2 == 0) testCID1 else testCID2;
             switch (MerkleSearchTree.add(mst, key, cid)) {
