@@ -95,7 +95,7 @@ module {
     if (keyBytes.size() == 0) return #err("Key cannot be empty");
 
     let node = getRootNode(mst);
-    removeRecursive(mst, node, mst.root, keyBytes, calculateDepth(keyBytes));
+    removeRecursive(mst, node, mst.root, keyBytes);
   };
 
   public func addMany(
@@ -465,7 +465,6 @@ module {
       mst.root,
       keyBytes,
       value,
-      calculateDepth(keyBytes),
       addOnly,
     );
   };
@@ -476,7 +475,6 @@ module {
     nodeCID : CID.CID,
     key : [Nat8],
     value : CID.CID,
-    keyDepth : Nat,
     addOnly : Bool,
   ) : Result.Result<MerkleSearchTree, Text> {
     // Find position for new key
@@ -488,27 +486,22 @@ module {
 
       switch (compareKeys(key, entryKey)) {
         case (#equal) {
-          let entryDepth = calculateDepth(entryKey);
-          if (keyDepth == entryDepth) {
-            if (addOnly) return #err("Key already exists");
-            // Update existing entry
-            let entries = Array.tabulate<MerkleNode.TreeEntry>(
-              node.entries.size(),
-              func(j) = if (j == i) {
-                { node.entries[j] with valueCID = value };
-              } else {
-                node.entries[j];
-              },
-            );
-            let updatedNode = { node with entries };
-            return #ok(replaceNode(mst, nodeCID, updatedNode));
-          };
-          insertPos := i;
-          break f;
+          if (addOnly) return #err("Key already exists");
+          // Update existing entry
+          let entries = Array.tabulate<MerkleNode.TreeEntry>(
+            node.entries.size(),
+            func(j) = if (j == i) {
+              { node.entries[j] with valueCID = value };
+            } else {
+              node.entries[j];
+            },
+          );
+          let updatedNode = { node with entries };
+          return #ok(replaceNode(mst, nodeCID, updatedNode));
         };
         case (#less) {
           insertPos := i;
-          return insertAtPosition(mst, node, nodeCID, insertPos, key, value, keyDepth, addOnly);
+          return insertAtPosition(mst, node, nodeCID, insertPos, key, value, addOnly);
         };
         case (#greater) insertPos := i + 1;
       };
@@ -516,7 +509,7 @@ module {
     };
 
     // Insert at end or in appropriate position
-    insertAtPosition(mst, node, nodeCID, insertPos, key, value, keyDepth, addOnly);
+    insertAtPosition(mst, node, nodeCID, insertPos, key, value, addOnly);
   };
 
   private func insertAtPosition(
@@ -526,15 +519,12 @@ module {
     pos : Nat,
     key : [Nat8],
     value : CID.CID,
-    keyDepth : Nat,
     addOnly : Bool,
   ) : Result.Result<MerkleSearchTree, Text> {
     // Determine if key belongs at this level
-    let nodeDepth = if (node.entries.size() > 0) {
-      calculateDepth(reconstructKey(node.entries, 0, null));
-    } else {
-      keyDepth // Empty node takes first key's depth
-    };
+    let nodeDepth = calculateDepth(reconstructKey(node.entries, 0, null));
+
+    let keyDepth = calculateDepth(key);
 
     if (keyDepth == nodeDepth) {
       // Insert at this level
@@ -560,7 +550,7 @@ module {
         case (?cid) {
           // Recursively add to subtree
           let ?subtree = getNode(mst, cid) else return #err("Subtree not found");
-          switch (addRecursive(mst, subtree, cid, key, value, keyDepth, addOnly)) {
+          switch (addRecursive(mst, subtree, cid, key, value, addOnly)) {
             case (#ok(updatedMst)) {
               // updatedMst.root is now the updated subtree's CID
               let newSubtreeCID = updatedMst.root;
@@ -764,7 +754,6 @@ module {
     node : MerkleNode.Node,
     nodeCID : CID.CID,
     keyBytes : [Nat8],
-    keyDepth : Nat,
   ) : Result.Result<(MerkleSearchTree, CID.CID), Text> {
 
     let fullKeys = DynamicArray.DynamicArray<[Nat8]>(node.entries.size());
@@ -773,9 +762,8 @@ module {
     for (i in Nat.range(0, Nat.max(1, node.entries.size()))) {
       let entryKey = reconstructKey(node.entries, i, prevKey);
       fullKeys.add(entryKey);
-      let entryDepth = calculateDepth(entryKey);
 
-      if (compareKeys(keyBytes, entryKey) == #equal and keyDepth == entryDepth) {
+      if (compareKeys(keyBytes, entryKey) == #equal) {
         let entries = DynamicArray.fromArray<MerkleNode.TreeEntry>(node.entries);
         let removedEntry = entries.remove(i);
         switch (entries.getOpt(i)) {
@@ -837,7 +825,7 @@ module {
       case (?cid) {
         let ?subtree = getNode(mst, cid) else return #err("Subtree not found");
 
-        switch (removeRecursive(mst, subtree, cid, keyBytes, keyDepth)) {
+        switch (removeRecursive(mst, subtree, cid, keyBytes)) {
           case (#ok((updatedMst, removedValue))) {
             let newSubtreeNode = getRootNode(updatedMst);
 
@@ -909,7 +897,7 @@ module {
 
     // Process entries
     var prevKey : ?[Nat8] = null;
-    for (i in Nat.range(0, Nat.max(0, node.entries.size()))) {
+    for (i in Nat.range(0, Nat.max(1, node.entries.size()))) {
       let entry = node.entries[i];
       let key = reconstructKey(node.entries, i, prevKey);
       callback(key, entry.valueCID);
