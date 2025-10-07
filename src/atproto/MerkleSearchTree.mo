@@ -758,48 +758,50 @@ module {
 
     let fullKeys = DynamicArray.DynamicArray<[Nat8]>(node.entries.size());
     // Find the key in current node
-    var prevKey = null;
-    for (i in Nat.range(0, Nat.max(1, node.entries.size()))) {
-      let entryKey = reconstructKey(node.entries, i, prevKey);
+    var prevKeyOrNull : ?[Nat8] = null;
+    label f for (i in Nat.range(0, Nat.max(1, node.entries.size()))) {
+      let entryKey = reconstructKey(node.entries, i, prevKeyOrNull);
       fullKeys.add(entryKey);
 
-      if (compareKeys(keyBytes, entryKey) == #equal) {
-        let entries = DynamicArray.fromArray<MerkleNode.TreeEntry>(node.entries);
-        let removedEntry = entries.remove(i);
-        switch (entries.getOpt(i)) {
-          case (null) (); // Removed last entry, nothing to adjust
-          case (?nextEntry) {
-            // Adjust next entry's prefixLength and keySuffix
-            let nextKey = reconstructKey(node.entries, i + 1, ?entryKey);
-            let (newSuffix, newPrefixLength) = switch (prevKey) {
-              case (?prevKey) {
-                // If there's a previous entry, adjust the next entry's suffix
-                let prefixLength = findCommonPrefixLength(prevKey, nextKey);
-
-                // Extract suffix after common prefix
-                let suffix = Array.sliceToArray(nextKey, prefixLength, nextKey.size());
-                (suffix, prefixLength);
-              };
-              case (null) {
-                // If there's no previous entry, then should be the full key with no prefixLength
-                let newSuffix = nextKey;
-                (newSuffix, 0);
-              };
-            };
-            entries.put(i, { nextEntry with keySuffix = newSuffix; prefixLength = newPrefixLength });
-          };
-        };
-
-        compressEntries(entries);
-        let updatedNode = {
-          node with
-          entries = DynamicArray.toArray(entries)
-        };
-
-        let newMst = replaceNode(mst, nodeCID, updatedNode);
-
-        return #ok((newMst, removedEntry.valueCID));
+      if (compareKeys(entryKey, keyBytes) != #equal) {
+        prevKeyOrNull := ?entryKey;
+        continue f;
       };
+
+      let entries = DynamicArray.fromArray<MerkleNode.TreeEntry>(node.entries);
+      let removedEntry = entries.remove(i);
+      switch (entries.getOpt(i)) {
+        case (null) (); // Removed last entry, nothing to adjust
+        case (?nextEntry) {
+          // Adjust next entry's prefixLength and keySuffix
+          let nextKey = reconstructKey(node.entries, i + 1, ?entryKey);
+          let (newSuffix, newPrefixLength) = switch (prevKeyOrNull) {
+            case (?prevKey) {
+              // If there's a previous entry, adjust the next entry's suffix
+              let prefixLength = findCommonPrefixLength(prevKey, nextKey);
+
+              // Extract suffix after common prefix
+              let suffix = Array.sliceToArray(nextKey, prefixLength, nextKey.size());
+              (suffix, prefixLength);
+            };
+            case (null) {
+              // If there's no previous entry, then should be the full key with no prefixLength
+              let newSuffix = nextKey;
+              (newSuffix, 0);
+            };
+          };
+          entries.put(i, { nextEntry with keySuffix = newSuffix; prefixLength = newPrefixLength });
+        };
+      };
+
+      let updatedNode = {
+        node with
+        entries = DynamicArray.toArray(entries)
+      };
+
+      let newMst = replaceNode(mst, nodeCID, updatedNode);
+
+      return #ok((newMst, removedEntry.valueCID));
     };
 
     // Find appropriate subtree
@@ -1035,46 +1037,6 @@ module {
     };
 
     DynamicArray.toArray(fullKey);
-  };
-
-  private func compressEntries(
-    entries : DynamicArray.DynamicArray<MerkleNode.TreeEntry>
-  ) {
-    if (entries.size() == 0) return;
-
-    let firstEntry = entries.get(0);
-    // First entry always has prefixLength = 0
-    if (firstEntry.prefixLength != 0) {
-      Runtime.trap("Invalid state. First entry must have prefixLength of 0");
-    };
-
-    var prevKey = firstEntry.keySuffix;
-
-    // Compress subsequent entries
-    for (i in Nat.range(1, entries.size())) {
-      let entry = entries.get(i);
-      // Reconstruct the full key from the entry
-      let fullKey = if (entry.prefixLength == 0) {
-        entry.keySuffix;
-      } else {
-        let prefix = Array.tabulate<Nat8>(
-          Nat.min(entry.prefixLength, prevKey.size()),
-          func(i) = prevKey[i],
-        );
-        Array.concat(prefix, entry.keySuffix);
-      };
-
-      // Find common prefix length with previous key
-      let prefixLength = findCommonPrefixLength(prevKey, fullKey);
-
-      if (prefixLength != entry.prefixLength) {
-        // Extract suffix after common prefix
-        let suffix = Array.sliceToArray(fullKey, prefixLength, fullKey.size());
-        // Update entry in place
-        entries.put(i, { entry with prefixLength = prefixLength; keySuffix = suffix });
-      };
-      prevKey := fullKey;
-    };
   };
 
   private func findCommonPrefixLength(a : [Nat8], b : [Nat8]) : Nat {
