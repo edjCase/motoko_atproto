@@ -337,6 +337,8 @@ module {
         case (#err(e)) return #err("Failed to create record: " # e);
       };
 
+      setRepository(newRepository);
+
       #ok({
         cid = recordCID;
         commit = ?{

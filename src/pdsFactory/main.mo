@@ -6,6 +6,7 @@ import Result "mo:core@1/Result";
 import Error "mo:core@1/Error";
 import Principal "mo:core@1/Principal";
 import Iter "mo:core@1/Iter";
+import DateTime "mo:datetime@1/DateTime";
 
 persistent actor PdsFactory {
 
@@ -26,7 +27,18 @@ persistent actor PdsFactory {
   };
 
   public type InitializationStatus = FinalInitializationStatus or {
-    #initializing;
+    #initializing : {
+      startedAt : Time.Time;
+    };
+    #notInitialized;
+  };
+
+  public type DeployRequest = {
+    existingCanisterId : ?Principal;
+    kind : {
+      #installOnly;
+      #installAndInitialize : PdsInterface.InitializeRequest;
+    };
   };
 
   var pdsMap = PureMap.empty<Principal, PdsInfo>();
@@ -62,14 +74,13 @@ persistent actor PdsFactory {
     };
   };
 
-  public shared ({ caller }) func deploy(
-    canisterId : ?Principal,
-    initializeRequest : PdsInterface.InitializeRequest,
+  public shared ({ caller }) func deployPds(
+    request : DeployRequest
   ) : async Result.Result<Principal, Text> {
     if (caller == Principal.anonymous()) {
       return #err("Anonymous caller is not allowed to deploy a PDS");
     };
-    let installArgs = switch (canisterId) {
+    let installArgs = switch (request.existingCanisterId) {
       case (?canisterId) #install(canisterId);
       case (null) #new({
         settings = ?{
@@ -90,7 +101,7 @@ persistent actor PdsFactory {
     let pdsInfo = {
       owner = caller;
       deployedAt = Time.now();
-      status = #initializing;
+      status = #notInitialized;
     };
     pdsMap := PureMap.add(
       pdsMap,
@@ -98,56 +109,52 @@ persistent actor PdsFactory {
       pdsPrincipal,
       pdsInfo,
     );
-    let status = await* initializeInternal(pds, initializeRequest);
-
-    pdsMap := PureMap.add(
-      pdsMap,
-      Principal.compare,
-      pdsPrincipal,
-      {
-        pdsInfo with
-        status = status
-      },
-    );
-    switch (status) {
-      case (#initialized(_)) #ok(pdsPrincipal);
-      case (#initializationFailed(failure)) #err("PDS deployed but initialization failed: " # failure.reason);
+    switch (request.kind) {
+      case (#installOnly) #ok(pdsPrincipal);
+      case (#installAndInitialize(initializeRequest)) switch (await* initializeInternal(pds, pdsInfo, initializeRequest)) {
+        case (#ok(())) #ok(pdsPrincipal);
+        case (#err(e)) #err("Deploy successful but initialization failed: " # e);
+      };
     };
   };
 
-  public shared ({ caller }) func retryFailedInitialization(
-    pdsPrincipal : Principal,
+  public shared ({ caller }) func initializePds(
+    pdsCanisterId : Principal,
     initializeRequest : PdsInterface.InitializeRequest,
   ) : async Result.Result<(), Text> {
-    let ?pdsInfo = PureMap.get(pdsMap, Principal.compare, pdsPrincipal) else return #err("PDS not found");
+    let ?pdsInfo = PureMap.get(pdsMap, Principal.compare, pdsCanisterId) else return #err("PDS not found");
     if (pdsInfo.owner != caller) {
       return #err("Only the owner can retry failed initialization the PDS");
     };
     switch (pdsInfo.status) {
+      case (#initializationFailed(_) or #notInitialized) ();
       case (#initialized(_)) return #err("PDS is already initialized");
-      case (#initializationFailed(_)) ();
-      case (#initializing) return #err("PDS is already initializing");
+      case (#initializing({ startedAt })) return #err("PDS is already initializing. Started at " # DateTime.DateTime(startedAt).toText());
     };
-    let pds = actor (Principal.toText(pdsPrincipal)) : Pds.Pds;
-    let status = await* initializeInternal(pds, initializeRequest);
+    let pds = actor (Principal.toText(pdsCanisterId)) : Pds.Pds;
 
+    await* initializeInternal(pds, pdsInfo, initializeRequest);
+  };
+
+  private func initializeInternal(
+    pds : Pds.Pds,
+    pdsInfo : PdsInfo,
+    initializeRequest : PdsInterface.InitializeRequest,
+  ) : async* Result.Result<(), Text> {
+
+    let pdsPrincipal = Principal.fromActor(pds);
     pdsMap := PureMap.add(
       pdsMap,
       Principal.compare,
       pdsPrincipal,
       {
         pdsInfo with
-        status = status
+        status = #initializing({
+          startedAt = Time.now();
+        });
       },
     );
-    #ok;
-  };
-
-  private func initializeInternal(
-    pds : Pds.Pds,
-    initializeRequest : PdsInterface.InitializeRequest,
-  ) : async* FinalInitializationStatus {
-    try {
+    let status = try {
       switch (await pds.initialize(initializeRequest)) {
         case (#ok(())) #initialized({
           initializedAt = Time.now();
@@ -160,9 +167,23 @@ persistent actor PdsFactory {
 
     } catch (e) {
       #initializationFailed({
-        reason = "Initialization failed: " # Error.message(e);
+        reason = Error.message(e);
         failedAt = Time.now();
       });
+    };
+
+    pdsMap := PureMap.add(
+      pdsMap,
+      Principal.compare,
+      pdsPrincipal,
+      {
+        pdsInfo with
+        status = status
+      },
+    );
+    switch (status) {
+      case (#initialized(_)) #ok;
+      case (#initializationFailed(failure)) #err(failure.reason);
     };
   };
 };

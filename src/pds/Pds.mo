@@ -123,7 +123,7 @@ shared ({ caller = deployer }) persistent actor class Pds(
     await* app.http_request_update(request);
   };
 
-  public shared ({ caller }) func post(message : Text) : async Result.Result<(), Text> {
+  public shared ({ caller }) func post(message : Text) : async Result.Result<Text, Text> {
     if (caller != owner) {
       return #err("Only the owner can post to this PDS");
     };
@@ -140,7 +140,7 @@ shared ({ caller = deployer }) persistent actor class Pds(
       swapCommit = null;
     };
     switch (await* repositoryHandler.createRecord(createRecordRequest)) {
-      case (#ok(_)) #ok;
+      case (#ok(response)) #ok(CID.toText(response.cid));
       case (#err(e)) #err("Failed to post: " # e);
     };
   };

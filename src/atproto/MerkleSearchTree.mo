@@ -273,7 +273,7 @@ module {
     };
 
     // Process entries and their subtrees
-    for (i in Nat.range(0, Nat.max(0, node.entries.size()))) {
+    for (i in Nat.range(0, node.entries.size())) {
       let entry = node.entries[i];
 
       switch (entry.subtreeCID) {
@@ -384,7 +384,7 @@ module {
     let fullKeys = DynamicArray.DynamicArray<[Nat8]>(node.entries.size());
     fullKeys.add(key);
     var prevKey = key;
-    for (i in Nat.range(1, Nat.max(2, node.entries.size()))) {
+    for (i in Nat.range(1, node.entries.size())) {
       key := reconstructKey(node.entries, i, ?prevKey);
       fullKeys.add(key);
 
@@ -481,7 +481,7 @@ module {
     var insertPos = 0;
 
     var prevKey : ?[Nat8] = null;
-    label f for (i in Nat.range(0, Nat.max(0, node.entries.size()))) {
+    label f for (i in Nat.range(0, node.entries.size())) {
       let entryKey = reconstructKey(node.entries, i, prevKey);
 
       switch (compareKeys(key, entryKey)) {
@@ -759,7 +759,7 @@ module {
     let fullKeys = DynamicArray.DynamicArray<[Nat8]>(node.entries.size());
     // Find the key in current node
     var prevKeyOrNull : ?[Nat8] = null;
-    label f for (i in Nat.range(0, Nat.max(1, node.entries.size()))) {
+    label f for (i in Nat.range(0, node.entries.size())) {
       let entryKey = reconstructKey(node.entries, i, prevKeyOrNull);
       fullKeys.add(entryKey);
 
@@ -806,7 +806,7 @@ module {
 
     // Find appropriate subtree
     var searchPos = 0;
-    label searchLoop for (i in Nat.range(0, Nat.max(1, node.entries.size()))) {
+    label searchLoop for (i in Nat.range(0, node.entries.size())) {
       let entryKey = fullKeys.get(i);
       if (compareKeys(keyBytes, entryKey) == #less) {
         searchPos := i;
@@ -899,7 +899,7 @@ module {
 
     // Process entries
     var prevKey : ?[Nat8] = null;
-    for (i in Nat.range(0, Nat.max(1, node.entries.size()))) {
+    for (i in Nat.range(0, node.entries.size())) {
       let entry = node.entries[i];
       let key = reconstructKey(node.entries, i, prevKey);
       callback(key, entry.valueCID);
