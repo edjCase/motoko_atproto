@@ -9,15 +9,11 @@ import Order "mo:core@1/Order";
 import Iter "mo:core@1/Iter";
 import Nat "mo:core@1/Nat";
 import Nat8 "mo:core@1/Nat8";
-import Char "mo:core@1/Char";
 import CIDBuilder "./CIDBuilder";
 import PureMap "mo:core@1/pure/Map";
-import Set "mo:core@1/Set";
 import Runtime "mo:core@1/Runtime";
 import DagCbor "mo:dag-cbor@2";
-import DagPb "mo:dag-pb@0";
 import MerkleNode "MerkleNode";
-import Int "mo:core@1/Int";
 import List "mo:core@1/List";
 
 module {
