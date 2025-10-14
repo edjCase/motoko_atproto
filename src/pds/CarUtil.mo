@@ -1,12 +1,9 @@
 import Text "mo:core@1/Text";
 import Result "mo:core@1/Result";
-import ServerInfo "ServerInfo";
 import DID "mo:did@3";
 import TID "mo:tid@1";
 import CID "mo:cid@1";
 import PureMap "mo:core@1/pure/Map";
-import Json "mo:json@1";
-import Principal "mo:core@1/Principal";
 import CAR "mo:car@1";
 import MerkleSearchTree "../atproto/MerkleSearchTree";
 import DagCbor "mo:dag-cbor@2";
@@ -16,6 +13,9 @@ import CIDBuilder "../atproto/CIDBuilder";
 import Blob "mo:core@1/Blob";
 import Int "mo:core@1/Int";
 import Repository "../atproto/Repository";
+import List "mo:core@1/List";
+import DynamicArray "mo:xtended-collections@0/DynamicArray";
+import MerkleNode "../atproto/MerkleNode";
 
 module {
   public func buildRepository(request : CAR.File) : Result.Result<(DID.Plc.DID, Repository.Repository), Text> {
@@ -49,7 +49,7 @@ module {
 
     // Reconstruct repository state
     var allRecords = PureMap.empty<CID.CID, DagCbor.Value>();
-    var allCommits = PureMap.empty<TID.TID, Commit.Commit>();
+    var allCommits = PureMap.empty<CID.CID, Commit.Commit>();
     var allBlobs = PureMap.empty<CID.CID, BlobRef.BlobRef>();
 
     // Reconstruct MST from the data CID in latest commit
@@ -65,34 +65,23 @@ module {
     };
 
     // Reconstruct commit history
-    var currentCommitOpt : ?Commit.Commit = ?latestCommit;
+    var currentCommitInfo : (CID.CID, Commit.Commit) = (latestCommitCID, latestCommit);
     label w while (true) {
-      switch (currentCommitOpt) {
-        case (null) break w;
-        case (?commit) {
-          allCommits := PureMap.add(allCommits, TID.compare, commit.rev, commit);
+      allCommits := PureMap.add(allCommits, CIDBuilder.compare, currentCommitInfo.0, currentCommitInfo.1);
 
-          switch (commit.prev) {
-            case (null) currentCommitOpt := null;
-            case (?prevCID) {
-              let ?prevData = PureMap.get(blockMap, CIDBuilder.compare, prevCID) else {
-                currentCommitOpt := null;
-                break w;
-              };
+      let ?prevCID = currentCommitInfo.1.prev else break w;
+      let ?prevData = PureMap.get(blockMap, CIDBuilder.compare, prevCID) else break w;
 
-              switch (DagCbor.fromBytes(prevData.vals())) {
-                case (#ok(prevValue)) {
-                  switch (parseCommitFromCbor(prevValue)) {
-                    case (#ok(prevCommit)) currentCommitOpt := ?prevCommit;
-                    case (#err(_)) currentCommitOpt := null;
-                  };
-                };
-                case (#err(_)) currentCommitOpt := null;
-              };
-            };
+      let prevCommit = switch (DagCbor.fromBytes(prevData.vals())) {
+        case (#ok(prevValue)) {
+          switch (parseCommitFromCbor(prevValue)) {
+            case (#ok(prevCommit)) prevCommit;
+            case (#err(e)) return #err("Failed to parse previous commit: " # e);
           };
         };
+        case (#err(e)) return #err("Failed to decode previous commit CBOR: " # debug_show (e));
       };
+      currentCommitInfo := (prevCID, prevCommit);
     };
 
     // Create repository
@@ -107,6 +96,125 @@ module {
       blobs = allBlobs;
     };
     #ok((latestCommit.did, repository));
+  };
+
+  public func fromRepository(
+    repository : Repository.Repository,
+    sinceOrNull : ?TID.TID,
+  ) : Result.Result<CAR.File, Text> {
+
+    let exportData = switch (Repository.exportData(repository, sinceOrNull)) {
+      case (#err(e)) return #err("Failed to export repository data: " # e);
+      case (#ok(data)) data;
+    };
+
+    let blocks = List.empty<CAR.Block>();
+
+    // Add commit blocks
+    for ((cid, commit) in exportData.commits.vals()) {
+      let cborValue = commitToCbor(commit);
+      let cborBytes = switch (DagCbor.toBytes(cborValue)) {
+        case (#ok(bytes)) bytes;
+        case (#err(e)) return #err("Failed to encode commit to CBOR: " # debug_show (e));
+      };
+      let block : CAR.Block = {
+        cid = cid;
+        data = Blob.fromArray(cborBytes);
+      };
+      List.add(blocks, block);
+    };
+
+    // Add record blocks
+    for ((cid, record) in exportData.records.vals()) {
+      let cborBytes = switch (DagCbor.toBytes(record)) {
+        case (#ok(bytes)) bytes;
+        case (#err(e)) return #err("Failed to encode record to CBOR: " # debug_show (e));
+      };
+      let block : CAR.Block = {
+        cid = cid;
+        data = Blob.fromArray(cborBytes);
+      };
+      List.add(blocks, block);
+    };
+
+    // Add node blocks
+    for ((cid, node) in exportData.nodes.vals()) {
+      let cborValue = nodeToCbor(node);
+      let cborBytes = switch (DagCbor.toBytes(cborValue)) {
+        case (#ok(bytes)) bytes;
+        case (#err(e)) return #err("Failed to encode node to CBOR: " # debug_show (e));
+      };
+      let block : CAR.Block = {
+        cid = cid;
+        data = Blob.fromArray(cborBytes);
+      };
+      List.add(blocks, block);
+    };
+
+    #ok({
+      header = {
+        version = 1;
+        roots = [repository.head];
+      };
+      blocks = List.toArray(blocks);
+    });
+  };
+
+  private func nodeToCbor(node : MerkleNode.Node) : DagCbor.Value {
+    let size = if (node.leftSubtreeCID == null) 1 else 2;
+    let fields = DynamicArray.DynamicArray<(Text, DagCbor.Value)>(size);
+
+    switch (node.leftSubtreeCID) {
+      case (?cid) {
+        fields.add(("l", #cid(cid)));
+      };
+      case (null) {};
+    };
+
+    let entryArray = DynamicArray.DynamicArray<DagCbor.Value>(node.entries.size());
+    for (entry in node.entries.vals()) {
+      entryArray.add(entryToCbor(entry));
+    };
+    fields.add(("e", #array(DynamicArray.toArray(entryArray))));
+
+    #map(DynamicArray.toArray(fields));
+  };
+
+  private func entryToCbor(entry : MerkleNode.TreeEntry) : DagCbor.Value {
+    let size = if (entry.subtreeCID == null) 3 else 4;
+    let fields = DynamicArray.DynamicArray<(Text, DagCbor.Value)>(size);
+
+    fields.add(("p", #int(entry.prefixLength)));
+    fields.add(("k", #bytes(entry.keySuffix)));
+    fields.add(("v", #cid(entry.valueCID)));
+
+    switch (entry.subtreeCID) {
+      case (?cid) {
+        fields.add(("t", #cid(cid)));
+      };
+      case (null) {};
+    };
+
+    #map(DynamicArray.toArray(fields));
+  };
+
+  private func commitToCbor(commit : Commit.Commit) : DagCbor.Value {
+    let size = if (commit.prev == null) 5 else 6;
+    let fields = DynamicArray.DynamicArray<(Text, DagCbor.Value)>(size);
+    fields.add(("did", #text(DID.Plc.toText(commit.did))));
+    fields.add(("version", #int(commit.version)));
+    fields.add(("data", #cid(commit.data)));
+    fields.add(("rev", #text(TID.toText(commit.rev))));
+    fields.add(("sig", #bytes(Blob.toArray(commit.sig))));
+
+    switch (commit.prev) {
+      case (?prevCID) {
+        fields.add(("prev", #cid(prevCID)));
+      };
+      case (null) ();
+    };
+
+    #map(DynamicArray.toArray(fields));
   };
 
   // Helper function to extract all records from MST

@@ -20,13 +20,14 @@ import CarUtil "CarUtil";
 import PdsInterface "./PdsInterface";
 import DateTime "mo:datetime@1/DateTime";
 import Repository "../atproto/Repository";
+import Option "mo:core@1/Option";
 
 shared ({ caller = deployer }) persistent actor class Pds(
   initData : {
-    owner : Principal;
+    owner : ?Principal;
   }
 ) : async PdsInterface.Actor = this {
-  var owner = initData.owner;
+  var owner = Option.get(initData.owner, deployer);
 
   transient let tidGenerator = TID.Generator();
 

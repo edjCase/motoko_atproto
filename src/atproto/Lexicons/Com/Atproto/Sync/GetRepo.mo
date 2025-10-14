@@ -1,4 +1,3 @@
-import Result "mo:core@1/Result";
 import DID "mo:did@3";
 
 module {
@@ -18,6 +17,5 @@ module {
   };
 
   // Output is CAR file data (application/vnd.ipld.car), so we use Blob type
-  public type Response = Blob;
 
 };

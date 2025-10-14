@@ -38,6 +38,9 @@ import DagCbor "mo:dag-cbor@2";
 import Debug "mo:core@1/Debug";
 import AtUri "../atproto/AtUri";
 import DIDModule "./DID";
+import CarUtil "./CarUtil";
+import CAR "mo:car@1";
+import Blob "mo:core@1/Blob";
 
 module {
 
@@ -71,6 +74,7 @@ module {
         case ("com.atproto.repo.putrecord") await* putRecord(routeContext);
         case ("com.atproto.repo.uploadblob") uploadBlob(routeContext);
         case ("com.atproto.server.describeserver") describeServer(routeContext);
+        case ("com.atproto.sync.getrepo") getRepo(routeContext);
         case ("com.atproto.sync.listblobs") listBlobs(routeContext);
         case ("com.atproto.sync.listrepos") listRepos(routeContext);
         case ("com.atproto.identity.resolvehandle") resolveHandle(routeContext);
@@ -551,6 +555,59 @@ module {
       routeContext.buildResponse(
         #notImplemented,
         #error(#message("listMissingBlobs not implemented yet")),
+      );
+    };
+
+    func getRepo(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
+      let ?didText = routeContext.getQueryParam("did") else return routeContext.buildResponse(
+        #badRequest,
+        #error(#message("Missing required query parameter: did")),
+      );
+      let did = switch (DID.Plc.fromText(didText)) {
+        case (#ok(did)) did;
+        case (#err(e)) return routeContext.buildResponse(
+          #badRequest,
+          #error(#message("Invalid did: " # e)),
+        );
+      };
+
+      let sinceOrNull : ?TID.TID = switch (routeContext.getQueryParam("since")) {
+        case (null) null;
+        case (?sinceText) switch (TID.fromText(sinceText)) {
+          case (#ok(tid)) ?tid;
+          case (#err(e)) return routeContext.buildResponse(
+            #badRequest,
+            #error(#message("Invalid 'since' parameter, must be a valid TID: " # e)),
+          );
+        };
+      };
+
+      let serverInfo = serverInfoHandler.get();
+      if (did != serverInfo.plcIdentifier) {
+        return routeContext.buildResponse(
+          #notFound,
+          #error(#message("Repository not found: " # didText)),
+        );
+      };
+
+      let repository = repositoryHandler.get();
+
+      let carFile = switch (CarUtil.fromRepository(repository, sinceOrNull)) {
+        case (#ok(blob)) blob;
+        case (#err(e)) return routeContext.buildResponse(
+          #badRequest,
+          #error(#message("Failed to get repo as CAR: " # e)),
+        );
+      };
+
+      let carBlob = Blob.fromArray(CAR.toBytes(carFile));
+
+      routeContext.buildResponse(
+        #ok,
+        #custom({
+          headers = [("Content-Type", "application/x-application/vnd.ipld.car")];
+          body = carBlob;
+        }),
       );
     };
 

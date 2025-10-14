@@ -15,6 +15,8 @@ import Runtime "mo:core@1/Runtime";
 import DagCbor "mo:dag-cbor@2";
 import MerkleNode "MerkleNode";
 import List "mo:core@1/List";
+import Commit "./Commit";
+import Set "mo:core@1/Set";
 
 module {
 
@@ -142,6 +144,68 @@ module {
     );
 
     List.values(records);
+  };
+
+  public func nodes(mst : MerkleSearchTree) : Iter.Iter<(CID.CID, MerkleNode.Node)> {
+    let rootNode = getRootNode(mst);
+    let nodeList = List.empty<(CID.CID, MerkleNode.Node)>();
+    nodesInternal(
+      mst,
+      rootNode,
+      func(nodeId : CID.CID, node : MerkleNode.Node) {
+        List.add(nodeList, (nodeId, node));
+      },
+    );
+    List.values(nodeList);
+  };
+
+  public func nodesSince(mst : MerkleSearchTree, previousRoot : CID.CID) : Iter.Iter<(CID.CID, MerkleNode.Node)> {
+    let previousNodes = nodes({
+      root = previousRoot;
+      nodes = mst.nodes;
+    });
+    let previousNodeIds = previousNodes
+    |> Iter.map(
+      _,
+      func((cid, _) : (CID.CID, MerkleNode.Node)) : CID.CID = cid,
+    )
+    |> Set.fromIter(_, CIDBuilder.compare);
+
+    nodes(mst)
+    |> Iter.filter(
+      _,
+      func((cid, _) : (CID.CID, MerkleNode.Node)) : Bool = not Set.contains(previousNodeIds, CIDBuilder.compare, cid),
+    );
+
+  };
+
+  private func nodesInternal(
+    mst : MerkleSearchTree,
+    node : MerkleNode.Node,
+    callback : (nodeId : CID.CID, node : MerkleNode.Node) -> (),
+  ) {
+    // Process left subtree
+    switch (node.leftSubtreeCID) {
+      case (?cid) {
+        switch (getNode(mst, cid)) {
+          case (?subtree) nodesInternal(mst, subtree, callback);
+          case (null) {};
+        };
+      };
+      case (null) {};
+    };
+
+    for (entry in node.entries.vals()) {
+      switch (entry.subtreeCID) {
+        case (?cid) {
+          switch (getNode(mst, cid)) {
+            case (?subtree) nodesInternal(mst, subtree, callback);
+            case (null) {};
+          };
+        };
+        case (null) {};
+      };
+    };
   };
 
   public func keys(mst : MerkleSearchTree) : Iter.Iter<Text> {

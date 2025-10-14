@@ -14,10 +14,10 @@ import Iter "mo:core@1/Iter";
 import TextX "mo:xtended-text@2/TextX";
 import List "mo:core@1/List";
 import Set "mo:core@1/Set";
-import Nat8 "mo:core@1/Nat8";
 import Text "mo:core@1/Text";
 import Char "mo:core@1/Char";
 import CIDBuilder "./CIDBuilder";
+import Array "mo:core@1/Array";
 
 module {
 
@@ -29,7 +29,7 @@ module {
   };
 
   public type Repository = MetaData and {
-    commits : PureMap.Map<TID.TID, Commit.Commit>;
+    commits : PureMap.Map<CID.CID, Commit.Commit>;
     records : PureMap.Map<CID.CID, DagCbor.Value>;
     nodes : PureMap.Map<CID.CID, MerkleNode.Node>;
     blobs : PureMap.Map<CID.CID, BlobRef.BlobRef>;
@@ -74,6 +74,12 @@ module {
     };
   };
 
+  public type ExportData = {
+    commits : [(CID.CID, Commit.Commit)];
+    records : [(CID.CID, DagCbor.Value)];
+    nodes : [(CID.CID, MerkleNode.Node)];
+  };
+
   public func empty(
     did : DID.Plc.DID,
     rev : TID.TID,
@@ -99,7 +105,7 @@ module {
       rev = rev;
       active = true;
       status = null;
-      commits = PureMap.singleton<TID.TID, Commit.Commit>(rev, signedCommit);
+      commits = PureMap.singleton<CID.CID, Commit.Commit>(signedCommitCID, signedCommit);
       records = PureMap.empty<CID.CID, DagCbor.Value>();
       nodes = mst.nodes;
       blobs = PureMap.empty<CID.CID, BlobRef.BlobRef>();
@@ -428,6 +434,69 @@ module {
     key.collection # "/" # key.recordKey;
   };
 
+  public func exportData(
+    repository : Repository,
+    sinceOrNull : ?TID.TID,
+  ) : Result.Result<ExportData, Text> {
+
+    let mst = buildMerkleSearchTree(repository);
+    let nodesIter = switch (sinceOrNull) {
+      case (null) MerkleSearchTree.nodes(mst);
+      case (?since) {
+        var firstCommitAfterSince : ?Commit.Commit = null;
+        for ((_, commit) in PureMap.entries(repository.commits)) {
+          if (TID.compare(commit.rev, since) == #greater) {
+            switch (firstCommitAfterSince) {
+              case (?existing) {
+                if (TID.compare(commit.rev, existing.rev) == #less) {
+                  firstCommitAfterSince := ?commit;
+                };
+              };
+              case (null) firstCommitAfterSince := ?commit;
+            };
+          };
+        };
+        switch (firstCommitAfterSince) {
+          case (null) return #ok({
+            commits = [];
+            records = [];
+            nodes = [];
+          }); // No new commits since 'since'
+          case (?commit) MerkleSearchTree.nodesSince(mst, commit.data);
+        };
+
+      };
+    };
+
+    let commitsIter : Iter.Iter<(CID.CID, Commit.Commit)> = switch (sinceOrNull) {
+      case (null) PureMap.entries(repository.commits);
+      case (?since) PureMap.entries(repository.commits)
+      |> Iter.filter(
+        _,
+        func((_, commit) : (CID.CID, Commit.Commit)) : Bool {
+          TID.compare(commit.rev, since) == #greater;
+        },
+      );
+    };
+
+    let nodes = Array.fromIter(nodesIter);
+
+    var records = PureMap.empty<CID.CID, DagCbor.Value>();
+    // Add all record blocks
+    for ((cid, node) in nodes.vals()) {
+      for (entry in node.entries.vals()) {
+        let ?recordValue = PureMap.get(repository.records, CIDBuilder.compare, entry.valueCID) else return #err("Invalid repository. Record CID not found in records: " # CID.toText(entry.valueCID));
+        records := PureMap.add(records, CIDBuilder.compare, entry.valueCID, recordValue);
+      };
+    };
+
+    #ok({
+      commits = Array.fromIter(commitsIter);
+      records = Array.fromIter(PureMap.entries(records));
+      nodes = nodes;
+    });
+  };
+
   private func commitNewData(
     repository : Repository,
     mst : MerkleSearchTree.MerkleSearchTree,
@@ -453,10 +522,10 @@ module {
 
     // Store new state
     let commitCID = CIDBuilder.fromCommit(signedCommit);
-    let updatedCommits = PureMap.add<TID.TID, Commit.Commit>(
+    let updatedCommits = PureMap.add<CID.CID, Commit.Commit>(
       repository.commits,
-      TID.compare,
-      rev,
+      CIDBuilder.compare,
+      commitCID,
       signedCommit,
     );
 
@@ -577,11 +646,10 @@ module {
     // Get current commit to find root node
     let ?currentCommit = PureMap.get(
       repository.commits,
-      TID.compare,
-      repository.rev,
-    ) else {
-      Runtime.trap("Current commit not found in repository");
-    };
+      CIDBuilder.compare,
+      repository.head,
+    ) else Runtime.trap("Current commit not found in repository");
+
     {
       root = currentCommit.data;
       nodes = repository.nodes;
