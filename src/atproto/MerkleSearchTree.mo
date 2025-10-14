@@ -15,7 +15,6 @@ import Runtime "mo:core@1/Runtime";
 import DagCbor "mo:dag-cbor@2";
 import MerkleNode "MerkleNode";
 import List "mo:core@1/List";
-import Commit "./Commit";
 import Set "mo:core@1/Set";
 
 module {

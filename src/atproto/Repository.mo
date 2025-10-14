@@ -2,7 +2,6 @@ import DID "mo:did@3";
 import CID "mo:cid@1";
 import TID "mo:tid@1";
 import DagCbor "mo:dag-cbor@2";
-import AtUri "./AtUri";
 import PureMap "mo:core@1/pure/Map";
 import MerkleNode "./MerkleNode";
 import BlobRef "./BlobRef";
