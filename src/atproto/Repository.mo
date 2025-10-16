@@ -17,6 +17,8 @@ import Text "mo:core@1/Text";
 import Char "mo:core@1/Char";
 import CIDBuilder "./CIDBuilder";
 import Array "mo:core@1/Array";
+import Debug "mo:core@1/Debug";
+import DynamicArray "mo:xtended-collections@0/DynamicArray";
 
 module {
 
@@ -30,7 +32,7 @@ module {
   public type Repository = MetaData and {
     commits : PureMap.Map<CID.CID, Commit.Commit>;
     records : PureMap.Map<CID.CID, DagCbor.Value>;
-    nodes : PureMap.Map<CID.CID, MerkleNode.Node>;
+    nodes : PureMap.Map<CID.CID, MerkleNode.Node>; // All nodes, including historical/orphaned ones
     blobs : PureMap.Map<CID.CID, BlobRef.BlobRef>;
   };
 
@@ -438,60 +440,72 @@ module {
     sinceOrNull : ?TID.TID,
   ) : Result.Result<ExportData, Text> {
 
-    let mst = buildMerkleSearchTree(repository);
-    let nodesIter = switch (sinceOrNull) {
-      case (null) MerkleSearchTree.nodes(mst);
+    let (commits, prevRootIdOrNull) : ([(CID.CID, Commit.Commit)], ?CID.CID) = switch (sinceOrNull) {
+      case (null) {
+        // Export all commits
+        let commits = Iter.toArray(PureMap.entries(repository.commits));
+        (commits, null);
+      };
       case (?since) {
-        var firstCommitAfterSince : ?Commit.Commit = null;
-        for ((_, commit) in PureMap.entries(repository.commits)) {
+        var sinceCommitOrNull : ?Commit.Commit = null;
+        let commits = DynamicArray.DynamicArray<(CID.CID, Commit.Commit)>(PureMap.size(repository.commits));
+        for ((cid, commit) in PureMap.entries(repository.commits)) {
           if (TID.compare(commit.rev, since) == #greater) {
-            switch (firstCommitAfterSince) {
+            commits.add((cid, commit));
+          } else {
+            // Find the closest commit before or at 'since'
+            switch (sinceCommitOrNull) {
+              case (null) sinceCommitOrNull := ?commit;
               case (?existing) {
-                if (TID.compare(commit.rev, existing.rev) == #less) {
-                  firstCommitAfterSince := ?commit;
+                if (TID.compare(commit.rev, existing.rev) == #greater) {
+                  sinceCommitOrNull := ?commit;
                 };
               };
-              case (null) firstCommitAfterSince := ?commit;
             };
           };
         };
-        switch (firstCommitAfterSince) {
-          case (null) return #ok({
-            commits = [];
-            records = [];
-            nodes = [];
-          }); // No new commits since 'since'
-          case (?commit) MerkleSearchTree.nodesSince(mst, commit.data);
+
+        let prevRootIdOrNull = switch (sinceCommitOrNull) {
+          case (null) null;
+          case (?sinceCommit) ?sinceCommit.data;
         };
 
+        (DynamicArray.toArray(commits), prevRootIdOrNull);
       };
     };
 
-    let commitsIter : Iter.Iter<(CID.CID, Commit.Commit)> = switch (sinceOrNull) {
-      case (null) PureMap.entries(repository.commits);
-      case (?since) PureMap.entries(repository.commits)
-      |> Iter.filter(
-        _,
-        func((_, commit) : (CID.CID, Commit.Commit)) : Bool {
-          TID.compare(commit.rev, since) == #greater;
-        },
-      );
+    if (commits.size() == 0) {
+      return #ok({
+        commits = [];
+        records = [];
+        nodes = [];
+      });
     };
 
-    let nodes = Array.fromIter(nodesIter);
-
-    var records = PureMap.empty<CID.CID, DagCbor.Value>();
-    // Add all record blocks
-    for ((cid, node) in nodes.vals()) {
-      for (entry in node.entries.vals()) {
-        let ?recordValue = PureMap.get(repository.records, CIDBuilder.compare, entry.valueCID) else return #err("Invalid repository. Record CID not found in records: " # CID.toText(entry.valueCID));
-        records := PureMap.add(records, CIDBuilder.compare, entry.valueCID, recordValue);
+    let mst = buildMerkleSearchTree(repository);
+    let (nodes, recordIds) : ([(CID.CID, MerkleNode.Node)], [CID.CID]) = switch (prevRootIdOrNull) {
+      case (null) {
+        let nodes = MerkleSearchTree.nodes(mst) |> Iter.toArray(_);
+        let recordIds = MerkleSearchTree.values(mst) |> Iter.toArray(_);
+        (nodes, recordIds);
+      };
+      case (?prevRootId) {
+        let changes = MerkleSearchTree.changesSince(mst, prevRootId);
+        (changes.nodes, changes.recordIds);
       };
     };
+
+    let records = Array.map<CID.CID, (CID.CID, DagCbor.Value)>(
+      recordIds,
+      func(cid : CID.CID) : (CID.CID, DagCbor.Value) {
+        let ?value = PureMap.get(repository.records, CIDBuilder.compare, cid) else Runtime.trap("Invalid repository. Record CID not found in records: " # CID.toText(cid));
+        (cid, value);
+      },
+    );
 
     #ok({
-      commits = Array.fromIter(commitsIter);
-      records = Array.fromIter(PureMap.entries(records));
+      commits = commits;
+      records = records;
       nodes = nodes;
     });
   };

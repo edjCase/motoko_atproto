@@ -147,6 +147,7 @@ shared ({ caller = deployer }) persistent actor class Pds(
   public shared ({ caller }) func initialize(request : PdsInterface.InitializeRequest) : async Result.Result<(), Text> {
     if (caller != owner and caller != deployer) {
       return #err("Only the owner or deployer can initialize the PDS");
+
     };
     // TODO prevent re-initialization?
     let (plcIndentifier, repository) : (DID.Plc.DID, ?Repository.Repository) = switch (request.plc) {

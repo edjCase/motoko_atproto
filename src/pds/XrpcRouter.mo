@@ -599,7 +599,10 @@ module {
       routeContext.buildResponse(
         #ok,
         #custom({
-          headers = [("Content-Type", "application/x-application/vnd.ipld.car")];
+          headers = [
+            ("Content-Type", "application/x-application/vnd.ipld.car"),
+            ("Content-Disposition", "attachment; filename=\"repo.car\""),
+          ];
           body = carBlob;
         }),
       );

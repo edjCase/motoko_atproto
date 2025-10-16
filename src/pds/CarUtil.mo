@@ -16,12 +16,17 @@ import Repository "../atproto/Repository";
 import List "mo:core@1/List";
 import DynamicArray "mo:xtended-collections@0/DynamicArray";
 import MerkleNode "../atproto/MerkleNode";
+import Debug "mo:core@1/Debug";
+import Iter "mo:core@1/Iter";
 
 module {
   public func buildRepository(request : CAR.File) : Result.Result<(DID.Plc.DID, Repository.Repository), Text> {
     let roots = request.header.roots;
     if (roots.size() == 0) {
       return #err("CAR file has no root CIDs");
+    };
+    if (roots.size() > 1) {
+      return #err("Unable to process CAR files with multiple roots");
     };
 
     // Build maps for quick lookup of blocks
@@ -53,7 +58,7 @@ module {
     var allBlobs = PureMap.empty<CID.CID, BlobRef.BlobRef>();
 
     // Reconstruct MST from the data CID in latest commit
-    let mst = switch (MerkleSearchTree.fromBlockMap(latestCommitCID, blockMap)) {
+    let mst = switch (MerkleSearchTree.fromBlockMap(latestCommit.data, blockMap)) {
       case (#err(e)) return #err("Failed to reconstruct MST: " # e);
       case (#ok(mst)) mst;
     };

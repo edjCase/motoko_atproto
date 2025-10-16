@@ -256,7 +256,7 @@ await testAsync(
 
     let tid3 = createTestTID(1000002);
     switch (await* Repository.deleteRecord(repo2, key, did, tid3, mockSignFunc)) {
-      case (#ok((updatedRepo, deletedCid))) {
+      case (#ok((updatedRepo, _))) {
         // Verify record is gone
         switch (Repository.getRecord(updatedRepo, key)) {
           case (?_) Runtime.trap("Deleted record still exists");
@@ -432,7 +432,7 @@ await testAsync(
     let tid2 = createTestTID(1000001);
 
     repo := switch (await* Repository.createRecord(repo, key, value, did, tid2, mockSignFunc)) {
-      case (#ok((r, cid))) r;
+      case (#ok((r, _))) r;
       case (#err(e)) Runtime.trap("Create failed: " # e);
     };
 
@@ -441,7 +441,7 @@ await testAsync(
       Runtime.trap("Expected 1 entry, got " # debug_show (entries.size()));
     };
 
-    let (entryKey, recordData) = entries[0];
+    let (entryKey, _) = entries[0];
     if (entryKey.collection != key.collection or entryKey.recordKey != key.recordKey) {
       Runtime.trap("Entry key mismatch");
     };
@@ -666,7 +666,7 @@ await testAsync(
 
     let tid3 = createTestTID(1000002);
     switch (await* Repository.applyWrites(repo, writes, did, tid3, mockSignFunc)) {
-      case (#ok((updatedRepo, results))) {
+      case (#ok((updatedRepo, _))) {
         // Verify record is deleted
         switch (Repository.getRecord(updatedRepo, key)) {
           case (?_) Runtime.trap("Deleted record still exists");
@@ -790,5 +790,89 @@ test(
       };
       case (null) Runtime.trap("Failed to parse key with slashes");
     };
+  },
+);
+
+await testAsync(
+  "exportData",
+  func() : async () {
+
+    let repoId = createTestDID();
+    var repository : Repository.Repository = switch (await* Repository.empty(repoId, createTestTID(1000000), mockSignFunc)) {
+      case (#ok(r)) r;
+      case (#err(e)) Runtime.trap("Setup failed: " # e);
+    };
+
+    let firstTID = createTestTID(1000001);
+
+    let (newRepository, record1CID) = switch (
+      await* Repository.createRecord(
+        repository,
+        { collection = "app.bsky.feed.post"; recordKey = "post1" },
+        createTestValue("test post"),
+        repoId,
+        firstTID,
+        mockSignFunc,
+      )
+    ) {
+      case (#ok((r, cid))) (r, cid);
+      case (#err(e)) Runtime.trap("Create failed: " # e);
+    };
+    repository := newRepository;
+
+    let (newRepository2, record2CID) = switch (
+      await* Repository.createRecord(
+        repository,
+        { collection = "app.bsky.feed.post"; recordKey = "post2" },
+        createTestValue("another post"),
+        repoId,
+        createTestTID(1000002),
+        mockSignFunc,
+      )
+    ) {
+      case (#ok((r, cid))) (r, cid);
+      case (#err(e)) Runtime.trap("Create failed: " # e);
+    };
+    repository := newRepository2;
+
+    switch (Repository.exportData(repository, null)) {
+      case (#ok(data)) {
+        if (data.records.size() != 2) {
+          Runtime.trap("Expected 2 records in export, got " # debug_show (data.records.size()));
+        };
+        if (not Array.any(data.records, func(r : (CID.CID, DagCbor.Value)) : Bool = r.0 == record1CID)) {
+          Runtime.trap("Export missing record1 CID");
+        };
+        if (not Array.any(data.records, func(r : (CID.CID, DagCbor.Value)) : Bool = r.0 == record2CID)) {
+          Runtime.trap("Export missing record2 CID");
+        };
+        if (data.commits.size() != 3) {
+          Runtime.trap("Expected 3 commits in export, got " # debug_show (data.commits.size()));
+        };
+        if (data.nodes.size() != 1) {
+          Runtime.trap("Expected exactly 1 node in export");
+        };
+      };
+      case (#err(e)) Runtime.trap("Export failed: " # e);
+    };
+
+    switch (Repository.exportData(repository, ?firstTID)) {
+      case (#ok(data)) {
+        if (data.records.size() != 1) {
+          Runtime.trap("Expected 1 records in export, got " # debug_show (data.records.size()));
+        };
+        if (not Array.any(data.records, func(r : (CID.CID, DagCbor.Value)) : Bool = r.0 == record2CID)) {
+          Runtime.trap("Export missing record2 CID");
+        };
+        if (data.commits.size() != 1) {
+          Runtime.trap("Expected 1 commit in export, got " # debug_show (data.commits.size()));
+        };
+        if (data.nodes.size() != 1) {
+          Runtime.trap("Expected exactly 1 node in export");
+        };
+      };
+      case (#err(e)) Runtime.trap("Export failed: " # e);
+    };
+
   },
 );

@@ -16,12 +16,18 @@ import DagCbor "mo:dag-cbor@2";
 import MerkleNode "MerkleNode";
 import List "mo:core@1/List";
 import Set "mo:core@1/Set";
+import Debug "mo:core@1/Debug";
 
 module {
 
   public type MerkleSearchTree = {
     root : CID.CID;
-    nodes : PureMap.Map<CID.CID, MerkleNode.Node>;
+    nodes : PureMap.Map<CID.CID, MerkleNode.Node>; // All nodes, including historical/orphaned ones
+  };
+
+  public type TreeDiff = {
+    nodes : [(CID.CID, MerkleNode.Node)];
+    recordIds : [CID.CID];
   };
 
   public func empty() : MerkleSearchTree {
@@ -148,7 +154,7 @@ module {
   public func nodes(mst : MerkleSearchTree) : Iter.Iter<(CID.CID, MerkleNode.Node)> {
     let rootNode = getRootNode(mst);
     let nodeList = List.empty<(CID.CID, MerkleNode.Node)>();
-    nodesInternal(
+    iterateNodes(
       mst,
       rootNode,
       func(nodeId : CID.CID, node : MerkleNode.Node) {
@@ -158,51 +164,80 @@ module {
     List.values(nodeList);
   };
 
-  public func nodesSince(mst : MerkleSearchTree, previousRoot : CID.CID) : Iter.Iter<(CID.CID, MerkleNode.Node)> {
-    let previousNodes = nodes({
+  public func changesSince(
+    mst : MerkleSearchTree,
+    previousRoot : CID.CID,
+  ) : TreeDiff {
+    let prevMst = {
       root = previousRoot;
       nodes = mst.nodes;
-    });
-    let previousNodeIds = previousNodes
-    |> Iter.map(
-      _,
-      func((cid, _) : (CID.CID, MerkleNode.Node)) : CID.CID = cid,
-    )
-    |> Set.fromIter(_, CIDBuilder.compare);
-
-    nodes(mst)
-    |> Iter.filter(
-      _,
-      func((cid, _) : (CID.CID, MerkleNode.Node)) : Bool = not Set.contains(previousNodeIds, CIDBuilder.compare, cid),
+    };
+    let prevRootNode = getRootNode(prevMst);
+    let prevNodeIds = List.empty<CID.CID>();
+    let prevRecordIds = List.empty<CID.CID>();
+    iterateNodes(
+      prevMst,
+      prevRootNode,
+      func(nodeId : CID.CID, node : MerkleNode.Node) {
+        List.add(prevNodeIds, nodeId);
+        for (entry in node.entries.vals()) {
+          List.add(prevRecordIds, entry.valueCID);
+        };
+      },
     );
+    let prevNodeIdSet = Set.fromIter(List.values(prevNodeIds), CIDBuilder.compare);
+    let prevRecordIdSet = Set.fromIter(List.values(prevRecordIds), CIDBuilder.compare);
+
+    let rootNode = getRootNode(mst);
+    let nodes = List.empty<(CID.CID, MerkleNode.Node)>();
+    let recordIds = List.empty<CID.CID>();
+    iterateNodes(
+      mst,
+      rootNode,
+      func(nodeId : CID.CID, node : MerkleNode.Node) {
+        if (not Set.contains(prevNodeIdSet, CIDBuilder.compare, nodeId)) {
+          List.add(nodes, (nodeId, node));
+        };
+        for (entry in node.entries.vals()) {
+          if (not Set.contains(prevRecordIdSet, CIDBuilder.compare, entry.valueCID)) {
+            List.add(recordIds, entry.valueCID);
+          };
+        };
+      },
+    );
+    {
+      nodes = List.toArray(nodes);
+      recordIds = List.toArray(recordIds);
+    }
 
   };
 
-  private func nodesInternal(
+  private func iterateNodes(
     mst : MerkleSearchTree,
     node : MerkleNode.Node,
     callback : (nodeId : CID.CID, node : MerkleNode.Node) -> (),
   ) {
+    callback(mst.root, node);
     // Process left subtree
     switch (node.leftSubtreeCID) {
       case (?cid) {
         switch (getNode(mst, cid)) {
-          case (?subtree) nodesInternal(mst, subtree, callback);
-          case (null) {};
+          case (?subtree) iterateNodes(mst, subtree, callback);
+          case (null) ();
         };
       };
-      case (null) {};
+      case (null) ();
     };
 
     for (entry in node.entries.vals()) {
       switch (entry.subtreeCID) {
         case (?cid) {
           switch (getNode(mst, cid)) {
-            case (?subtree) nodesInternal(mst, subtree, callback);
-            case (null) {};
+            case (?subtree) iterateNodes(mst, subtree, callback);
+            case (null) ();
           };
         };
-        case (null) {};
+        case (null) ();
       };
     };
   };
@@ -366,7 +401,7 @@ module {
     // Check if already loaded
     switch (PureMap.get(nodes, CIDBuilder.compare, cid)) {
       case (?_) return #ok(nodes);
-      case null {};
+      case (null) {};
     };
 
     // Get block data
@@ -556,7 +591,7 @@ module {
             },
           );
           let updatedNode = { node with entries };
-          return #ok(replaceNode(mst, nodeCID, updatedNode));
+          return #ok(addNode(mst, updatedNode));
         };
         case (#less) {
           insertPos := i;
@@ -593,7 +628,7 @@ module {
         entries = newEntries
       };
 
-      #ok(replaceNode(mst, nodeCID, updatedNode));
+      #ok(addNode(mst, updatedNode));
     } else if (keyDepth < nodeDepth) {
       // Lower depth - goes in subtree
       let subtreeCID = if (pos == 0) node.leftSubtreeCID else {
@@ -616,7 +651,7 @@ module {
 
               if (pos == 0) {
                 let updatedNode = { node with leftSubtreeCID = ?newSubtreeCID };
-                #ok(replaceNode(updatedMst, nodeCID, updatedNode));
+                #ok(addNode(updatedMst, updatedNode));
               } else {
                 let entries = Array.tabulate<MerkleNode.TreeEntry>(
                   node.entries.size(),
@@ -627,7 +662,7 @@ module {
                   },
                 );
                 let updatedNode = { node with entries };
-                #ok(replaceNode(updatedMst, nodeCID, updatedNode));
+                #ok(addNode(updatedMst, updatedNode));
               };
             };
             case (#err(e)) #err(e);
@@ -655,7 +690,7 @@ module {
           // Update parent to reference new subtree
           if (pos == 0) {
             let updatedNode = { node with leftSubtreeCID = ?newSubtreeCID };
-            #ok(replaceNode(mstWithSubtree, nodeCID, updatedNode));
+            #ok(addNode(mstWithSubtree, updatedNode));
           } else {
             let entries = Array.tabulate<MerkleNode.TreeEntry>(
               node.entries.size(),
@@ -666,7 +701,7 @@ module {
               },
             );
             let updatedNode = { node with entries };
-            #ok(replaceNode(mstWithSubtree, nodeCID, updatedNode));
+            #ok(addNode(mstWithSubtree, updatedNode));
           };
         };
       };
@@ -682,7 +717,7 @@ module {
         entries = newEntries
       };
 
-      #ok(replaceNode(mst, nodeCID, updatedNode));
+      #ok(addNode(mst, updatedNode));
     };
   };
 
@@ -735,19 +770,17 @@ module {
     DynamicArray.toArray(dynamicEntries);
   };
 
-  private func replaceNode(
+  private func addNode(
     mst : MerkleSearchTree,
-    oldCID : CID.CID,
     newNode : MerkleNode.Node,
   ) : MerkleSearchTree {
 
     // Add new node
     let newCID = CIDBuilder.fromMSTNode(newNode);
     let newNodes = PureMap.add(mst.nodes, CIDBuilder.compare, newCID, newNode);
-    // Remove old node
-    let (cleanedNodes, _) = PureMap.delete(newNodes, CIDBuilder.compare, oldCID);
+    // Don't remove old node to keep history
 
-    { root = newCID; nodes = cleanedNodes };
+    { root = newCID; nodes = newNodes };
   };
 
   private func getRootNode(mst : MerkleSearchTree) : MerkleNode.Node {
@@ -858,7 +891,7 @@ module {
         entries = DynamicArray.toArray(entries)
       };
 
-      let newMst = replaceNode(mst, nodeCID, updatedNode);
+      let newMst = addNode(mst, updatedNode);
 
       return #ok((newMst, removedEntry.valueCID));
     };
@@ -895,7 +928,7 @@ module {
               // Remove empty subtree reference
               if (searchPos == 0) {
                 let updatedNode = { node with leftSubtreeCID = null };
-                let newMst = replaceNode(updatedMst, nodeCID, updatedNode);
+                let newMst = addNode(updatedMst, updatedNode);
                 return #ok((newMst, removedValue));
               } else {
                 let entries = Array.tabulate<MerkleNode.TreeEntry>(
@@ -907,7 +940,7 @@ module {
                   },
                 );
                 let updatedNode = { node with entries };
-                let newMst = replaceNode(updatedMst, nodeCID, updatedNode);
+                let newMst = addNode(updatedMst, updatedNode);
                 return #ok((newMst, removedValue));
               };
             } else {
@@ -916,7 +949,7 @@ module {
                 let updatedNode = {
                   node with leftSubtreeCID = ?updatedMst.root
                 };
-                let newMst = replaceNode(updatedMst, nodeCID, updatedNode);
+                let newMst = addNode(updatedMst, updatedNode);
                 return #ok((newMst, removedValue));
               } else {
                 let entries = Array.tabulate<MerkleNode.TreeEntry>(
@@ -928,7 +961,7 @@ module {
                   },
                 );
                 let updatedNode = { node with entries };
-                let newMst = replaceNode(updatedMst, nodeCID, updatedNode);
+                let newMst = addNode(updatedMst, updatedNode);
                 return #ok((newMst, removedValue));
               };
             };

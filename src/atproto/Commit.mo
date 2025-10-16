@@ -5,13 +5,13 @@ import DID "mo:did@3";
 module {
   public type UnsignedCommit = {
     did : DID.Plc.DID;
-    version : Nat; // Always 3 for current format
+    version : Nat;
     data : CID.CID; // Points to MST root
     rev : TID.TID; // Timestamp/revision
-    prev : ?CID.CID; // Previous commit (usually null)
+    prev : ?CID.CID; // Previous commit
   };
 
   public type Commit = UnsignedCommit and {
-    sig : Blob; // Cryptographic signature
+    sig : Blob; // signature
   };
 };
