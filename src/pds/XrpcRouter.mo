@@ -586,13 +586,20 @@ module {
 
       let repository = repositoryHandler.get();
 
-      let carFile = switch (CarUtil.fromRepository(repository, sinceOrNull)) {
+      let exportDataKind = switch (sinceOrNull) {
+        case (null) #full({ includeHistorical = false });
+        case (?since) #since(since);
+      };
+
+      let carFile = switch (CarUtil.fromRepository(repository, exportDataKind)) {
         case (#ok(blob)) blob;
         case (#err(e)) return routeContext.buildResponse(
           #badRequest,
           #error(#message("Failed to get repo as CAR: " # e)),
         );
       };
+
+      Debug.print("Generated CAR file: " # debug_show (carFile));
 
       let carBlob = Blob.fromArray(CAR.toBytes(carFile));
 

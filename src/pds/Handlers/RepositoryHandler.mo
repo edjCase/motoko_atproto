@@ -1,32 +1,21 @@
 import Repository "../../atproto/Repository";
 import ServerInfoHandler "./ServerInfoHandler";
-import DID "mo:did@3";
 import CID "mo:cid@1";
 import TID "mo:tid@1";
 import PureMap "mo:core@1/pure/Map";
-import Commit "../../atproto/Commit";
 import DagCbor "mo:dag-cbor@2";
 import CIDBuilder "../../atproto/CIDBuilder";
-import AtUri "../../atproto/AtUri";
 import Result "mo:core@1/Result";
 import KeyHandler "../Handlers/KeyHandler";
 import Text "mo:core@1/Text";
-import Order "mo:core@1/Order";
 import Blob "mo:core@1/Blob";
-import MerkleSearchTree "../../atproto/MerkleSearchTree";
-import MerkleNode "../../atproto/MerkleNode";
 import Iter "mo:core@1/Iter";
 import LexiconValidator "../../atproto/LexiconValidator";
-import Debug "mo:core@1/Debug";
-import Domain "mo:url-kit@3/Domain";
-import DIDModule "../DID";
 import Nat "mo:core@1/Nat";
 import Array "mo:core@1/Array";
 import Time "mo:core@1/Time";
 import List "mo:core@1/List";
 import Runtime "mo:core@1/Runtime";
-import Int "mo:core@1/Int";
-import Set "mo:core@1/Set";
 import BlobRef "../../atproto/BlobRef";
 
 module {
@@ -269,7 +258,7 @@ module {
 
     public func getAllCollections() : [Text] {
       let repository = getRepository();
-      Repository.collectionKeys(repository) |> Iter.toArray(_);
+      Repository.collectionKeys(repository, false) |> Iter.toArray(_);
     };
 
     public func getRecord(request : GetRecordRequest) : ?GetRecordResponse {
@@ -583,7 +572,7 @@ module {
       let repository = getRepository();
 
       // TODO optimize for reverse/limit/cursor
-      let records = Repository.recordEntriesByCollection(repository, request.collection);
+      let records = Repository.recordEntriesByCollection(repository, request.collection, false);
 
       // Apply reverse ordering if requested
       let orderedRecords = switch (request.reverse) {

@@ -10,7 +10,6 @@ import Sha256 "mo:sha2/Sha256";
 import Error "mo:core@1/Error";
 import TextX "mo:xtended-text@2/TextX";
 import Text "mo:core@1/Text";
-import Debug "mo:core@1/Debug";
 
 module {
 

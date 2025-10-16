@@ -17,7 +17,6 @@ import Text "mo:core@1/Text";
 import Char "mo:core@1/Char";
 import CIDBuilder "./CIDBuilder";
 import Array "mo:core@1/Array";
-import Debug "mo:core@1/Debug";
 import DynamicArray "mo:xtended-collections@0/DynamicArray";
 
 module {
@@ -81,6 +80,11 @@ module {
     nodes : [(CID.CID, MerkleNode.Node)];
   };
 
+  public type ExportDataKind = {
+    #full : { includeHistorical : Bool };
+    #since : TID.TID;
+  };
+
   public func empty(
     did : DID.Plc.DID,
     rev : TID.TID,
@@ -113,9 +117,9 @@ module {
     });
   };
 
-  public func recordKeys(repository : Repository) : Iter.Iter<Key> {
+  public func recordKeys(repository : Repository, includeHistorical : Bool) : Iter.Iter<Key> {
     let mst = buildMerkleSearchTree(repository);
-    MerkleSearchTree.keys(mst)
+    MerkleSearchTree.keys(mst, includeHistorical)
     |> Iter.map(
       _,
       func(key : Text) : Key {
@@ -127,9 +131,9 @@ module {
     );
   };
 
-  public func recordEntries(repository : Repository) : Iter.Iter<(Key, RecordData)> {
+  public func recordEntries(repository : Repository, includeHistorical : Bool) : Iter.Iter<(Key, RecordData)> {
     let mst = buildMerkleSearchTree(repository);
-    MerkleSearchTree.entries(mst)
+    MerkleSearchTree.entries(mst, includeHistorical)
     |> Iter.map<(Text, CID.CID), (Key, RecordData)>(
       _,
       func((keyText, value) : (Text, CID.CID)) : (Key, RecordData) {
@@ -150,9 +154,9 @@ module {
     );
   };
 
-  public func recordEntriesByCollection(repository : Repository, collection : Text) : Iter.Iter<(Key, RecordData)> {
+  public func recordEntriesByCollection(repository : Repository, collection : Text, includeHistorical : Bool) : Iter.Iter<(Key, RecordData)> {
 
-    recordEntries(repository)
+    recordEntries(repository, includeHistorical)
     |> Iter.filter(
       _,
       func((key, _) : (Key, RecordData)) : Bool {
@@ -161,9 +165,9 @@ module {
     );
   };
 
-  public func collectionKeys(repository : Repository) : Iter.Iter<Text> {
+  public func collectionKeys(repository : Repository, includeHistorical : Bool) : Iter.Iter<Text> {
     let collections = Set.empty<Text>();
-    for (key in recordKeys(repository)) {
+    for (key in recordKeys(repository, includeHistorical)) {
       Set.add(collections, Text.compare, key.collection);
     };
     Set.values(collections);
@@ -216,7 +220,6 @@ module {
     let newRepository = switch (
       await* commitNewData(
         repository,
-        mst,
         newMst,
         newRecords,
         did,
@@ -264,7 +267,6 @@ module {
     let newRepository = switch (
       await* commitNewData(
         repository,
-        mst,
         newMst,
         newRecords,
         did,
@@ -304,7 +306,6 @@ module {
     let newRepository = switch (
       await* commitNewData(
         repository,
-        mst,
         newMst,
         newRecords,
         did,
@@ -401,7 +402,6 @@ module {
     let newRepository = switch (
       await* commitNewData(
         repository,
-        mst,
         newMst,
         updatedRecords,
         did,
@@ -437,16 +437,22 @@ module {
 
   public func exportData(
     repository : Repository,
-    sinceOrNull : ?TID.TID,
+    kind : ExportDataKind,
   ) : Result.Result<ExportData, Text> {
 
-    let (commits, prevRootIdOrNull) : ([(CID.CID, Commit.Commit)], ?CID.CID) = switch (sinceOrNull) {
-      case (null) {
-        // Export all commits
-        let commits = Iter.toArray(PureMap.entries(repository.commits));
-        (commits, null);
+    let (commits, prevRootIdOrNull, includeHistorical) : ([(CID.CID, Commit.Commit)], ?CID.CID, Bool) = switch (kind) {
+      case (#full({ includeHistorical })) {
+        if (includeHistorical) {
+          // Export all commits
+          let commits = Iter.toArray(PureMap.entries(repository.commits));
+          (commits, null, true);
+        } else {
+          let ?latestCommit = PureMap.get(repository.commits, CIDBuilder.compare, repository.head) else Runtime.trap("Corrupted repository. Latest commit not found: " # CID.toText(repository.head));
+          // Clear prev to avoid linking to historical commits
+          ([(repository.head, { latestCommit with prev = null })], null, false);
+        };
       };
-      case (?since) {
+      case (#since(since)) {
         var sinceCommitOrNull : ?Commit.Commit = null;
         let commits = DynamicArray.DynamicArray<(CID.CID, Commit.Commit)>(PureMap.size(repository.commits));
         for ((cid, commit) in PureMap.entries(repository.commits)) {
@@ -470,7 +476,7 @@ module {
           case (?sinceCommit) ?sinceCommit.data;
         };
 
-        (DynamicArray.toArray(commits), prevRootIdOrNull);
+        (DynamicArray.toArray(commits), prevRootIdOrNull, false);
       };
     };
 
@@ -485,8 +491,8 @@ module {
     let mst = buildMerkleSearchTree(repository);
     let (nodes, recordIds) : ([(CID.CID, MerkleNode.Node)], [CID.CID]) = switch (prevRootIdOrNull) {
       case (null) {
-        let nodes = MerkleSearchTree.nodes(mst) |> Iter.toArray(_);
-        let recordIds = MerkleSearchTree.values(mst) |> Iter.toArray(_);
+        let nodes = MerkleSearchTree.nodes(mst, includeHistorical) |> Iter.toArray(_);
+        let recordIds = MerkleSearchTree.values(mst, includeHistorical) |> Iter.toArray(_);
         (nodes, recordIds);
       };
       case (?prevRootId) {
@@ -512,7 +518,6 @@ module {
 
   private func commitNewData(
     repository : Repository,
-    mst : MerkleSearchTree.MerkleSearchTree,
     newMst : MerkleSearchTree.MerkleSearchTree,
     newRecords : PureMap.Map<CID.CID, DagCbor.Value>,
     did : DID.Plc.DID,
@@ -525,7 +530,7 @@ module {
         did,
         rev,
         newMst.root,
-        ?mst.root,
+        ?repository.head, // Previous commit
         signFunc,
       )
     ) {
@@ -557,7 +562,7 @@ module {
     did : DID.Plc.DID,
     rev : TID.TID,
     newNodeCID : CID.CID,
-    lastNodeCID : ?CID.CID,
+    lastCommitCID : ?CID.CID,
     signFunc : (Blob) -> async* Result.Result<Blob, Text>,
   ) : async* Result.Result<Commit.Commit, Text> {
 
@@ -566,7 +571,7 @@ module {
       version = 3; // TODO?
       data = newNodeCID;
       rev = rev;
-      prev = lastNodeCID;
+      prev = lastCommitCID;
     };
 
     // Sign commit

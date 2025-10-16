@@ -16,7 +16,6 @@ import DagCbor "mo:dag-cbor@2";
 import MerkleNode "MerkleNode";
 import List "mo:core@1/List";
 import Set "mo:core@1/Set";
-import Debug "mo:core@1/Debug";
 
 module {
 
@@ -54,10 +53,11 @@ module {
     validateNode(mst, rootNode, null);
   };
 
-  public func size(mst : MerkleSearchTree) : Nat {
+  public func size(mst : MerkleSearchTree, includeHistorical : Bool) : Nat {
     var count = 0;
     traverseTree(
       mst,
+      includeHistorical,
       func(key : Text, value : CID.CID) {
         count += 1;
       },
@@ -98,7 +98,7 @@ module {
     if (keyBytes.size() == 0) return #err("Key cannot be empty");
 
     let node = getRootNode(mst);
-    removeRecursive(mst, node, mst.root, keyBytes);
+    removeRecursive(mst, node, keyBytes);
   };
 
   public func addMany(
@@ -137,21 +137,25 @@ module {
     #ok((currentMst, List.toArray(removedCids)));
   };
 
-  public func entries(mst : MerkleSearchTree) : Iter.Iter<(Text, CID.CID)> {
+  public func entries(mst : MerkleSearchTree, includeHistorical : Bool) : Iter.Iter<(Text, CID.CID)> {
     // TODO optimize by not creating list?
     let records = List.empty<(Text, CID.CID)>();
 
     traverseTree(
       mst,
+      includeHistorical,
       func(key : Text, value : CID.CID) {
         List.add(records, (key, value));
       },
     );
-
     List.values(records);
   };
 
-  public func nodes(mst : MerkleSearchTree) : Iter.Iter<(CID.CID, MerkleNode.Node)> {
+  public func nodes(mst : MerkleSearchTree, includeHistorical : Bool) : Iter.Iter<(CID.CID, MerkleNode.Node)> {
+    if (includeHistorical) {
+      // Return all nodes
+      return PureMap.entries(mst.nodes);
+    };
     let rootNode = getRootNode(mst);
     let nodeList = List.empty<(CID.CID, MerkleNode.Node)>();
     iterateNodes(
@@ -242,12 +246,13 @@ module {
     };
   };
 
-  public func keys(mst : MerkleSearchTree) : Iter.Iter<Text> {
+  public func keys(mst : MerkleSearchTree, includeHistorical : Bool) : Iter.Iter<Text> {
     // TODO optimize by not creating list?
     let keys = List.empty<Text>();
 
     traverseTree(
       mst,
+      includeHistorical,
       func(key : Text, value : CID.CID) {
         List.add(keys, key);
       },
@@ -256,12 +261,13 @@ module {
     List.values(keys);
   };
 
-  public func values(mst : MerkleSearchTree) : Iter.Iter<CID.CID> {
+  public func values(mst : MerkleSearchTree, includeHistorical : Bool) : Iter.Iter<CID.CID> {
     // TODO optimize by not creating list?
     let values = List.empty<CID.CID>();
 
     traverseTree(
       mst,
+      includeHistorical,
       func(key : Text, value : CID.CID) {
         List.add(values, value);
       },
@@ -310,19 +316,74 @@ module {
 
   private func traverseTree(
     mst : MerkleSearchTree,
+    includeHistorical : Bool,
     onEntry : (key : Text, value : CID.CID) -> (),
   ) {
-    let rootNode = getRootNode(mst);
-    traverseTreeNode(
-      mst,
-      rootNode,
-      func(key : [Nat8], value : CID.CID) {
-        switch (keyToText(key)) {
-          case (?keyText) onEntry(keyText, value);
-          case (null) {};
+    if (includeHistorical) {
+      let uniqueKeys = Set.empty<Text>();
+      // Use all nodes, not just reachable ones
+      for ((_, node) in PureMap.entries(mst.nodes)) {
+        var prevKey : ?[Nat8] = null;
+        for (i in Nat.range(0, node.entries.size())) {
+          let entry = node.entries[i];
+          let key = reconstructKey(node.entries, i, prevKey);
+          let keyText = keyToText(key);
+          let uniqueKey = keyText # "~" # CID.toText(entry.valueCID);
+          if (not Set.contains(uniqueKeys, Text.compare, uniqueKey)) {
+            Set.add(uniqueKeys, Text.compare, uniqueKey);
+            // Historical keys may be in multiple nodes, so deduplicate
+            onEntry(keyText, entry.valueCID);
+          };
+          prevKey := ?key;
         };
-      },
-    );
+      };
+    } else {
+      let rootNode = getRootNode(mst);
+      traverseTreeNode(
+        mst,
+        rootNode,
+        func(key : [Nat8], value : CID.CID) {
+          onEntry(keyToText(key), value);
+        },
+      );
+    };
+  };
+
+  private func traverseTreeNode(
+    mst : MerkleSearchTree,
+    node : MerkleNode.Node,
+    callback : ([Nat8], CID.CID) -> (),
+  ) {
+    // Process left subtree
+    switch (node.leftSubtreeCID) {
+      case (?cid) {
+        switch (getNode(mst, cid)) {
+          case (?subtree) traverseTreeNode(mst, subtree, callback);
+          case null {};
+        };
+      };
+      case null {};
+    };
+
+    // Process entries
+    var prevKey : ?[Nat8] = null;
+    for (i in Nat.range(0, node.entries.size())) {
+      let entry = node.entries[i];
+      let key = reconstructKey(node.entries, i, prevKey);
+      callback(key, entry.valueCID);
+
+      // Process right subtree
+      switch (entry.subtreeCID) {
+        case (?cid) {
+          switch (getNode(mst, cid)) {
+            case (?subtree) traverseTreeNode(mst, subtree, callback);
+            case null {};
+          };
+        };
+        case null {};
+      };
+      prevKey := ?key;
+    };
   };
 
   private func debugNodeRecursive(
@@ -339,10 +400,7 @@ module {
     let keyRange = if (node.entries.size() > 0) {
       let firstKey = reconstructKey(node.entries, 0, null);
       let lastKey = reconstructKey(node.entries, node.entries.size() - 1, null);
-      switch (keyToText(firstKey), keyToText(lastKey)) {
-        case (?first, ?last) " range:" # first # "-" # last;
-        case _ "";
-      };
+      " range:" # keyToText(firstKey) # "-" # keyToText(lastKey);
     } else {
       " (empty)";
     };
@@ -556,7 +614,6 @@ module {
     addRecursive(
       mst,
       node,
-      mst.root,
       keyBytes,
       value,
       addOnly,
@@ -566,7 +623,6 @@ module {
   private func addRecursive(
     mst : MerkleSearchTree,
     node : MerkleNode.Node,
-    nodeCID : CID.CID,
     key : [Nat8],
     value : CID.CID,
     addOnly : Bool,
@@ -595,7 +651,7 @@ module {
         };
         case (#less) {
           insertPos := i;
-          return insertAtPosition(mst, node, nodeCID, insertPos, key, value, addOnly);
+          return insertAtPosition(mst, node, insertPos, key, value, addOnly);
         };
         case (#greater) insertPos := i + 1;
       };
@@ -603,13 +659,12 @@ module {
     };
 
     // Insert at end or in appropriate position
-    insertAtPosition(mst, node, nodeCID, insertPos, key, value, addOnly);
+    insertAtPosition(mst, node, insertPos, key, value, addOnly);
   };
 
   private func insertAtPosition(
     mst : MerkleSearchTree,
     node : MerkleNode.Node,
-    nodeCID : CID.CID,
     pos : Nat,
     key : [Nat8],
     value : CID.CID,
@@ -644,7 +699,7 @@ module {
         case (?cid) {
           // Recursively add to subtree
           let ?subtree = getNode(mst, cid) else return #err("Subtree not found");
-          switch (addRecursive(mst, subtree, cid, key, value, addOnly)) {
+          switch (addRecursive(mst, subtree, key, value, addOnly)) {
             case (#ok(updatedMst)) {
               // updatedMst.root is now the updated subtree's CID
               let newSubtreeCID = updatedMst.root;
@@ -844,7 +899,6 @@ module {
   private func removeRecursive(
     mst : MerkleSearchTree,
     node : MerkleNode.Node,
-    nodeCID : CID.CID,
     keyBytes : [Nat8],
   ) : Result.Result<(MerkleSearchTree, CID.CID), Text> {
 
@@ -919,7 +973,7 @@ module {
       case (?cid) {
         let ?subtree = getNode(mst, cid) else return #err("Subtree not found");
 
-        switch (removeRecursive(mst, subtree, cid, keyBytes)) {
+        switch (removeRecursive(mst, subtree, keyBytes)) {
           case (#ok((updatedMst, removedValue))) {
             let newSubtreeNode = getRootNode(updatedMst);
 
@@ -970,43 +1024,6 @@ module {
         };
       };
       case null #err("Key not found");
-    };
-  };
-
-  private func traverseTreeNode(
-    mst : MerkleSearchTree,
-    node : MerkleNode.Node,
-    callback : ([Nat8], CID.CID) -> (),
-  ) {
-    // Process left subtree
-    switch (node.leftSubtreeCID) {
-      case (?cid) {
-        switch (getNode(mst, cid)) {
-          case (?subtree) traverseTreeNode(mst, subtree, callback);
-          case null {};
-        };
-      };
-      case null {};
-    };
-
-    // Process entries
-    var prevKey : ?[Nat8] = null;
-    for (i in Nat.range(0, node.entries.size())) {
-      let entry = node.entries[i];
-      let key = reconstructKey(node.entries, i, prevKey);
-      callback(key, entry.valueCID);
-
-      // Process right subtree
-      switch (entry.subtreeCID) {
-        case (?cid) {
-          switch (getNode(mst, cid)) {
-            case (?subtree) traverseTreeNode(mst, subtree, callback);
-            case null {};
-          };
-        };
-        case null {};
-      };
-      prevKey := ?key;
     };
   };
 
@@ -1074,8 +1091,11 @@ module {
     leadingZeros;
   };
 
-  private func keyToText(key : [Nat8]) : ?Text {
-    Text.decodeUtf8(Blob.fromArray(key));
+  private func keyToText(key : [Nat8]) : Text {
+    switch (Text.decodeUtf8(Blob.fromArray(key))) {
+      case (?t) t;
+      case (null) Runtime.trap("Invalid entry key is not valid UTF-8: " # debug_show (key));
+    };
   };
 
   private func keyToBytes(key : Text) : [Nat8] {

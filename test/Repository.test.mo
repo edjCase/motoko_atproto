@@ -22,7 +22,7 @@ func mockSignFunc(data : Blob) : async* Result.Result<Blob, Text> {
 
 // Helper to create test DID
 func createTestDID() : DID.Plc.DID {
-  { identifier = "test123456789abcdef" };
+  { identifier = "test123456789abcdefghijk" };
 };
 
 // Helper to create test TID

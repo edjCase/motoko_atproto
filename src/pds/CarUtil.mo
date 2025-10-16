@@ -17,10 +17,10 @@ import List "mo:core@1/List";
 import DynamicArray "mo:xtended-collections@0/DynamicArray";
 import MerkleNode "../atproto/MerkleNode";
 import Debug "mo:core@1/Debug";
-import Iter "mo:core@1/Iter";
+import DagCborBuilder "../atproto/DagCborBuilder";
 
 module {
-  public func buildRepository(request : CAR.File) : Result.Result<(DID.Plc.DID, Repository.Repository), Text> {
+  public func toRepository(request : CAR.File) : Result.Result<(DID.Plc.DID, Repository.Repository), Text> {
     let roots = request.header.roots;
     if (roots.size() == 0) {
       return #err("CAR file has no root CIDs");
@@ -75,7 +75,7 @@ module {
       allCommits := PureMap.add(allCommits, CIDBuilder.compare, currentCommitInfo.0, currentCommitInfo.1);
 
       let ?prevCID = currentCommitInfo.1.prev else break w;
-      let ?prevData = PureMap.get(blockMap, CIDBuilder.compare, prevCID) else break w;
+      let ?prevData = PureMap.get(blockMap, CIDBuilder.compare, prevCID) else return #err("Previous commit block not found: " # CID.toText(prevCID));
 
       let prevCommit = switch (DagCbor.fromBytes(prevData.vals())) {
         case (#ok(prevValue)) {
@@ -105,10 +105,10 @@ module {
 
   public func fromRepository(
     repository : Repository.Repository,
-    sinceOrNull : ?TID.TID,
+    exportDataKind : Repository.ExportDataKind,
   ) : Result.Result<CAR.File, Text> {
 
-    let exportData = switch (Repository.exportData(repository, sinceOrNull)) {
+    let exportData = switch (Repository.exportData(repository, exportDataKind)) {
       case (#err(e)) return #err("Failed to export repository data: " # e);
       case (#ok(data)) data;
     };
@@ -117,11 +117,12 @@ module {
 
     // Add commit blocks
     for ((cid, commit) in exportData.commits.vals()) {
-      let cborValue = commitToCbor(commit);
+      let cborValue = DagCborBuilder.fromCommit(commit);
       let cborBytes = switch (DagCbor.toBytes(cborValue)) {
         case (#ok(bytes)) bytes;
         case (#err(e)) return #err("Failed to encode commit to CBOR: " # debug_show (e));
       };
+      Debug.print("Commit CID: " # CID.toText(cid));
       let block : CAR.Block = {
         cid = cid;
         data = Blob.fromArray(cborBytes);
@@ -135,6 +136,7 @@ module {
         case (#ok(bytes)) bytes;
         case (#err(e)) return #err("Failed to encode record to CBOR: " # debug_show (e));
       };
+      Debug.print("Record CID: " # CID.toText(cid));
       let block : CAR.Block = {
         cid = cid;
         data = Blob.fromArray(cborBytes);
@@ -144,11 +146,12 @@ module {
 
     // Add node blocks
     for ((cid, node) in exportData.nodes.vals()) {
-      let cborValue = nodeToCbor(node);
+      let cborValue = DagCborBuilder.fromMSTNode(node);
       let cborBytes = switch (DagCbor.toBytes(cborValue)) {
         case (#ok(bytes)) bytes;
         case (#err(e)) return #err("Failed to encode node to CBOR: " # debug_show (e));
       };
+      Debug.print("Node CID: " # CID.toText(cid));
       let block : CAR.Block = {
         cid = cid;
         data = Blob.fromArray(cborBytes);
@@ -165,63 +168,6 @@ module {
     });
   };
 
-  private func nodeToCbor(node : MerkleNode.Node) : DagCbor.Value {
-    let size = if (node.leftSubtreeCID == null) 1 else 2;
-    let fields = DynamicArray.DynamicArray<(Text, DagCbor.Value)>(size);
-
-    switch (node.leftSubtreeCID) {
-      case (?cid) {
-        fields.add(("l", #cid(cid)));
-      };
-      case (null) {};
-    };
-
-    let entryArray = DynamicArray.DynamicArray<DagCbor.Value>(node.entries.size());
-    for (entry in node.entries.vals()) {
-      entryArray.add(entryToCbor(entry));
-    };
-    fields.add(("e", #array(DynamicArray.toArray(entryArray))));
-
-    #map(DynamicArray.toArray(fields));
-  };
-
-  private func entryToCbor(entry : MerkleNode.TreeEntry) : DagCbor.Value {
-    let size = if (entry.subtreeCID == null) 3 else 4;
-    let fields = DynamicArray.DynamicArray<(Text, DagCbor.Value)>(size);
-
-    fields.add(("p", #int(entry.prefixLength)));
-    fields.add(("k", #bytes(entry.keySuffix)));
-    fields.add(("v", #cid(entry.valueCID)));
-
-    switch (entry.subtreeCID) {
-      case (?cid) {
-        fields.add(("t", #cid(cid)));
-      };
-      case (null) {};
-    };
-
-    #map(DynamicArray.toArray(fields));
-  };
-
-  private func commitToCbor(commit : Commit.Commit) : DagCbor.Value {
-    let size = if (commit.prev == null) 5 else 6;
-    let fields = DynamicArray.DynamicArray<(Text, DagCbor.Value)>(size);
-    fields.add(("did", #text(DID.Plc.toText(commit.did))));
-    fields.add(("version", #int(commit.version)));
-    fields.add(("data", #cid(commit.data)));
-    fields.add(("rev", #text(TID.toText(commit.rev))));
-    fields.add(("sig", #bytes(Blob.toArray(commit.sig))));
-
-    switch (commit.prev) {
-      case (?prevCID) {
-        fields.add(("prev", #cid(prevCID)));
-      };
-      case (null) ();
-    };
-
-    #map(DynamicArray.toArray(fields));
-  };
-
   // Helper function to extract all records from MST
   private func extractAllRecords(
     mst : MerkleSearchTree.MerkleSearchTree,
@@ -233,7 +179,7 @@ module {
     // This function is called with an MST reconstructed from blocks, so we need to find the root
     // For now, get the first node as root (this may need refinement for complex MSTs)
 
-    for (cid in MerkleSearchTree.values(mst)) {
+    for (cid in MerkleSearchTree.values(mst, true)) {
       let ?blockData = PureMap.get(blockMap, CIDBuilder.compare, cid) else {
         return #err("Record block not found: " # CID.toText(cid));
       };
@@ -267,7 +213,7 @@ module {
             case ("did", #text(didText)) {
               switch (DID.Plc.fromText(didText)) {
                 case (#ok(d)) did := ?d;
-                case (#err(_)) return #err("Invalid DID in commit");
+                case (#err(e)) return #err("Invalid DID in commit: " # didText # ", Error: " # e);
               };
             };
             case ("version", #int(v)) version := ?Int.abs(v);

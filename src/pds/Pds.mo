@@ -143,6 +143,11 @@ shared ({ caller = deployer }) persistent actor class Pds(
     };
   };
 
+  public shared query func exportRepoData() : async Result.Result<Repository.ExportData, Text> {
+    let repository = repositoryHandler.get();
+    Repository.exportData(repository, #full({ includeHistorical = true }));
+  };
+
   // Candid API methods
   public shared ({ caller }) func initialize(request : PdsInterface.InitializeRequest) : async Result.Result<(), Text> {
     if (caller != owner and caller != deployer) {
@@ -165,7 +170,7 @@ shared ({ caller = deployer }) persistent actor class Pds(
       };
       case (#car(carBlob)) {
         switch (CAR.fromBytes(carBlob.vals())) {
-          case (#ok(parsedFile)) switch (CarUtil.buildRepository(parsedFile)) {
+          case (#ok(parsedFile)) switch (CarUtil.toRepository(parsedFile)) {
             case (#ok((did, repo))) (did, ?repo);
             case (#err(error)) return #err("Failed to build repository from CAR file: " # error);
           };
