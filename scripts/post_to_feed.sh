@@ -1,18 +1,23 @@
 #!/bin/bash
 
 if [ -z "$1" ]; then
-    echo "Error: canisterId required"
-    echo "Usage: $0 <canisterId> <message>"
+    echo "Error: network required (local/ic)"
+    echo "Usage: $0 <network> <message>"
     exit 1
 fi
+
+network=$1
+
+canister_id=$(dfx canister id pds  --network "${network}")
 
 if [ -z "$2" ]; then
     echo "Error: message required"
-    echo "Usage: $0 <canisterId> <message>"
+    echo "Usage: $0 <network> <message>"
     exit 1
 fi
 
-canister_id=$1
 message=$2
 
-dfx canister call ${canister_id} post "(\"${message}\")"
+echo "Posting '${message}' to the feed of canister ${canister_id}..."
+
+dfx canister call ${canister_id} post "(\"${message}\")" --network "${network}"

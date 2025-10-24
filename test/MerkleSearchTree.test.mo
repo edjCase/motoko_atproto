@@ -1,20 +1,12 @@
-import Debug "mo:core@1/Debug";
-import Result "mo:core@1/Result";
 import Runtime "mo:core@1/Runtime";
-import Int "mo:core@1/Int";
 import CID "mo:cid@1";
 import Text "mo:core@1/Text";
-import Blob "mo:core@1/Blob";
 import Array "mo:core@1/Array";
-import PureMap "mo:core@1/pure/Map";
-import MerkleNode "../src/atproto/MerkleNode";
 import MerkleSearchTree "../src/atproto/MerkleSearchTree";
-import CIDBuilder "../src/atproto/CIDBuilder";
 import { test } "mo:test";
 import Sha256 "mo:sha2@0/Sha256";
 import Nat "mo:core@1/Nat";
 import Iter "mo:core@1/Iter";
-import DagCbor "mo:dag-cbor@2";
 
 // Helper function to create test CIDs
 func createTestCID(content : Text) : CID.CID {
@@ -279,7 +271,7 @@ test(
     // Test empty key
     switch (MerkleSearchTree.add(mst, "", testValue)) {
       case (#ok(_)) Runtime.trap("Should have failed with empty key");
-      case (#err(msg)) {};
+      case (#err(_)) {};
     };
 
     // Test duplicate key addition
@@ -289,7 +281,7 @@ test(
         mst := newMst;
         switch (MerkleSearchTree.add(mst, validKey, testValue)) {
           case (#ok(_)) Runtime.trap("Should have failed with duplicate key");
-          case (#err(msg)) {};
+          case (#err(_)) {};
         };
       };
       case (#err(msg)) Runtime.trap("Initial key addition failed: " # msg);
@@ -917,8 +909,8 @@ test(
     };
 
     switch (MerkleSearchTree.add(mst, path, cidA)) {
-      case (#ok(newMst)) Runtime.trap("Duplicate entry added successfully");
-      case (#err(msg)) { /* Expected failure */ };
+      case (#ok(_)) Runtime.trap("Duplicate entry added successfully");
+      case (#err(_)) { /* Expected failure */ };
     };
   },
 );

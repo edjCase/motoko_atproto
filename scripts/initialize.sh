@@ -1,13 +1,22 @@
 #!/bin/bash
 set -e
 
-canister_id=$(dfx canister id pds)
+
+if [ -z "$1" ]; then
+    echo "Error: network required"
+    echo "Usage: $0 <network> <mode>"
+    exit 1
+fi
+
+network=$1
+
+canister_id=$(dfx canister id pds  --network "${network}")
 
 echo "Initializing PDS in canister ${canister_id}..."
 
 
 # Initialize PDS
-response=$(dfx canister call pds initialize --output json "(record { plc = variant { id = \"sdpv6troz7ozrjf2titdtcd2\" }; hostname = \"${canister_id}.localhost\"; handlePrefix = null })")
+response=$(dfx canister call pds initialize  --network "${network}" --output json "(record { plc = variant { id = \"sdpv6troz7ozrjf2titdtcd2\" }; hostname = \"${canister_id}.localhost\"; handlePrefix = null })")
 
 # Check for error
 if echo "$response" | grep -q '"err"'; then

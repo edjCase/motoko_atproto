@@ -1,8 +1,7 @@
-import RouteContext "mo:liminal@1/RouteContext";
-import Route "mo:liminal@1/Route";
+import RouteContext "mo:liminal@2/RouteContext";
+import Route "mo:liminal@2/Route";
 import DIDModule "./DID";
 import KeyHandler "./Handlers/KeyHandler";
-import Domain "mo:url-kit@3/Domain";
 import DID "mo:did@3";
 import DIDDocument "../atproto/DIDDocument";
 import ServerInfo "./ServerInfo";

@@ -3,12 +3,12 @@ name = "atproto"
 version = "0.0.1"
 description = ""
 repository = "https://github.com/edjcase/motoko_atproto"
-keywords = ["at", "protocol", "atproto", "ipld"]
+keywords = [ "at", "protocol", "atproto", "ipld" ]
 license = "MIT"
 
 [dependencies]
 "core@1" = "1.0.0"
-"liminal@1" = "1.3.0"
+"liminal@2" = "2.0.1"
 "base-x-encoder@2" = "2.1.0"
 "dag-cbor@2" = "2.2.1"
 "cid@1" = "1.1.0"

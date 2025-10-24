@@ -14,8 +14,6 @@ import Blob "mo:core@1/Blob";
 import Int "mo:core@1/Int";
 import Repository "../atproto/Repository";
 import List "mo:core@1/List";
-import DynamicArray "mo:xtended-collections@0/DynamicArray";
-import MerkleNode "../atproto/MerkleNode";
 import Debug "mo:core@1/Debug";
 import DagCborBuilder "../atproto/DagCborBuilder";
 
@@ -179,7 +177,7 @@ module {
     // This function is called with an MST reconstructed from blocks, so we need to find the root
     // For now, get the first node as root (this may need refinement for complex MSTs)
 
-    for (cid in MerkleSearchTree.values(mst, true)) {
+    for (cid in MerkleSearchTree.valuesAdvanced(mst, { includeHistorical = true })) {
       let ?blockData = PureMap.get(blockMap, CIDBuilder.compare, cid) else {
         return #err("Record block not found: " # CID.toText(cid));
       };

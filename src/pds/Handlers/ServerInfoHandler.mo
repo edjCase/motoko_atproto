@@ -1,5 +1,4 @@
 import ServerInfo "../ServerInfo";
-import DID "mo:did@3";
 import Runtime "mo:core@1/Runtime";
 
 module {

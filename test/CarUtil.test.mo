@@ -1,4 +1,3 @@
-import Debug "mo:core@1/Debug";
 import Result "mo:core@1/Result";
 import Runtime "mo:core@1/Runtime";
 import DID "mo:did@3";
@@ -75,7 +74,7 @@ await testAsync(
     };
     repository := newRepository2;
 
-    let carFile = switch (CarUtil.fromRepository(repository, null)) {
+    let carFile = switch (CarUtil.fromRepository(repository, #full({ includeHistorical = false }))) {
       case (#err(err)) Runtime.trap("Error creating CAR file: " # err);
       case (#ok(carFile)) carFile;
     };
@@ -85,10 +84,10 @@ await testAsync(
         if (repoId != actualRepoId) {
           Runtime.trap("Root CIDs do not match");
         };
-        let expectedData = Repository.exportData(repository, null);
-        let actualData = Repository.exportData(actualRepo, null);
+        let expectedData = Repository.exportData(repository, #full({ includeHistorical = false }));
+        let actualData = Repository.exportData(actualRepo, #full({ includeHistorical = false }));
         if (expectedData != actualData) {
-          Runtime.trap("Repository data does not match");
+          Runtime.trap("Repository data does not match\nExpected: " # debug_show (expectedData) # "\nActual: " # debug_show (actualData));
         };
       };
     };

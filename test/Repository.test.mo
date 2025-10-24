@@ -1,4 +1,3 @@
-import Debug "mo:core@1/Debug";
 import Result "mo:core@1/Result";
 import Runtime "mo:core@1/Runtime";
 import CID "mo:cid@1";
@@ -835,40 +834,60 @@ await testAsync(
     };
     repository := newRepository2;
 
-    switch (Repository.exportData(repository, null)) {
+    switch (Repository.exportData(repository, #full({ includeHistorical = false }))) {
       case (#ok(data)) {
         if (data.records.size() != 2) {
-          Runtime.trap("Expected 2 records in export, got " # debug_show (data.records.size()));
+          Runtime.trap("full, no historical - Expected 2 records in export, got " # debug_show (data.records.size()));
         };
         if (not Array.any(data.records, func(r : (CID.CID, DagCbor.Value)) : Bool = r.0 == record1CID)) {
-          Runtime.trap("Export missing record1 CID");
+          Runtime.trap("full, no historical - Export missing record1 CID");
         };
         if (not Array.any(data.records, func(r : (CID.CID, DagCbor.Value)) : Bool = r.0 == record2CID)) {
-          Runtime.trap("Export missing record2 CID");
+          Runtime.trap("full, no historical - Export missing record2 CID");
         };
-        if (data.commits.size() != 3) {
-          Runtime.trap("Expected 3 commits in export, got " # debug_show (data.commits.size()));
+        if (data.commits.size() != 1) {
+          Runtime.trap("full, no historical - Expected 1 commit in export, got " # debug_show (data.commits.size()));
         };
         if (data.nodes.size() != 1) {
-          Runtime.trap("Expected exactly 1 node in export");
+          Runtime.trap("full, no historical - Expected exactly 1 node in export, got " # debug_show (data.nodes.size()));
+        };
+      };
+      case (#err(e)) Runtime.trap("Export failed: " # e);
+    };
+    switch (Repository.exportData(repository, #full({ includeHistorical = true }))) {
+      case (#ok(data)) {
+        if (data.records.size() != 2) {
+          Runtime.trap("full, historical - Expected 2 records in export, got " # debug_show (data.records.size()));
+        };
+        if (not Array.any(data.records, func(r : (CID.CID, DagCbor.Value)) : Bool = r.0 == record1CID)) {
+          Runtime.trap("full, historical - Export missing record1 CID");
+        };
+        if (not Array.any(data.records, func(r : (CID.CID, DagCbor.Value)) : Bool = r.0 == record2CID)) {
+          Runtime.trap("full, historical - Export missing record2 CID");
+        };
+        if (data.commits.size() != 3) {
+          Runtime.trap("full, historical - Expected 3 commits in export, got " # debug_show (data.commits.size()));
+        };
+        if (data.nodes.size() != 3) {
+          Runtime.trap("full, historical - Expected exactly 3 nodes in export, got " # debug_show (data.nodes.size()));
         };
       };
       case (#err(e)) Runtime.trap("Export failed: " # e);
     };
 
-    switch (Repository.exportData(repository, ?firstTID)) {
+    switch (Repository.exportData(repository, #since(firstTID))) {
       case (#ok(data)) {
         if (data.records.size() != 1) {
-          Runtime.trap("Expected 1 records in export, got " # debug_show (data.records.size()));
+          Runtime.trap("since - Expected 1 records in export, got " # debug_show (data.records.size()));
         };
         if (not Array.any(data.records, func(r : (CID.CID, DagCbor.Value)) : Bool = r.0 == record2CID)) {
-          Runtime.trap("Export missing record2 CID");
+          Runtime.trap("since - Export missing record2 CID");
         };
         if (data.commits.size() != 1) {
-          Runtime.trap("Expected 1 commit in export, got " # debug_show (data.commits.size()));
+          Runtime.trap("since - Expected 1 commit in export, got " # debug_show (data.commits.size()));
         };
         if (data.nodes.size() != 1) {
-          Runtime.trap("Expected exactly 1 node in export");
+          Runtime.trap("since - Expected exactly 1 node in export, got " # debug_show (data.nodes.size()));
         };
       };
       case (#err(e)) Runtime.trap("Export failed: " # e);

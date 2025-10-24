@@ -85,6 +85,14 @@ module {
     #since : TID.TID;
   };
 
+  public type EntriesOptions = {
+    includeHistorical : Bool;
+  };
+
+  public type KeysOptions = {
+    includeHistorical : Bool;
+  };
+
   public func empty(
     did : DID.Plc.DID,
     rev : TID.TID,
@@ -117,9 +125,13 @@ module {
     });
   };
 
-  public func recordKeys(repository : Repository, includeHistorical : Bool) : Iter.Iter<Key> {
+  public func recordKeys(repository : Repository) : Iter.Iter<Key> {
+    recordKeysAdvanced(repository, { includeHistorical = false });
+  };
+
+  public func recordKeysAdvanced(repository : Repository, options : KeysOptions) : Iter.Iter<Key> {
     let mst = buildMerkleSearchTree(repository);
-    MerkleSearchTree.keys(mst, includeHistorical)
+    MerkleSearchTree.keysAdvanced(mst, options)
     |> Iter.map(
       _,
       func(key : Text) : Key {
@@ -131,9 +143,13 @@ module {
     );
   };
 
-  public func recordEntries(repository : Repository, includeHistorical : Bool) : Iter.Iter<(Key, RecordData)> {
+  public func recordEntries(repository : Repository) : Iter.Iter<(Key, RecordData)> {
+    recordEntriesAdvanced(repository, { includeHistorical = false });
+  };
+
+  public func recordEntriesAdvanced(repository : Repository, options : EntriesOptions) : Iter.Iter<(Key, RecordData)> {
     let mst = buildMerkleSearchTree(repository);
-    MerkleSearchTree.entries(mst, includeHistorical)
+    MerkleSearchTree.entriesAdvanced(mst, options)
     |> Iter.map<(Text, CID.CID), (Key, RecordData)>(
       _,
       func((keyText, value) : (Text, CID.CID)) : (Key, RecordData) {
@@ -154,9 +170,12 @@ module {
     );
   };
 
-  public func recordEntriesByCollection(repository : Repository, collection : Text, includeHistorical : Bool) : Iter.Iter<(Key, RecordData)> {
+  public func recordEntriesByCollection(repository : Repository, collection : Text) : Iter.Iter<(Key, RecordData)> {
+    recordEntriesByCollectionAdvanced(repository, collection, { includeHistorical = false });
+  };
 
-    recordEntries(repository, includeHistorical)
+  public func recordEntriesByCollectionAdvanced(repository : Repository, collection : Text, options : EntriesOptions) : Iter.Iter<(Key, RecordData)> {
+    recordEntriesAdvanced(repository, options)
     |> Iter.filter(
       _,
       func((key, _) : (Key, RecordData)) : Bool {
@@ -165,9 +184,13 @@ module {
     );
   };
 
-  public func collectionKeys(repository : Repository, includeHistorical : Bool) : Iter.Iter<Text> {
+  public func collectionKeys(repository : Repository) : Iter.Iter<Text> {
+    collectionKeysAdvanced(repository, { includeHistorical = false });
+  };
+
+  public func collectionKeysAdvanced(repository : Repository, options : KeysOptions) : Iter.Iter<Text> {
     let collections = Set.empty<Text>();
-    for (key in recordKeys(repository, includeHistorical)) {
+    for (key in recordKeysAdvanced(repository, options)) {
       Set.add(collections, Text.compare, key.collection);
     };
     Set.values(collections);
@@ -491,8 +514,8 @@ module {
     let mst = buildMerkleSearchTree(repository);
     let (nodes, recordIds) : ([(CID.CID, MerkleNode.Node)], [CID.CID]) = switch (prevRootIdOrNull) {
       case (null) {
-        let nodes = MerkleSearchTree.nodes(mst, includeHistorical) |> Iter.toArray(_);
-        let recordIds = MerkleSearchTree.values(mst, includeHistorical) |> Iter.toArray(_);
+        let nodes = MerkleSearchTree.nodesAdvanced(mst, { includeHistorical = includeHistorical }) |> Iter.toArray(_);
+        let recordIds = MerkleSearchTree.valuesAdvanced(mst, { includeHistorical = includeHistorical }) |> Iter.toArray(_);
         (nodes, recordIds);
       };
       case (?prevRootId) {

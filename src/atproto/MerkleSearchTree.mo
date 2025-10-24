@@ -29,6 +29,26 @@ module {
     recordIds : [CID.CID];
   };
 
+  public type SizeOptions = {
+    includeHistorical : Bool;
+  };
+
+  public type EntriesOptions = {
+    includeHistorical : Bool;
+  };
+
+  public type KeysOptions = {
+    includeHistorical : Bool;
+  };
+
+  public type ValuesOptions = {
+    includeHistorical : Bool;
+  };
+
+  public type NodesOptions = {
+    includeHistorical : Bool;
+  };
+
   public func empty() : MerkleSearchTree {
     let emptyNode : MerkleNode.Node = {
       leftSubtreeCID = null;
@@ -53,11 +73,15 @@ module {
     validateNode(mst, rootNode, null);
   };
 
-  public func size(mst : MerkleSearchTree, includeHistorical : Bool) : Nat {
+  public func size(mst : MerkleSearchTree) : Nat {
+    sizeAdvanced(mst, { includeHistorical = false });
+  };
+
+  public func sizeAdvanced(mst : MerkleSearchTree, options : SizeOptions) : Nat {
     var count = 0;
     traverseTree(
       mst,
-      includeHistorical,
+      options.includeHistorical,
       func(key : Text, value : CID.CID) {
         count += 1;
       },
@@ -137,13 +161,17 @@ module {
     #ok((currentMst, List.toArray(removedCids)));
   };
 
-  public func entries(mst : MerkleSearchTree, includeHistorical : Bool) : Iter.Iter<(Text, CID.CID)> {
+  public func entries(mst : MerkleSearchTree) : Iter.Iter<(Text, CID.CID)> {
+    entriesAdvanced(mst, { includeHistorical = false });
+  };
+
+  public func entriesAdvanced(mst : MerkleSearchTree, options : EntriesOptions) : Iter.Iter<(Text, CID.CID)> {
     // TODO optimize by not creating list?
     let records = List.empty<(Text, CID.CID)>();
 
     traverseTree(
       mst,
-      includeHistorical,
+      options.includeHistorical,
       func(key : Text, value : CID.CID) {
         List.add(records, (key, value));
       },
@@ -151,8 +179,12 @@ module {
     List.values(records);
   };
 
-  public func nodes(mst : MerkleSearchTree, includeHistorical : Bool) : Iter.Iter<(CID.CID, MerkleNode.Node)> {
-    if (includeHistorical) {
+  public func nodes(mst : MerkleSearchTree) : Iter.Iter<(CID.CID, MerkleNode.Node)> {
+    nodesAdvanced(mst, { includeHistorical = false });
+  };
+
+  public func nodesAdvanced(mst : MerkleSearchTree, options : NodesOptions) : Iter.Iter<(CID.CID, MerkleNode.Node)> {
+    if (options.includeHistorical) {
       // Return all nodes
       return PureMap.entries(mst.nodes);
     };
@@ -246,13 +278,17 @@ module {
     };
   };
 
-  public func keys(mst : MerkleSearchTree, includeHistorical : Bool) : Iter.Iter<Text> {
+  public func keys(mst : MerkleSearchTree) : Iter.Iter<Text> {
+    keysAdvanced(mst, { includeHistorical = false });
+  };
+
+  public func keysAdvanced(mst : MerkleSearchTree, options : KeysOptions) : Iter.Iter<Text> {
     // TODO optimize by not creating list?
     let keys = List.empty<Text>();
 
     traverseTree(
       mst,
-      includeHistorical,
+      options.includeHistorical,
       func(key : Text, value : CID.CID) {
         List.add(keys, key);
       },
@@ -261,13 +297,17 @@ module {
     List.values(keys);
   };
 
-  public func values(mst : MerkleSearchTree, includeHistorical : Bool) : Iter.Iter<CID.CID> {
+  public func values(mst : MerkleSearchTree) : Iter.Iter<CID.CID> {
+    valuesAdvanced(mst, { includeHistorical = false });
+  };
+
+  public func valuesAdvanced(mst : MerkleSearchTree, options : ValuesOptions) : Iter.Iter<CID.CID> {
     // TODO optimize by not creating list?
     let values = List.empty<CID.CID>();
 
     traverseTree(
       mst,
-      includeHistorical,
+      options.includeHistorical,
       func(key : Text, value : CID.CID) {
         List.add(values, value);
       },

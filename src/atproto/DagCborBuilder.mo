@@ -2,11 +2,9 @@ import Commit "Commit";
 import DID "mo:did@3";
 import TID "mo:tid@1";
 import DagCbor "mo:dag-cbor@2";
-import BaseX "mo:base-x-encoder@2";
 import Text "mo:core@1/Text";
 import Array "mo:core@1/Array";
 import MerkleNode "MerkleNode";
-import Nat8 "mo:core@1/Nat8";
 import DynamicArray "mo:xtended-collections@0/DynamicArray";
 import Blob "mo:core@1/Blob";
 

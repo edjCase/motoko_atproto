@@ -202,7 +202,7 @@ module {
 
   public class Handler(
     stableData : ?StableData,
-    keyHandler : KeyHandler.Handler,
+    keyHandler : KeyHandler.HandlerInterface,
     serverInfoHandler : ServerInfoHandler.Handler,
     tidGenerator : TID.Generator,
   ) {
@@ -258,7 +258,7 @@ module {
 
     public func getAllCollections() : [Text] {
       let repository = getRepository();
-      Repository.collectionKeys(repository, false) |> Iter.toArray(_);
+      Repository.collectionKeys(repository) |> Iter.toArray(_);
     };
 
     public func getRecord(request : GetRecordRequest) : ?GetRecordResponse {
@@ -572,7 +572,7 @@ module {
       let repository = getRepository();
 
       // TODO optimize for reverse/limit/cursor
-      let records = Repository.recordEntriesByCollection(repository, request.collection, false);
+      let records = Repository.recordEntriesByCollection(repository, request.collection);
 
       // Apply reverse ordering if requested
       let orderedRecords = switch (request.reverse) {

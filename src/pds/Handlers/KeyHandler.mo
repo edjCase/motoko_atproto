@@ -15,7 +15,12 @@ module {
     #verification;
   };
 
-  public class Handler(stableData : StableData) = this {
+  public type HandlerInterface = {
+    sign : (key : KeyKind, messageHash : Blob) -> async* Result.Result<Blob, Text>;
+    getPublicKey : (key : KeyKind) -> async* Result.Result<DID.Key.DID, Text>;
+  };
+
+  public class Handler(stableData : StableData) : HandlerInterface = this {
     var verificationDerivationPath : [Blob] = stableData.verificationDerivationPath;
     var verificationPublicKeyCache : ?DID.Key.DID = null; // Cache the verification key to avoid repeated calls to ic.ecdsa_public_key
     var rotationPublicKeyCache : ?DID.Key.DID = null; // Cache the rotation key to avoid repeated calls to ic.ecdsa_public_key

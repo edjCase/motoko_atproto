@@ -2,11 +2,11 @@ import Text "mo:core@1/Text";
 import Result "mo:core@1/Result";
 import XrpcRouter "./XrpcRouter";
 import WellKnownRouter "./WellKnownRouter";
-import RouterMiddleware "mo:liminal@1/Middleware/Router";
-import CompressionMiddleware "mo:liminal@1/Middleware/Compression";
-import CORSMiddleware "mo:liminal@1/Middleware/CORS";
-import Liminal "mo:liminal@1";
-import Router "mo:liminal@1/Router";
+import RouterMiddleware "mo:liminal@2/Middleware/Router";
+import CompressionMiddleware "mo:liminal@2/Middleware/Compression";
+import CORSMiddleware "mo:liminal@2/Middleware/CORS";
+import Liminal "mo:liminal@2";
+import Router "mo:liminal@2/Router";
 import RepositoryHandler "Handlers/RepositoryHandler";
 import KeyHandler "Handlers/KeyHandler";
 import ServerInfoHandler "Handlers/ServerInfoHandler";
@@ -109,7 +109,15 @@ shared ({ caller = deployer }) persistent actor class Pds(
     ];
     errorSerializer = Liminal.defaultJsonErrorSerializer;
     candidRepresentationNegotiator = Liminal.defaultCandidRepresentationNegotiator;
-    logger = Liminal.buildDebugLogger(#info);
+    logger = Liminal.buildDebugLogger(#verbose);
+    urlNormalization = {
+      pathIsCaseSensitive = false;
+      preserveTrailingSlash = false;
+      queryKeysAreCaseSensitive = false;
+      removeEmptyPathSegments = true;
+      resolvePathDotSegments = true;
+      usernameIsCaseSensitive = false;
+    };
   });
 
   // Http server methods
@@ -139,7 +147,7 @@ shared ({ caller = deployer }) persistent actor class Pds(
     };
     switch (await* repositoryHandler.createRecord(createRecordRequest)) {
       case (#ok(response)) #ok(CID.toText(response.cid));
-      case (#err(e)) #err("Failed to post: " # e);
+      case (#err(e)) #err("Failed to post to the feed: " # e);
     };
   };
 
