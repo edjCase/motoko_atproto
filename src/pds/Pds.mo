@@ -21,6 +21,8 @@ import PdsInterface "./PdsInterface";
 import DateTime "mo:datetime@1/DateTime";
 import Repository "../atproto/Repository";
 import Option "mo:core@1/Option";
+import RouteContext "mo:liminal@2/RouteContext";
+import Route "mo:liminal@2/Route";
 
 shared ({ caller = deployer }) persistent actor class Pds(
   initData : {
@@ -29,69 +31,94 @@ shared ({ caller = deployer }) persistent actor class Pds(
 ) : async PdsInterface.Actor = this {
   var owner = Option.get(initData.owner, deployer);
 
-  transient let tidGenerator = TID.Generator();
-
   var repositoryStableData : ?RepositoryHandler.StableData = null;
   var serverInfoStableData : ?ServerInfoHandler.StableData = null;
   var keyHandlerStableData : KeyHandler.StableData = {
     verificationDerivationPath = ["\00"]; // TODO: configure properly
   };
 
-  // Handlers
-  transient var keyHandler = KeyHandler.Handler(keyHandlerStableData);
-  transient var serverInfoHandler = ServerInfoHandler.Handler(serverInfoStableData);
-  transient var didDirectoryHandler = DIDDirectoryHandler.Handler(keyHandler);
-  transient var repositoryHandler = RepositoryHandler.Handler(
-    repositoryStableData,
-    keyHandler,
-    serverInfoHandler,
-    tidGenerator,
-  );
-
-  // Routers
-  transient var xrpcRouter = XrpcRouter.Router(
-    repositoryHandler,
-    serverInfoHandler,
-    keyHandler,
-  );
-  transient var wellKnownRouter = WellKnownRouter.Router(
-    serverInfoHandler,
-    keyHandler,
-  );
-
-  system func preupgrade() {
-    keyHandlerStableData := keyHandler.toStableData();
-    serverInfoStableData := serverInfoHandler.toStableData();
-    repositoryStableData := repositoryHandler.toStableData();
+  type Handlers = {
+    repositoryHandler : RepositoryHandler.Handler;
+    serverInfoHandler : ServerInfoHandler.Handler;
+    keyHandler : KeyHandler.Handler;
+    didDirectoryHandler : DIDDirectoryHandler.Handler;
   };
 
-  system func postupgrade() {
-    keyHandler := KeyHandler.Handler(keyHandlerStableData);
-    serverInfoHandler := ServerInfoHandler.Handler(serverInfoStableData);
-    didDirectoryHandler := DIDDirectoryHandler.Handler(keyHandler);
-    repositoryHandler := RepositoryHandler.Handler(
+  func buildRouters() : (XrpcRouter.Router, WellKnownRouter.Router, Handlers, () -> ()) {
+    let tidGenerator = TID.Generator();
+    let keyHandler = KeyHandler.Handler(keyHandlerStableData);
+    let serverInfoHandler = ServerInfoHandler.Handler(serverInfoStableData);
+    let didDirectoryHandler = DIDDirectoryHandler.Handler(keyHandler);
+    let repositoryHandler = RepositoryHandler.Handler(
       repositoryStableData,
       keyHandler,
       serverInfoHandler,
       tidGenerator,
     );
-    xrpcRouter := XrpcRouter.Router(
+    let handlers = {
+      repositoryHandler = repositoryHandler;
+      serverInfoHandler = serverInfoHandler;
+      keyHandler = keyHandler;
+      didDirectoryHandler = didDirectoryHandler;
+    };
+    let xrpcRouter = XrpcRouter.Router(
       repositoryHandler,
       serverInfoHandler,
       keyHandler,
     );
-    wellKnownRouter := WellKnownRouter.Router(serverInfoHandler, keyHandler);
+    let wellKnownRouter = WellKnownRouter.Router(serverInfoHandler, keyHandler);
+    let dispose = func() {
+      keyHandlerStableData := keyHandler.toStableData();
+      serverInfoStableData := serverInfoHandler.toStableData();
+      repositoryStableData := repositoryHandler.toStableData();
+    };
+    (xrpcRouter, wellKnownRouter, handlers, dispose);
+  };
+
+  func routeGet<system>(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
+    let (xrpcRouter, _, _, dispose) = buildRouters();
+    let response = await* xrpcRouter.routeGet(routeContext);
+    dispose();
+    response;
+  };
+
+  func routePost<system>(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
+    let (xrpcRouter, _, _, dispose) = buildRouters();
+    let response = await* xrpcRouter.routePost(routeContext);
+    dispose();
+    response;
+  };
+
+  func getDidDocument<system>(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
+    let (_, wellKnownRouter, _, dispose) = buildRouters();
+    let response = await* wellKnownRouter.getDidDocument(routeContext);
+    dispose();
+    response;
+  };
+
+  func getIcDomains<system>(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
+    let (_, wellKnownRouter, _, dispose) = buildRouters();
+    let response = wellKnownRouter.getIcDomains<system>(routeContext);
+    dispose();
+    response;
+  };
+
+  func getAtprotoDid<system>(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
+    let (_, wellKnownRouter, _, dispose) = buildRouters();
+    let response = wellKnownRouter.getAtprotoDid<system>(routeContext);
+    dispose();
+    response;
   };
 
   transient let routerConfig : RouterMiddleware.Config = {
     prefix = null;
     identityRequirement = null;
     routes = [
-      Router.getAsyncUpdate("/xrpc/{nsid}", xrpcRouter.routeGet),
-      Router.postAsyncUpdate("/xrpc/{nsid}", xrpcRouter.routePost),
-      Router.getAsyncUpdate("/.well-known/did.json", wellKnownRouter.getDidDocument),
-      Router.getUpdate("/.well-known/ic-domains", wellKnownRouter.getIcDomains),
-      Router.getUpdate("/.well-known/atproto-did", wellKnownRouter.getAtprotoDid),
+      Router.getAsyncUpdate("/xrpc/{nsid}", routeGet),
+      Router.postAsyncUpdate("/xrpc/{nsid}", routePost),
+      Router.getAsyncUpdate("/.well-known/did.json", getDidDocument),
+      Router.getUpdate("/.well-known/ic-domains", getIcDomains),
+      Router.getUpdate("/.well-known/atproto-did", getAtprotoDid),
     ];
   };
 
@@ -145,14 +172,17 @@ shared ({ caller = deployer }) persistent actor class Pds(
       validate = null;
       swapCommit = null;
     };
-    switch (await* repositoryHandler.createRecord(createRecordRequest)) {
-      case (#ok(response)) #ok(CID.toText(response.cid));
+    let (_, _, handlers, dispose) = buildRouters();
+    switch (await* handlers.repositoryHandler.createRecord(createRecordRequest)) {
+      case (#ok(response)) { dispose(); #ok(CID.toText(response.cid)) };
       case (#err(e)) #err("Failed to post to the feed: " # e);
     };
+
   };
 
   public shared query func exportRepoData() : async Result.Result<Repository.ExportData, Text> {
-    let repository = repositoryHandler.get();
+    let (_, _, handlers, _) = buildRouters();
+    let repository = handlers.repositoryHandler.get();
     Repository.exportData(repository, #full({ includeHistorical = true }));
   };
 
@@ -162,10 +192,11 @@ shared ({ caller = deployer }) persistent actor class Pds(
       return #err("Only the owner or deployer can initialize the PDS");
 
     };
+    let (_, _, handlers, dispose) = buildRouters();
     // TODO prevent re-initialization?
     let (plcIndentifier, repository) : (DID.Plc.DID, ?Repository.Repository) = switch (request.plc) {
       case (#new(createRequest)) {
-        switch (await* didDirectoryHandler.create(createRequest)) {
+        switch (await* handlers.didDirectoryHandler.create(createRequest)) {
           case (#ok(did)) (did, null);
           case (#err(e)) return #err("Failed to create PLC identifier: " # e);
         };
@@ -186,13 +217,13 @@ shared ({ caller = deployer }) persistent actor class Pds(
         };
       };
     };
-    serverInfoHandler.set({
+    handlers.serverInfoHandler.set({
       hostname = request.hostname;
       plcIdentifier = plcIndentifier;
       handlePrefix = request.handlePrefix;
     });
-    switch (await* repositoryHandler.initialize(repository)) {
-      case (#ok(_)) #ok;
+    switch (await* handlers.repositoryHandler.initialize(repository)) {
+      case (#ok(_)) { dispose(); #ok };
       case (#err(e)) return #err("Failed to create repository: " # e);
     };
   };
