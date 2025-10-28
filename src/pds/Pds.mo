@@ -29,19 +29,19 @@ shared ({ caller = deployer }) persistent actor class Pds(
 ) : async PdsInterface.Actor = this {
   var owner = Option.get(initData.owner, deployer);
 
-  transient let tidGenerator = TID.Generator();
-
   var repositoryStableData : ?RepositoryHandler.StableData = null;
   var serverInfoStableData : ?ServerInfoHandler.StableData = null;
   var keyHandlerStableData : KeyHandler.StableData = {
     verificationDerivationPath = ["\00"]; // TODO: configure properly
   };
 
+  transient let tidGenerator = TID.Generator();
+
   // Handlers
-  transient var keyHandler = KeyHandler.Handler(keyHandlerStableData);
-  transient var serverInfoHandler = ServerInfoHandler.Handler(serverInfoStableData);
-  transient var didDirectoryHandler = DIDDirectoryHandler.Handler(keyHandler);
-  transient var repositoryHandler = RepositoryHandler.Handler(
+  transient let keyHandler = KeyHandler.Handler(keyHandlerStableData);
+  transient let serverInfoHandler = ServerInfoHandler.Handler(serverInfoStableData);
+  transient let didDirectoryHandler = DIDDirectoryHandler.Handler(keyHandler);
+  transient let repositoryHandler = RepositoryHandler.Handler(
     repositoryStableData,
     keyHandler,
     serverInfoHandler,
@@ -49,41 +49,18 @@ shared ({ caller = deployer }) persistent actor class Pds(
   );
 
   // Routers
-  transient var xrpcRouter = XrpcRouter.Router(
+  transient let xrpcRouter = XrpcRouter.Router(
     repositoryHandler,
     serverInfoHandler,
     keyHandler,
   );
-  transient var wellKnownRouter = WellKnownRouter.Router(
+  transient let wellKnownRouter = WellKnownRouter.Router(
     serverInfoHandler,
     keyHandler,
   );
 
-  system func preupgrade() {
-    keyHandlerStableData := keyHandler.toStableData();
-    serverInfoStableData := serverInfoHandler.toStableData();
-    repositoryStableData := repositoryHandler.toStableData();
-  };
-
-  system func postupgrade() {
-    keyHandler := KeyHandler.Handler(keyHandlerStableData);
-    serverInfoHandler := ServerInfoHandler.Handler(serverInfoStableData);
-    didDirectoryHandler := DIDDirectoryHandler.Handler(keyHandler);
-    repositoryHandler := RepositoryHandler.Handler(
-      repositoryStableData,
-      keyHandler,
-      serverInfoHandler,
-      tidGenerator,
-    );
-    xrpcRouter := XrpcRouter.Router(
-      repositoryHandler,
-      serverInfoHandler,
-      keyHandler,
-    );
-    wellKnownRouter := WellKnownRouter.Router(serverInfoHandler, keyHandler);
-  };
-
-  transient let routerConfig : RouterMiddleware.Config = {
+  // Http App
+  transient let routerConfig = {
     prefix = null;
     identityRequirement = null;
     routes = [
@@ -94,8 +71,6 @@ shared ({ caller = deployer }) persistent actor class Pds(
       Router.getUpdate("/.well-known/atproto-did", wellKnownRouter.getAtprotoDid),
     ];
   };
-
-  // Http App
   transient let app = Liminal.App({
     middleware = [
       CompressionMiddleware.default(),
@@ -119,6 +94,12 @@ shared ({ caller = deployer }) persistent actor class Pds(
       usernameIsCaseSensitive = false;
     };
   });
+
+  system func preupgrade() {
+    keyHandlerStableData := keyHandler.toStableData();
+    serverInfoStableData := serverInfoHandler.toStableData();
+    repositoryStableData := repositoryHandler.toStableData();
+  };
 
   // Http server methods
   public query func http_request(request : Liminal.RawQueryHttpRequest) : async Liminal.RawQueryHttpResponse {

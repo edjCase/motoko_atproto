@@ -62,7 +62,7 @@ module {
         case ("com.atproto.repo.deleterecord") await* deleteRecord(routeContext);
         case ("com.atproto.repo.describerepo") await* describeRepo(routeContext);
         case ("com.atproto.repo.getrecord") getRecord(routeContext);
-        case ("com.atproto.repo.importRepo") importRepo(routeContext);
+        case ("com.atproto.repo.importrepo") importRepo(routeContext);
         case ("com.atproto.repo.listmissingblobs") listMissingBlobs(routeContext);
         case ("com.atproto.repo.listrecords") listRecords(routeContext);
         case ("com.atproto.repo.putrecord") await* putRecord(routeContext);
