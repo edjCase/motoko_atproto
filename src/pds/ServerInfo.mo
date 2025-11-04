@@ -1,13 +1,12 @@
-import Domain "mo:url-kit@3/Domain";
 import DID "mo:did@3";
 import Text "mo:core@1/Text";
 import TextX "mo:xtended-text@2/TextX";
 
 module {
   public type ServerInfo = {
+    serviceSubdomain : ?Text;
     hostname : Text;
     plcIdentifier : DID.Plc.DID;
-    handlePrefix : ?Text; // TODO should this live here and should i be configurable?
   };
 
   public func buildWebDID(serverInfo : ServerInfo) : DID.Web.DID {
@@ -18,18 +17,9 @@ module {
     };
   };
 
-  public func buildHandle(serverInfo : ServerInfo) : Text {
-    switch (serverInfo.handlePrefix) {
-      case (null) serverInfo.hostname;
-      case (?handlePrefix) handlePrefix # "." # serverInfo.hostname;
-    };
-  };
+  public func buildServerHandle(serverInfo : ServerInfo) : Text = serverInfo.hostname;
 
-  public func getPrefixFromHandle(serverInfo : ServerInfo, handle : Text) : ?Text {
-    let domainText = "." # serverInfo.hostname;
-    switch (Text.stripEnd(handle, #text(domainText))) {
-      case (null) null;
-      case (?name) if (TextX.isEmptyOrWhitespace(name)) null else ?name;
-    };
+  public func isServerHandle(serverInfo : ServerInfo, handle : Text) : Bool {
+    TextX.equalIgnoreCase(handle, buildServerHandle(serverInfo));
   };
 };

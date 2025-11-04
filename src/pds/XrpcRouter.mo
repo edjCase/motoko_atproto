@@ -3,8 +3,8 @@ import Array "mo:core@1/Array";
 import RepositoryHandler "Handlers/RepositoryHandler";
 import ServerInfoHandler "Handlers/ServerInfoHandler";
 import KeyHandler "Handlers/KeyHandler";
-import RouteContext "mo:liminal@2/RouteContext";
-import Route "mo:liminal@2/Route";
+import RouteContext "mo:liminal@3/RouteContext";
+import Route "mo:liminal@3/Route";
 import Serde "mo:serde";
 import DID "mo:did@3";
 import CID "mo:cid@1";
@@ -35,51 +35,55 @@ import DIDModule "./DID";
 import CarUtil "./CarUtil";
 import CAR "mo:car@1";
 import Blob "mo:core@1/Blob";
+import PureMap "mo:core@1/pure/Map";
 
 module {
+
+  type RouteKind = {
+    #query_ : (RouteContext.RouteContext) -> Route.HttpResponse;
+    #update_ : (RouteContext.RouteContext) -> Route.HttpResponse;
+    #queryAsync_ : (RouteContext.RouteContext) -> async* Route.HttpResponse;
+    #updateAsync_ : (RouteContext.RouteContext) -> async* Route.HttpResponse;
+  };
 
   public class Router(
     repositoryHandler : RepositoryHandler.Handler,
     serverInfoHandler : ServerInfoHandler.Handler,
     keyHandler : KeyHandler.Handler,
   ) {
+    var routeMapCache : ?PureMap.Map<Text, RouteKind> = null;
 
-    public func routeGet<system>(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
-      await* routeAsync(routeContext);
-    };
-
-    public func routePost<system>(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
-      await* routeAsync(routeContext);
-    };
-
-    func routeAsync(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
+    func getRouteOrNull(routeContext : RouteContext.RouteContext) : ?RouteKind {
+      let routeMap = getOrBuildRouteMap();
       let nsid = routeContext.getRouteParam("nsid");
+      PureMap.get(routeMap, Text.compare, Text.toLower(nsid));
+    };
 
-      switch (Text.toLower(nsid)) {
-        case ("_health") health(routeContext);
-        case ("com.atproto.repo.applywrites") await* applyWrites(routeContext);
-        case ("com.atproto.repo.createrecord") await* createRecord(routeContext);
-        case ("com.atproto.repo.deleterecord") await* deleteRecord(routeContext);
-        case ("com.atproto.repo.describerepo") await* describeRepo(routeContext);
-        case ("com.atproto.repo.getrecord") getRecord(routeContext);
-        case ("com.atproto.repo.importrepo") importRepo(routeContext);
-        case ("com.atproto.repo.listmissingblobs") listMissingBlobs(routeContext);
-        case ("com.atproto.repo.listrecords") listRecords(routeContext);
-        case ("com.atproto.repo.putrecord") await* putRecord(routeContext);
-        case ("com.atproto.repo.uploadblob") uploadBlob(routeContext);
-        case ("com.atproto.server.describeserver") describeServer(routeContext);
-        case ("com.atproto.sync.getrepo") getRepo(routeContext);
-        case ("com.atproto.sync.listblobs") listBlobs(routeContext);
-        case ("com.atproto.sync.listrepos") listRepos(routeContext);
-        case ("com.atproto.identity.resolvehandle") resolveHandle(routeContext);
-        case ("app.bsky.actor.getprofile") getProfile(routeContext);
-        case ("app.bsky.actor.getprofiles") getProfiles(routeContext);
-        case (_) {
-          routeContext.buildResponse(
-            #badRequest,
-            #error(#message("Unsupported NSID: " # nsid)),
-          );
-        };
+    func buildUnsupportedNsidResponse(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
+      routeContext.buildResponse(
+        #badRequest,
+        #error(#message("Unsupported NSID")),
+      );
+    };
+
+    public func routeQuery(_ : RouteContext.RouteContext) : RouteContext.QueryHttpResponse {
+      // TODO have edjcase.com point to 'raw'/api url, otherwise every request needs to be upgraded
+      // let ?route = getRouteOrNull(routeContext) else return #response(buildUnsupportedNsidResponse(routeContext));
+      // switch (route) {
+      //   case (#query_(f)) #response(f(routeContext));
+      //   // TODO support composite queries
+      //   case (_) #upgrade;
+      // };
+      #upgrade;
+    };
+
+    public func routeUpdateAsync(routeContext : RouteContext.RouteContext) : async* Route.HttpResponse {
+      let ?route = getRouteOrNull(routeContext) else return buildUnsupportedNsidResponse(routeContext);
+      switch (route) {
+        case (#query_(f)) f(routeContext);
+        case (#queryAsync_(f)) await* f(routeContext);
+        case (#update_(f)) f(routeContext);
+        case (#updateAsync_(f)) await* f(routeContext);
       };
     };
 
@@ -153,7 +157,7 @@ module {
         #content(
           #Record([
             ("did", #Text(DID.Plc.toText(serverInfo.plcIdentifier))),
-            ("availableUserDomains", #Array([#Text("." # serverInfo.hostname)])),
+            ("availableUserDomains", #Array([])),
             ("inviteCodeRequired", #Bool(true)),
             ("links", #Record(linksCandid)),
             ("contact", #Record([])),
@@ -708,8 +712,9 @@ module {
           if (did != serverInfo.plcIdentifier) return null;
         };
         case (#err(_)) {
-          let prefix = ServerInfo.getPrefixFromHandle(serverInfo, idOrHandle);
-          if (serverInfo.handlePrefix != prefix) return null;
+          if (not ServerInfo.isServerHandle(serverInfo, idOrHandle)) {
+            return null;
+          };
         };
       };
 
@@ -760,7 +765,7 @@ module {
 
       ?{
         did = serverInfo.plcIdentifier;
-        handle = ServerInfo.buildHandle(serverInfo);
+        handle = ServerInfo.buildServerHandle(serverInfo);
         avatar = avatar;
         displayName = displayName;
         banner = null; // TODO
@@ -857,9 +862,7 @@ module {
       );
       let serverInfo = serverInfoHandler.get();
 
-      let prefix = ServerInfo.getPrefixFromHandle(serverInfo, handleParam);
-
-      if (serverInfo.handlePrefix != prefix) return routeContext.buildResponse(
+      if (not ServerInfo.isServerHandle(serverInfo, handleParam)) return routeContext.buildResponse(
         #notFound,
         #error(#message("Handle not found: " # handleParam)),
       );
@@ -872,6 +875,14 @@ module {
       routeContext.buildResponse(
         #ok,
         #json(responseJson),
+      );
+    };
+
+    func subscribeRepos(routeContext : RouteContext.RouteContext) : Route.HttpResponse {
+
+      routeContext.buildResponse(
+        #notImplemented,
+        #error(#message("subscribeRepos not implemented yet. No websocket support on the IC yet")),
       );
     };
 
@@ -906,6 +917,39 @@ module {
         case (#ok(req)) #ok(req);
         case (#err(e)) return #err("Invalid request: " # e);
       };
+    };
+
+    func getOrBuildRouteMap() : PureMap.Map<Text, RouteKind> {
+      switch (routeMapCache) {
+        case (?cache) cache;
+        case (null) {
+          let routes : [(Text, RouteKind)] = [
+            ("_health", #query_(health)),
+            ("com.atproto.repo.applywrites", #updateAsync_(applyWrites)),
+            ("com.atproto.repo.createrecord", #updateAsync_(createRecord)),
+            ("com.atproto.repo.deleterecord", #updateAsync_(deleteRecord)),
+            ("com.atproto.repo.describerepo", #updateAsync_(describeRepo)),
+            ("com.atproto.repo.getrecord", #query_(getRecord)),
+            ("com.atproto.repo.importrepo", #update_(importRepo)),
+            ("com.atproto.repo.listmissingblobs", #query_(listMissingBlobs)),
+            ("com.atproto.repo.listrecords", #query_(listRecords)),
+            ("com.atproto.repo.putrecord", #updateAsync_(putRecord)),
+            ("com.atproto.repo.uploadblob", #update_(uploadBlob)),
+            ("com.atproto.server.describeserver", #query_(describeServer)),
+            ("com.atproto.sync.getrepo", #query_(getRepo)),
+            ("com.atproto.sync.listblobs", #query_(listBlobs)),
+            ("com.atproto.sync.listrepos", #query_(listRepos)),
+            ("com.atproto.sync.subscribeRepos", #query_(subscribeRepos)),
+            ("com.atproto.identity.resolvehandle", #query_(resolveHandle)),
+            ("app.bsky.actor.getprofile", #query_(getProfile)),
+            ("app.bsky.actor.getprofiles", #query_(getProfiles)),
+          ];
+          let map = PureMap.fromIter(routes.vals(), Text.compare);
+          routeMapCache := ?map;
+          map;
+        };
+      };
+
     };
   };
 };

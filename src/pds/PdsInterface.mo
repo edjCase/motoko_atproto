@@ -8,7 +8,7 @@ module {
   public type InitializeRequest = {
     plc : PlcKind;
     hostname : Text;
-    handlePrefix : ?Text;
+    serviceSubdomain : ?Text;
   };
 
   public type PlcKind = {
@@ -18,6 +18,12 @@ module {
   };
 
   public type CreatePlcRequest = {
+    alsoKnownAs : [Text];
+    services : [PlcService];
+  };
+
+  public type UpdatePlcRequest = {
+    did : Text;
     alsoKnownAs : [Text];
     services : [PlcService];
   };

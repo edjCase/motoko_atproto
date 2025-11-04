@@ -18,6 +18,12 @@ module {
     services : [PlcService];
   };
 
+  public type UpdatePlcRequest = {
+    did : DID.Plc.DID;
+    alsoKnownAs : [Text];
+    services : [PlcService];
+  };
+
   type PlcRequestInfo = {
     request : SignedPlcRequest;
     did : DID.Plc.DID;
@@ -43,12 +49,12 @@ module {
   };
 
   public class Handler(keyHandler : KeyHandler.Handler) {
-
     public func create(request : CreatePlcRequest) : async* Result.Result<DID.Plc.DID, Text> {
-
       let requestInfo = switch (
         await* buildPlcRequest(
-          request,
+          request.alsoKnownAs,
+          request.services,
+          null,
           keyHandler,
         )
       ) {
@@ -56,13 +62,48 @@ module {
         case (#err(err)) return #err("Failed to build PLC request: " # err);
       };
 
-      // Convert to JSON
-      let json = requestToJson(requestInfo.request);
+      switch (await* submitPlcOperation(requestInfo.request, requestInfo.did)) {
+        case (#ok(_)) #ok(requestInfo.did);
+        case (#err(err)) {
+          // Check for already created
+          if (Text.contains(err, #text("Operations not correctly ordered"))) {
+            return #ok(requestInfo.did);
+          };
+          #err(err);
+        };
+      };
+    };
 
+    public func update(request : UpdatePlcRequest) : async* Result.Result<(), Text> {
+      let prevCid = switch (await* getLatestOperationCid(request.did)) {
+        case (#ok(cid)) cid;
+        case (#err(err)) return #err("Failed to get latest operation CID: " # err);
+      };
+
+      let requestInfo = switch (
+        await* buildPlcRequest(
+          request.alsoKnownAs,
+          request.services,
+          ?prevCid,
+          keyHandler,
+        )
+      ) {
+        case (#ok(info)) info;
+        case (#err(err)) return #err("Failed to build PLC update request: " # err);
+      };
+
+      await* submitPlcOperation(requestInfo.request, request.did);
+    };
+
+    private func submitPlcOperation(
+      request : SignedPlcRequest,
+      did : DID.Plc.DID,
+    ) : async* Result.Result<(), Text> {
+      let json = requestToJson(request);
       let body : Blob = Text.encodeUtf8(Json.stringify(json, null));
 
       let httpRequest = {
-        url = "https://plc.directory/" # DID.Plc.toText(requestInfo.did);
+        url = "https://plc.directory/" # DID.Plc.toText(did);
         method = #post;
         max_response_bytes = null;
         body = ?body;
@@ -70,21 +111,81 @@ module {
         headers = [{ name = "Content-Type"; value = "application/json" }];
         is_replicated = ?false;
       };
+
       let httpResponse = try {
         await IC.httpRequest(httpRequest);
       } catch (e) {
-        return #err("PLC creation request failed: " # Error.message(e));
-      };
-      if (httpResponse.status != 200) {
-        if (httpResponse.status == 400 and body == "{\"message\":\"Operations not correctly ordered\"}") {
-          // Already created
-          // TODO better way to do this?
-          return #ok(requestInfo.did);
-        };
-        return #err("Failed to create PLC.\nResponse: " # debug_show (Text.decodeUtf8(httpResponse.body)) # "\nRequest: " # debug_show (Text.decodeUtf8(body)) # "\nDID: " # DID.Plc.toText(requestInfo.did));
+        return #err("PLC operation request failed: " # Error.message(e));
       };
 
-      #ok(requestInfo.did);
+      if (httpResponse.status != 200) {
+        return #err(
+          "Failed to submit PLC operation.\nResponse: "
+          # debug_show (Text.decodeUtf8(httpResponse.body))
+          # "\nRequest: "
+          # debug_show (Text.decodeUtf8(body))
+          # "\nDID: "
+          # DID.Plc.toText(did)
+        );
+      };
+
+      #ok();
+    };
+
+    private func getLatestOperationCid(did : DID.Plc.DID) : async* Result.Result<Text, Text> {
+      let httpRequest = {
+        url = "https://plc.directory/" # DID.Plc.toText(did) # "/log/audit";
+        method = #get;
+        max_response_bytes = ?(20_000 : Nat64); // 20KB limit
+        body = null;
+        transform = null;
+        headers = [];
+        is_replicated = ?false;
+      };
+
+      let httpResponse = try {
+        await IC.httpRequest(httpRequest);
+      } catch (e) {
+        return #err("Failed to fetch operation log: " # Error.message(e));
+      };
+
+      if (httpResponse.status != 200) {
+        return #err("Failed to fetch operation log. Status: " # debug_show (httpResponse.status));
+      };
+
+      let responseText = switch (Text.decodeUtf8(httpResponse.body)) {
+        case (?text) text;
+        case (null) return #err("Failed to decode response body");
+      };
+
+      let jsonArray = switch (Json.parse(responseText)) {
+        case (#ok(#array(arr))) arr;
+        case (#ok(_)) return #err("Expected JSON array in response, got: " # responseText);
+        case (#err(e)) return #err("Failed to parse JSON response: " # debug_show (e));
+      };
+
+      if (jsonArray.size() == 0) {
+        return #err("No operations found in log");
+      };
+
+      // Get the last operation
+      let lastOperation = jsonArray[jsonArray.size() - 1];
+
+      // Extract the 'cid' field
+      switch (lastOperation) {
+        case (#object_(fields)) {
+          for ((key, value) in fields.vals()) {
+            if (key == "cid") {
+              switch (value) {
+                case (#string(cid)) return #ok(cid);
+                case (_) return #err("CID field is not a string");
+              };
+            };
+          };
+          return #err("CID field not found in operation");
+        };
+        case (_) return #err("Expected object in operation log");
+      };
     };
 
   };
@@ -134,7 +235,9 @@ module {
   };
 
   func buildPlcRequest(
-    request : CreatePlcRequest,
+    alsoKnownAs : [Text],
+    services : [PlcService],
+    prev : ?Text,
     keyHandler : KeyHandler.Handler,
   ) : async* Result.Result<PlcRequestInfo, Text> {
 
@@ -151,9 +254,9 @@ module {
       type_ = "plc_operation";
       rotationKeys = [DID.Key.toText(rotationPublicKeyDid, #base58btc)];
       verificationMethods = [("atproto", DID.Key.toText(verificationPublicKeyDid, #base58btc))];
-      alsoKnownAs = request.alsoKnownAs;
-      services = request.services;
-      prev = null;
+      alsoKnownAs = alsoKnownAs;
+      services = services;
+      prev = prev;
     };
 
     // Convert to CBOR and sign

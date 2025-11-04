@@ -39,9 +39,9 @@ func createMockHandlers() : (KeyHandler.HandlerInterface, ServerInfoHandler.Hand
   };
 
   let serverInfoStableData : ServerInfoHandler.StableData = {
-    hostname = "test.example.com";
+    serviceSubdomain = ?"test";
+    hostname = "example.com";
     plcIdentifier = createTestDID();
-    handlePrefix = null;
   };
   let serverInfoHandler = ServerInfoHandler.Handler(?serverInfoStableData);
 

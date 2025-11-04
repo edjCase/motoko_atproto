@@ -2,11 +2,12 @@ import Text "mo:core@1/Text";
 import Result "mo:core@1/Result";
 import XrpcRouter "./XrpcRouter";
 import WellKnownRouter "./WellKnownRouter";
-import RouterMiddleware "mo:liminal@2/Middleware/Router";
-import CompressionMiddleware "mo:liminal@2/Middleware/Compression";
-import CORSMiddleware "mo:liminal@2/Middleware/CORS";
-import Liminal "mo:liminal@2";
-import Router "mo:liminal@2/Router";
+import HtmlRouter "./HtmlRouter";
+import RouterMiddleware "mo:liminal@3/Middleware/Router";
+import CompressionMiddleware "mo:liminal@3/Middleware/Compression";
+import CORSMiddleware "mo:liminal@3/Middleware/CORS";
+import Liminal "mo:liminal@3";
+import Router "mo:liminal@3/Router";
 import RepositoryHandler "Handlers/RepositoryHandler";
 import KeyHandler "Handlers/KeyHandler";
 import ServerInfoHandler "Handlers/ServerInfoHandler";
@@ -21,6 +22,12 @@ import PdsInterface "./PdsInterface";
 import DateTime "mo:datetime@1/DateTime";
 import Repository "../atproto/Repository";
 import Option "mo:core@1/Option";
+import CertifiedAssets "mo:certified-assets@0";
+import StableCertifiedAssets "mo:certified-assets@0/Stable";
+import App "mo:liminal@3/App";
+import IcWebSocketCdk "mo:ic-websocket-cdk@0";
+import IcWebSocketCdkState "mo:ic-websocket-cdk@0/State";
+import IcWebSocketCdkTypes "mo:ic-websocket-cdk@0/Types";
 
 shared ({ caller = deployer }) persistent actor class Pds(
   initData : {
@@ -34,6 +41,7 @@ shared ({ caller = deployer }) persistent actor class Pds(
   var keyHandlerStableData : KeyHandler.StableData = {
     verificationDerivationPath = ["\00"]; // TODO: configure properly
   };
+  var certStore = CertifiedAssets.init_stable_store();
 
   transient let tidGenerator = TID.Generator();
 
@@ -57,22 +65,43 @@ shared ({ caller = deployer }) persistent actor class Pds(
   transient let wellKnownRouter = WellKnownRouter.Router(
     serverInfoHandler,
     keyHandler,
+    certStore,
   );
+  transient let htmlRouter = HtmlRouter.Router(
+    serverInfoHandler
+  );
+
+  func buildLoggingMiddleware() : App.Middleware {
+    {
+      name = "Logging";
+      handleQuery = func(httpContext : Liminal.HttpContext, next : App.Next) : App.QueryResult {
+        next();
+      };
+      handleUpdate = func(httpContext : Liminal.HttpContext, next : App.NextAsync) : async* App.HttpResponse {
+        httpContext.log(#info, "Received HTTP update request: " # debug_show (httpContext.request));
+        let response = await* next();
+        httpContext.log(#info, "Responding to HTTP update request. Status Code: " # debug_show (response.statusCode) # ", Headers: " # debug_show (response.headers));
+        response;
+      };
+    };
+  };
 
   // Http App
   transient let routerConfig = {
     prefix = null;
     identityRequirement = null;
     routes = [
-      Router.getAsyncUpdate("/xrpc/{nsid}", xrpcRouter.routeGet),
-      Router.postAsyncUpdate("/xrpc/{nsid}", xrpcRouter.routePost),
-      Router.getAsyncUpdate("/.well-known/did.json", wellKnownRouter.getDidDocument),
-      Router.getUpdate("/.well-known/ic-domains", wellKnownRouter.getIcDomains),
-      Router.getUpdate("/.well-known/atproto-did", wellKnownRouter.getAtprotoDid),
+      Router.get("/xrpc/{nsid}", #upgradableQuery({ queryHandler = xrpcRouter.routeQuery; updateHandler = #async_(xrpcRouter.routeUpdateAsync) })),
+      Router.post("/xrpc/{nsid}", #upgradableQuery({ queryHandler = xrpcRouter.routeQuery; updateHandler = #async_(xrpcRouter.routeUpdateAsync) })),
+      Router.get("/.well-known/did.json", #update(#async_(wellKnownRouter.getDidDocument))),
+      Router.get("/.well-known/ic-domains", #query_(wellKnownRouter.getIcDomains)),
+      Router.get("/.well-known/atproto-did", #update(#sync(wellKnownRouter.getAtprotoDid))),
+      Router.get("/", #update(#sync(htmlRouter.getLandingPage))),
     ];
   };
   transient let app = Liminal.App({
     middleware = [
+      buildLoggingMiddleware(),
       CompressionMiddleware.default(),
       CORSMiddleware.new({
         CORSMiddleware.defaultOptions with
@@ -84,7 +113,7 @@ shared ({ caller = deployer }) persistent actor class Pds(
     ];
     errorSerializer = Liminal.defaultJsonErrorSerializer;
     candidRepresentationNegotiator = Liminal.defaultCandidRepresentationNegotiator;
-    logger = Liminal.buildDebugLogger(#verbose);
+    logger = Liminal.buildDebugLogger(#info);
     urlNormalization = {
       pathIsCaseSensitive = false;
       preserveTrailingSlash = false;
@@ -101,6 +130,17 @@ shared ({ caller = deployer }) persistent actor class Pds(
     repositoryStableData := repositoryHandler.toStableData();
   };
 
+  transient let params = IcWebSocketCdkTypes.WsInitParams(null, null);
+  transient let ws_state = IcWebSocketCdkState.IcWebSocketState(params);
+
+  transient let handlers = IcWebSocketCdkTypes.WsHandlers(
+    ?webSocketRouter.onOpen,
+    ?webSocketRouter.onMessage,
+    ?webSocketRouter.onClose,
+  );
+
+  let ws = IcWebSocketCdk.IcWebSocket(ws_state, params, handlers);
+
   // Http server methods
   public query func http_request(request : Liminal.RawQueryHttpRequest) : async Liminal.RawQueryHttpResponse {
     app.http_request(request);
@@ -108,6 +148,28 @@ shared ({ caller = deployer }) persistent actor class Pds(
 
   public func http_request_update(request : Liminal.RawUpdateHttpRequest) : async Liminal.RawUpdateHttpResponse {
     await* app.http_request_update(request);
+  };
+
+  // Webscoket server methods
+
+  // method called by the WS Gateway after receiving FirstMessage from the client
+  public shared ({ caller }) func ws_open(args : IcWebSocketCdk.CanisterWsOpenArguments) : async IcWebSocketCdk.CanisterWsOpenResult {
+    await ws.ws_open(caller, args);
+  };
+
+  // method called by the Ws Gateway when closing the IcWebSocket connection
+  public shared ({ caller }) func ws_close(args : IcWebSocketCdk.CanisterWsCloseArguments) : async IcWebSocketCdk.CanisterWsCloseResult {
+    await ws.ws_close(caller, args);
+  };
+
+  // method called by the frontend SDK to send a message to the canister
+  public shared ({ caller }) func ws_message(args : IcWebSocketCdk.CanisterWsMessageArguments, msg : ?AppMessage) : async IcWebSocketCdk.CanisterWsMessageResult {
+    await ws.ws_message(caller, args, msg);
+  };
+
+  // method called by the WS Gateway to get messages for all the clients it serves
+  public shared query ({ caller }) func ws_get_messages(args : IcWebSocketCdk.CanisterWsGetMessagesArguments) : async IcWebSocketCdk.CanisterWsGetMessagesResult {
+    ws.ws_get_messages(caller, args);
   };
 
   public shared ({ caller }) func post(message : Text) : async Result.Result<Text, Text> {
@@ -141,7 +203,6 @@ shared ({ caller = deployer }) persistent actor class Pds(
   public shared ({ caller }) func initialize(request : PdsInterface.InitializeRequest) : async Result.Result<(), Text> {
     if (caller != owner and caller != deployer) {
       return #err("Only the owner or deployer can initialize the PDS");
-
     };
     // TODO prevent re-initialization?
     let (plcIndentifier, repository) : (DID.Plc.DID, ?Repository.Repository) = switch (request.plc) {
@@ -170,11 +231,47 @@ shared ({ caller = deployer }) persistent actor class Pds(
     serverInfoHandler.set({
       hostname = request.hostname;
       plcIdentifier = plcIndentifier;
-      handlePrefix = request.handlePrefix;
+      serviceSubdomain = request.serviceSubdomain;
     });
     switch (await* repositoryHandler.initialize(repository)) {
-      case (#ok(_)) #ok;
+      case (#ok(_)) ();
       case (#err(e)) return #err("Failed to create repository: " # e);
+    };
+
+    // TODO can this be built into the WellKnownRouter instead?
+    let serverInfo = serverInfoHandler.get();
+    let icDomains = WellKnownRouter.getIcDomainsText(serverInfo);
+    let icDomainsBlob = Text.encodeUtf8(icDomains);
+    let icDomainsEndpoint = CertifiedAssets.Endpoint("/.well-known/ic-domains", ?icDomainsBlob).no_certification().no_request_certification();
+    StableCertifiedAssets.certify(certStore, icDomainsEndpoint);
+    #ok;
+  };
+
+  public shared ({ caller }) func createPlcDid(request : PdsInterface.CreatePlcRequest) : async Result.Result<Text, Text> {
+    if (caller != owner and caller != deployer) {
+      return #err("Only the owner or deployer can update the PLC identifier");
+    };
+    switch (await* didDirectoryHandler.create(request)) {
+      case (#ok(did)) #ok(DID.Plc.toText(did));
+      case (#err(e)) #err("Failed to create PLC identifier: " # e);
+    };
+  };
+
+  public shared ({ caller }) func updatePlcDid(request : PdsInterface.UpdatePlcRequest) : async Result.Result<(), Text> {
+    if (caller != owner and caller != deployer) {
+      return #err("Only the owner or deployer can update the PLC identifier");
+    };
+    let did = switch (DID.Plc.fromText(request.did)) {
+      case (#ok(did)) did;
+      case (#err(e)) return #err("Invalid PLC identifier '" # request.did # "': " # e);
+    };
+    let updateRequest = {
+      request with
+      did = did;
+    };
+    switch (await* didDirectoryHandler.update(updateRequest)) {
+      case (#ok) #ok;
+      case (#err(e)) #err("Failed to update PLC identifier: " # e);
     };
   };
 
