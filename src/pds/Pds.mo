@@ -25,9 +25,6 @@ import Option "mo:core@1/Option";
 import CertifiedAssets "mo:certified-assets@0";
 import StableCertifiedAssets "mo:certified-assets@0/Stable";
 import App "mo:liminal@3/App";
-import IcWebSocketCdk "mo:ic-websocket-cdk@0";
-import IcWebSocketCdkState "mo:ic-websocket-cdk@0/State";
-import IcWebSocketCdkTypes "mo:ic-websocket-cdk@0/Types";
 
 shared ({ caller = deployer }) persistent actor class Pds(
   initData : {
@@ -130,17 +127,6 @@ shared ({ caller = deployer }) persistent actor class Pds(
     repositoryStableData := repositoryHandler.toStableData();
   };
 
-  transient let params = IcWebSocketCdkTypes.WsInitParams(null, null);
-  transient let ws_state = IcWebSocketCdkState.IcWebSocketState(params);
-
-  transient let handlers = IcWebSocketCdkTypes.WsHandlers(
-    ?webSocketRouter.onOpen,
-    ?webSocketRouter.onMessage,
-    ?webSocketRouter.onClose,
-  );
-
-  let ws = IcWebSocketCdk.IcWebSocket(ws_state, params, handlers);
-
   // Http server methods
   public query func http_request(request : Liminal.RawQueryHttpRequest) : async Liminal.RawQueryHttpResponse {
     app.http_request(request);
@@ -148,28 +134,6 @@ shared ({ caller = deployer }) persistent actor class Pds(
 
   public func http_request_update(request : Liminal.RawUpdateHttpRequest) : async Liminal.RawUpdateHttpResponse {
     await* app.http_request_update(request);
-  };
-
-  // Webscoket server methods
-
-  // method called by the WS Gateway after receiving FirstMessage from the client
-  public shared ({ caller }) func ws_open(args : IcWebSocketCdk.CanisterWsOpenArguments) : async IcWebSocketCdk.CanisterWsOpenResult {
-    await ws.ws_open(caller, args);
-  };
-
-  // method called by the Ws Gateway when closing the IcWebSocket connection
-  public shared ({ caller }) func ws_close(args : IcWebSocketCdk.CanisterWsCloseArguments) : async IcWebSocketCdk.CanisterWsCloseResult {
-    await ws.ws_close(caller, args);
-  };
-
-  // method called by the frontend SDK to send a message to the canister
-  public shared ({ caller }) func ws_message(args : IcWebSocketCdk.CanisterWsMessageArguments, msg : ?AppMessage) : async IcWebSocketCdk.CanisterWsMessageResult {
-    await ws.ws_message(caller, args, msg);
-  };
-
-  // method called by the WS Gateway to get messages for all the clients it serves
-  public shared query ({ caller }) func ws_get_messages(args : IcWebSocketCdk.CanisterWsGetMessagesArguments) : async IcWebSocketCdk.CanisterWsGetMessagesResult {
-    ws.ws_get_messages(caller, args);
   };
 
   public shared ({ caller }) func post(message : Text) : async Result.Result<Text, Text> {
