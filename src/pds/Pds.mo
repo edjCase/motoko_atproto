@@ -25,6 +25,8 @@ import Option "mo:core@1/Option";
 import CertifiedAssets "mo:certified-assets@0";
 import StableCertifiedAssets "mo:certified-assets@0/Stable";
 import App "mo:liminal@3/App";
+import RepositoryMessageHandler "./Handlers/RepositoryMessageHandler";
+import PureQueue "mo:core@1/pure/Queue";
 
 shared ({ caller = deployer }) persistent actor class Pds(
   initData : {
@@ -33,6 +35,12 @@ shared ({ caller = deployer }) persistent actor class Pds(
 ) : async PdsInterface.Actor = this {
   var owner = Option.get(initData.owner, deployer);
 
+  var repositoryMessageStableData : RepositoryMessageHandler.StableData = {
+    messages = PureQueue.empty<RepositoryMessageHandler.Message>();
+    seq = 0;
+    lastRev = null;
+    maxEventCount = 1000;
+  };
   var repositoryStableData : ?RepositoryHandler.StableData = null;
   var serverInfoStableData : ?ServerInfoHandler.StableData = null;
   var keyHandlerStableData : KeyHandler.StableData = {
@@ -41,6 +49,11 @@ shared ({ caller = deployer }) persistent actor class Pds(
   var certStore = CertifiedAssets.init_stable_store();
 
   transient let tidGenerator = TID.Generator();
+
+  transient let messageHandler = RepositoryMessageHandler.Handler(repositoryMessageStableData);
+  func onRepositoryEvent(event : RepositoryMessageHandler.Event) {
+    messageHandler.addEvent(event);
+  };
 
   // Handlers
   transient let keyHandler = KeyHandler.Handler(keyHandlerStableData);
@@ -51,6 +64,7 @@ shared ({ caller = deployer }) persistent actor class Pds(
     keyHandler,
     serverInfoHandler,
     tidGenerator,
+    onRepositoryEvent,
   );
 
   // Routers

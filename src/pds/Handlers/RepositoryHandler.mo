@@ -17,6 +17,9 @@ import Time "mo:core@1/Time";
 import List "mo:core@1/List";
 import Runtime "mo:core@1/Runtime";
 import BlobRef "../../atproto/BlobRef";
+import RepositoryMessageHandler "./RepositoryMessageHandler";
+import Car "mo:car@1";
+import CarUtil "../CarUtil";
 
 module {
   public type StableData = {
@@ -200,11 +203,14 @@ module {
     cids : [CID.CID];
   };
 
+  public type OnEventCallback = (RepositoryMessageHandler.Event) -> ();
+
   public class Handler(
     stableData : ?StableData,
     keyHandler : KeyHandler.HandlerInterface,
     serverInfoHandler : ServerInfoHandler.Handler,
     tidGenerator : TID.Generator,
+    onEvent : OnEventCallback,
   ) {
     var dataOrNull = stableData;
 
@@ -328,6 +334,29 @@ module {
 
       setRepository(newRepository);
 
+      // Emit message via callback
+      let newBlocks = switch (CarUtil.fromRepository(newRepository, #since(repository.rev))) {
+        case (#ok(data)) data;
+        case (#err(e)) Runtime.trap("Failed to export repository data for event: " # e);
+      };
+      let newBlocksBlob = Blob.fromArray(Car.toBytes(newBlocks));
+
+      let prevData = Repository.getMstRootCid(repository);
+
+      let event = #commit({
+        repo = did;
+        commit = newRepository.head;
+        rev = rev;
+        blocks = newBlocksBlob;
+        ops = [{
+          action = #create({ cid = recordCID });
+          key = key;
+        }];
+        prevData = ?prevData;
+        since = ?repository.rev;
+      });
+      onEvent(event);
+
       #ok({
         cid = recordCID;
         commit = ?{
@@ -366,7 +395,7 @@ module {
       let did = serverInfoHandler.get().plcIdentifier;
       let rev = tidGenerator.next();
       let signFunc = getSignFunc();
-      let (newRepository, recordCID) = switch (
+      let (newRepository, { newCid = newRecordCid; prevCid = prevRecordCid }) = switch (
         await* Repository.putRecord(
           repository,
           {
@@ -384,8 +413,33 @@ module {
       };
       setRepository(newRepository);
 
+      // Emit event via callback
+      let blocks = switch (CarUtil.fromRepository(newRepository, #since(repository.rev))) {
+        case (#ok(data)) data;
+        case (#err(e)) Runtime.trap("Failed to export repository data for event: " # e);
+      };
+
+      let newBlocksBlob = Blob.fromArray(Car.toBytes(blocks));
+
+      let prevData = Repository.getMstRootCid(repository);
+      let event : RepositoryMessageHandler.Event = #commit({
+        repo = did;
+        commit = newRepository.head;
+        rev = rev;
+        blocks = newBlocksBlob;
+        ops = [{
+          action = #update({ newCid = newRecordCid; prevCid = prevRecordCid });
+          key = {
+            collection = request.collection;
+            recordKey = request.rkey;
+          };
+        }];
+        prevData = ?prevData;
+      });
+      onEvent(event);
+
       #ok({
-        cid = recordCID;
+        cid = newRecordCid;
         commit = ?{
           cid = newRepository.head;
           rev = newRepository.rev;
@@ -411,7 +465,7 @@ module {
       let did = serverInfoHandler.get().plcIdentifier;
       let rev = tidGenerator.next();
       let signFunc = getSignFunc();
-      let (newRepository, _deletedRecordCID) = switch (
+      let (newRepository, deletedRecordCID) = switch (
         await* Repository.deleteRecord(
           repository,
           {
@@ -427,6 +481,31 @@ module {
         case (#err(e)) return #err("Failed to delete record: " # e);
       };
       setRepository(newRepository);
+
+      // Emit event via callback
+
+      let blocks = switch (CarUtil.fromRepository(newRepository, #since(repository.rev))) {
+        case (#ok(data)) data;
+        case (#err(e)) Runtime.trap("Failed to export repository data for event: " # e);
+      };
+      let newBlocksBlob = Blob.fromArray(Car.toBytes(blocks));
+
+      let prevData = Repository.getMstRootCid(repository);
+      let event : RepositoryMessageHandler.Event = #commit({
+        repo = did;
+        commit = newRepository.head;
+        rev = rev;
+        blocks = newBlocksBlob;
+        ops = [{
+          action = #delete({ cid = deletedRecordCID });
+          key = {
+            collection = request.collection;
+            recordKey = request.rkey;
+          };
+        }];
+        prevData = ?prevData;
+      });
+      onEvent(event);
 
       #ok({
         commit = ?{
@@ -473,6 +552,57 @@ module {
 
       setRepository(newRepository);
 
+      // Emit events via callback for each write operation
+      let operations : [RepositoryMessageHandler.Operation] = results.vals()
+      |> Iter.map(
+        _,
+        func(writeResult : Repository.WriteResult) : RepositoryMessageHandler.Operation {
+          switch (writeResult) {
+            case (#create(createRes)) {
+              {
+                action = #create({ cid = createRes.cid });
+                key = createRes.key;
+              };
+            };
+            case (#update(updateRes)) {
+              {
+                action = #update({
+                  newCid = updateRes.newCid;
+                  prevCid = updateRes.prevCid;
+                });
+                key = updateRes.key;
+              };
+            };
+            case (#delete(deleteRes)) {
+              {
+                action = #delete({ cid = deleteRes.cid });
+                key = deleteRes.key;
+              };
+            };
+          };
+        },
+      )
+      |> Iter.toArray(_);
+
+      let newBlocks = switch (CarUtil.fromRepository(newRepository, #since(repository.rev))) {
+        case (#ok(data)) data;
+        case (#err(e)) Runtime.trap("Failed to export repository data for event: " # e);
+      };
+      let newBlocksBlob = Blob.fromArray(Car.toBytes(newBlocks));
+
+      let prevData = Repository.getMstRootCid(repository);
+
+      let event : RepositoryMessageHandler.Event = #commit({
+        repo = did;
+        commit = newRepository.head;
+        rev = rev;
+        blocks = newBlocksBlob;
+        ops = operations;
+        prevData = ?prevData;
+      });
+
+      onEvent(event);
+
       #ok({
         commit = ?{
           cid = newRepository.head;
@@ -493,7 +623,7 @@ module {
               case (#update(updateRes)) #update({
                 collection = updateRes.key.collection;
                 rkey = updateRes.key.recordKey;
-                cid = updateRes.cid;
+                cid = updateRes.newCid;
                 validationStatus = validationStatus;
               });
               case (#delete(_)) #delete({});

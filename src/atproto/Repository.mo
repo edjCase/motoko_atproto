@@ -66,7 +66,8 @@ module {
     };
     #update : {
       key : Key;
-      cid : CID.CID;
+      newCid : CID.CID;
+      prevCid : CID.CID;
     };
     #delete : {
       key : Key;
@@ -123,6 +124,11 @@ module {
       nodes = mst.nodes;
       blobs = PureMap.empty<CID.CID, BlobRef.BlobRef>();
     });
+  };
+
+  public func getMstRootCid(repository : Repository) : CID.CID {
+    let mst = buildMerkleSearchTree(repository);
+    mst.root;
   };
 
   public func recordKeys(repository : Repository) : Iter.Iter<Key> {
@@ -263,9 +269,17 @@ module {
     did : DID.Plc.DID,
     rev : TID.TID,
     signFunc : (Blob) -> async* Result.Result<Blob, Text>,
-  ) : async* Result.Result<(Repository, CID.CID), Text> {
+  ) : async* Result.Result<(Repository, { newCid : CID.CID; prevCid : CID.CID }), Text> {
 
-    let recordCID = CIDBuilder.fromRecord(key.recordKey, value);
+    let currentPath = keyToText(key);
+    let mst = buildMerkleSearchTree(repository);
+
+    let currentRecordCid = switch (MerkleSearchTree.get(mst, currentPath)) {
+      case (?cid) cid;
+      case (null) return #err("Record to update does not exist: " # currentPath);
+    };
+
+    let newRecordCid = CIDBuilder.fromRecord(key.recordKey, value);
 
     // Create record path
     let path = switch (keyToTextAndValidate(key)) {
@@ -273,9 +287,8 @@ module {
       case (#err(e)) return #err(e);
     };
 
-    let mst = buildMerkleSearchTree(repository);
     // Update MST (this will replace existing record)
-    let newMst = switch (MerkleSearchTree.put(mst, path, recordCID)) {
+    let newMst = switch (MerkleSearchTree.put(mst, path, newRecordCid)) {
       case (#ok(mst)) mst;
       case (#err(e)) return #err("Failed to update MST: " # debug_show (e));
     };
@@ -283,7 +296,7 @@ module {
     let newRecords = PureMap.add(
       repository.records,
       CIDBuilder.compare,
-      recordCID,
+      newRecordCid,
       value,
     );
 
@@ -301,7 +314,7 @@ module {
       case (#err(e)) return #err(e);
     };
 
-    #ok((newRepository, recordCID));
+    #ok((newRepository, { newCid = newRecordCid; prevCid = currentRecordCid }));
   };
 
   public func deleteRecord(
@@ -382,9 +395,15 @@ module {
           });
         };
         case (#update(updateOp)) {
+          let currentPath = keyToText(updateOp.key);
+
+          let currentRecordCid = switch (MerkleSearchTree.get(newMst, currentPath)) {
+            case (?cid) cid;
+            case (null) return #err("Record to update does not exist: " # currentPath);
+          };
           // TODO consolidate with putRecord
-          let recordCID = CIDBuilder.fromRecord(updateOp.key.recordKey, updateOp.value);
-          updatedRecords := PureMap.add(updatedRecords, CIDBuilder.compare, recordCID, updateOp.value);
+          let newRecordCid = CIDBuilder.fromRecord(updateOp.key.recordKey, updateOp.value);
+          updatedRecords := PureMap.add(updatedRecords, CIDBuilder.compare, newRecordCid, updateOp.value);
 
           // Create record path for MST
           let path = switch (keyToTextAndValidate(updateOp.key)) {
@@ -392,14 +411,15 @@ module {
             case (#err(e)) return #err("Key validation failed: " # e);
           };
           // Update MST (this will replace existing record)
-          newMst := switch (MerkleSearchTree.put(newMst, path, recordCID)) {
+          newMst := switch (MerkleSearchTree.put(newMst, path, newRecordCid)) {
             case (#ok(mst)) mst;
             case (#err(e)) return #err("Failed to update MST: " # debug_show (e));
           };
 
           #update({
             key = updateOp.key;
-            cid = recordCID;
+            newCid = newRecordCid;
+            prevCid = currentRecordCid;
           });
         };
         case (#delete(deleteOp)) {

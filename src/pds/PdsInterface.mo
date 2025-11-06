@@ -1,4 +1,7 @@
 import Result "mo:core@1/Result";
+import TID "mo:tid@1";
+import CID "mo:cid@1";
+import DagCbor "mo:dag-cbor@2";
 
 module {
   public type Actor = actor {
