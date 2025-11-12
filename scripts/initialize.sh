@@ -4,24 +4,35 @@ set -e
 
 if [ -z "$1" ]; then
     echo "Error: network required"
-    echo "Usage: $0 <network> <mode>"
+    echo "Usage: $0 <network> ('new'|<plc_did>)"
+    exit 1
+fi
+
+if [ -z "$2" ]; then
+    echo "Error: second argument required"
+    echo "Usage: $0 <network> ('new'|<plc_did>)"
+    echo "  Specify 'new' to create a new DID, or provide an existing PLC DID"
     exit 1
 fi
 
 network=$1
-
+plc_did=$2
 canister_id=$(dfx canister id pds  --network "${network}")
 
 # Map network to hostname
 case "${network}" in
     local)
         hostname="${canister_id}.localhost"
-        serviceSubdomain="null"
+        serviceSubdomain=
+        serviceSubdomainCandid="null"
+        fullDomain="${hostname}"
         port=":4943"
         ;;
     ic)
         hostname="edjcase.com"
-        serviceSubdomain="opt \"pds\""
+        serviceSubdomain="pds2"
+        serviceSubdomainCandid="opt \"${serviceSubdomain}\""
+        fullDomain="${serviceSubdomain}.${hostname}"
         port=""
         ;;
     *)
@@ -31,10 +42,21 @@ case "${network}" in
         ;;
 esac
 
-echo "Initializing PDS in canister ${canister_id} on ${network} (${hostname})..."
-
 # Initialize PDS
-response=$(dfx canister call pds initialize --network "${network}" --output json "(record { plc = variant { id = \"sdpv6troz7ozrjf2titdtcd2\" }; hostname = \"${hostname}\"; serviceSubdomain = ${serviceSubdomain} })")
+if [ "$plc_did" = "new" ]; then
+    echo "Initializing PDS in canister ${canister_id} on ${network} (${hostname}) with new DID..."
+    # Create new PLC identity
+    plc_variant="variant { new = record { alsoKnownAs = vec { \"at://${hostname}\" }; services = vec { record { id = \"atproto_pds\"; \"type\" = \"AtprotoPersonalDataServer\"; endpoint = \"https://${fullDomain}\" } } } }"
+else
+    echo "Initializing PDS in canister ${canister_id} on ${network} (${hostname}) with existing DID: ${plc_did}..."
+    # Use provided PLC DID
+    plc_variant="variant { id = \"${plc_did}\" }"
+fi
+
+candid_args="(record { plc = ${plc_variant}; hostname = \"${hostname}\"; serviceSubdomain = ${serviceSubdomainCandid} })"
+echo "Candid args: ${candid_args}"
+
+response=$(dfx canister call pds initialize --network "${network}" --output json "${candid_args}")
 
 # Check for error
 if echo "$response" | grep -q '"err"'; then

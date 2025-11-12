@@ -27,6 +27,9 @@ import StableCertifiedAssets "mo:certified-assets@0/Stable";
 import App "mo:liminal@3/App";
 import RepositoryMessageHandler "./Handlers/RepositoryMessageHandler";
 import PureQueue "mo:core@1/pure/Queue";
+import RestApiRouter "./RestApiRouter";
+import List "mo:core@1/List";
+import Iter "mo:core@1/Iter";
 
 shared ({ caller = deployer }) persistent actor class Pds(
   initData : {
@@ -36,7 +39,7 @@ shared ({ caller = deployer }) persistent actor class Pds(
   var owner = Option.get(initData.owner, deployer);
 
   var repositoryMessageStableData : RepositoryMessageHandler.StableData = {
-    messages = PureQueue.empty<RepositoryMessageHandler.Message>();
+    messages = PureQueue.empty<RepositoryMessageHandler.QueueMessage>();
     seq = 0;
     lastRev = null;
     maxEventCount = 1000;
@@ -81,6 +84,10 @@ shared ({ caller = deployer }) persistent actor class Pds(
   transient let htmlRouter = HtmlRouter.Router(
     serverInfoHandler
   );
+  transient let restApiRouter = RestApiRouter.Router(
+    messageHandler
+  );
+  transient let httpLogs = List.empty<Text>();
 
   func buildLoggingMiddleware() : App.Middleware {
     {
@@ -89,9 +96,10 @@ shared ({ caller = deployer }) persistent actor class Pds(
         next();
       };
       handleUpdate = func(httpContext : Liminal.HttpContext, next : App.NextAsync) : async* App.HttpResponse {
-        httpContext.log(#info, "Received HTTP update request: " # debug_show (httpContext.request));
         let response = await* next();
-        httpContext.log(#info, "Responding to HTTP update request. Status Code: " # debug_show (response.statusCode) # ", Headers: " # debug_show (response.headers));
+        let message = "HTTP: Method - " # debug_show (httpContext.request.method) # ", URL - " # debug_show (httpContext.request.url) # ", Response Code - " # debug_show (response.statusCode);
+        httpContext.log(#info, message);
+        List.add(httpLogs, message);
         response;
       };
     };
@@ -102,6 +110,7 @@ shared ({ caller = deployer }) persistent actor class Pds(
     prefix = null;
     identityRequirement = null;
     routes = [
+      Router.get("/api/getRepoMessages", #update(#sync(restApiRouter.getRepoMessages))),
       Router.get("/xrpc/{nsid}", #upgradableQuery({ queryHandler = xrpcRouter.routeQuery; updateHandler = #async_(xrpcRouter.routeUpdateAsync) })),
       Router.post("/xrpc/{nsid}", #upgradableQuery({ queryHandler = xrpcRouter.routeQuery; updateHandler = #async_(xrpcRouter.routeUpdateAsync) })),
       Router.get("/.well-known/did.json", #update(#async_(wellKnownRouter.getDidDocument))),
@@ -139,6 +148,7 @@ shared ({ caller = deployer }) persistent actor class Pds(
     keyHandlerStableData := keyHandler.toStableData();
     serverInfoStableData := serverInfoHandler.toStableData();
     repositoryStableData := repositoryHandler.toStableData();
+    repositoryMessageStableData := messageHandler.toStableData();
   };
 
   // Http server methods
@@ -148,6 +158,18 @@ shared ({ caller = deployer }) persistent actor class Pds(
 
   public func http_request_update(request : Liminal.RawUpdateHttpRequest) : async Liminal.RawUpdateHttpResponse {
     await* app.http_request_update(request);
+  };
+
+  public func getHttpLogs(count : Nat) : async [Text] {
+    let dropCount : Nat = if (List.size(httpLogs) > count) {
+      List.size(httpLogs) - count;
+    } else {
+      0;
+    };
+    List.values(httpLogs)
+    |> Iter.drop(_, dropCount)
+    |> Iter.take(_, count)
+    |> Iter.toArray(_);
   };
 
   public shared ({ caller }) func post(message : Text) : async Result.Result<Text, Text> {

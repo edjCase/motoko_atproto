@@ -157,7 +157,7 @@ module {
         #content(
           #Record([
             ("did", #Text(DID.Plc.toText(serverInfo.plcIdentifier))),
-            ("availableUserDomains", #Array([])),
+            ("availableUserDomains", #Array([#Text(serverInfo.hostname)])),
             ("inviteCodeRequired", #Bool(true)),
             ("links", #Record(linksCandid)),
             ("contact", #Record([])),

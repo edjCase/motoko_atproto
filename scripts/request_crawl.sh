@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-hostname="pds.edjcase.com"
+hostname="pds2.edjcase.com"
 relay="https://bsky.network"
 
 echo "Requesting crawl from ${relay} for ${hostname}..."

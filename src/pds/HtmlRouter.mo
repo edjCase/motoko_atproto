@@ -124,7 +124,7 @@ module {
             <p>
                 Atmosphere: at://{HANDLE}<br>
                 BluSky Profile: <a href=\"https://bsky.app/profile/{HANDLE}\" target=\"_blank\">bsky.app/profile/{HANDLE}</a><br>
-                DID: <span class=\"highlight\">{PLC_DID}</span> (<a href=\"https://web.plc.directory/did/did:plc:74xe6ejv6k4c7amqb7pef3os\" target=\"_blank\">Directory</a>)<br>
+                DID: <span class=\"highlight\">{PLC_DID}</span> (<a href=\"https://web.plc.directory/did/{PLC_DID}\" target=\"_blank\">Directory</a>)<br>
             </p>
         </div>
 

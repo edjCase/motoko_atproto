@@ -25,6 +25,7 @@ license = "MIT"
 "url-kit@3" = "3.0.0"
 "sha2@0" = "0.1.6"
 "certified-assets@0" = "0.6.0"
+"buffer@0" = "0.1.0"
 
 [dev-dependencies]
 test = "2.1.1"
