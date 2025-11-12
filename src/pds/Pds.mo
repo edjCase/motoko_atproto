@@ -54,20 +54,29 @@ shared ({ caller = deployer }) persistent actor class Pds(
   transient let tidGenerator = TID.Generator();
 
   transient let messageHandler = RepositoryMessageHandler.Handler(repositoryMessageStableData);
-  func onRepositoryEvent(event : RepositoryMessageHandler.Event) {
-    messageHandler.addEvent(event);
-  };
 
   // Handlers
   transient let keyHandler = KeyHandler.Handler(keyHandlerStableData);
   transient let serverInfoHandler = ServerInfoHandler.Handler(serverInfoStableData);
+
+  func onIdentityChange(change : RepositoryMessageHandler.IdentityChange) : () {
+    messageHandler.addEvent(#identity(change));
+  };
+
+  func onAccountChange(change : RepositoryMessageHandler.AccountChange) : () {
+    messageHandler.addEvent(#account(change));
+  };
   transient let didDirectoryHandler = DIDDirectoryHandler.Handler(keyHandler);
+
+  func onRepositoryCommit(commit : RepositoryMessageHandler.Commit) : () {
+    messageHandler.addEvent(#commit(commit));
+  };
   transient let repositoryHandler = RepositoryHandler.Handler(
     repositoryStableData,
     keyHandler,
     serverInfoHandler,
     tidGenerator,
-    onRepositoryEvent,
+    onRepositoryCommit,
   );
 
   // Routers
@@ -110,13 +119,13 @@ shared ({ caller = deployer }) persistent actor class Pds(
     prefix = null;
     identityRequirement = null;
     routes = [
-      Router.get("/api/getRepoMessages", #update(#sync(restApiRouter.getRepoMessages))),
+      Router.get("/api/getRepoMessages", #query_(restApiRouter.getRepoMessages)),
       Router.get("/xrpc/{nsid}", #upgradableQuery({ queryHandler = xrpcRouter.routeQuery; updateHandler = #async_(xrpcRouter.routeUpdateAsync) })),
       Router.post("/xrpc/{nsid}", #upgradableQuery({ queryHandler = xrpcRouter.routeQuery; updateHandler = #async_(xrpcRouter.routeUpdateAsync) })),
       Router.get("/.well-known/did.json", #update(#async_(wellKnownRouter.getDidDocument))),
       Router.get("/.well-known/ic-domains", #query_(wellKnownRouter.getIcDomains)),
-      Router.get("/.well-known/atproto-did", #update(#sync(wellKnownRouter.getAtprotoDid))),
-      Router.get("/", #update(#sync(htmlRouter.getLandingPage))),
+      Router.get("/.well-known/atproto-did", #query_(wellKnownRouter.getAtprotoDid)),
+      Router.get("/", #query_(htmlRouter.getLandingPage)),
     ];
   };
   transient let app = Liminal.App({
@@ -237,6 +246,15 @@ shared ({ caller = deployer }) persistent actor class Pds(
       case (#ok(_)) ();
       case (#err(e)) return #err("Failed to create repository: " # e);
     };
+    onIdentityChange({
+      did = #plc(plcIndentifier);
+      handle = ?request.hostname;
+    });
+    onAccountChange({
+      did = #plc(plcIndentifier);
+      active = true;
+      status = null;
+    });
 
     // TODO can this be built into the WellKnownRouter instead?
     let serverInfo = serverInfoHandler.get();

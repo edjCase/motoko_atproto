@@ -30,7 +30,7 @@ case "${network}" in
         ;;
     ic)
         hostname="edjcase.com"
-        serviceSubdomain="pds2"
+        serviceSubdomain="pds"
         serviceSubdomainCandid="opt \"${serviceSubdomain}\""
         fullDomain="${serviceSubdomain}.${hostname}"
         port=""

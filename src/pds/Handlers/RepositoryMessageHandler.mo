@@ -15,6 +15,26 @@ module {
 
   public type Event = {
     #commit : Commit;
+    #identity : IdentityChange;
+    #account : AccountChange;
+  };
+
+  public type IdentityChange = {
+    did : DID.DID;
+    handle : ?Text;
+  };
+
+  public type AccountChange = {
+    did : DID.DID;
+    active : Bool;
+    status : ?AccountStatus;
+  };
+
+  public type AccountStatus = {
+    #takendown;
+    #suspended;
+    #deleted;
+    #deactivated;
   };
 
   public type Commit = {
@@ -39,6 +59,8 @@ module {
 
   public type QueueMessage = {
     #commit : SubscribeRepos.Commit;
+    #identity : SubscribeRepos.Identity;
+    #account : SubscribeRepos.Account;
   };
 
   public type Message = QueueMessage or {
@@ -63,7 +85,8 @@ module {
     let maxEventCount : Nat = stableData.maxEventCount;
 
     public func addEvent(event : Event) {
-      let (message, rev) : (QueueMessage, TID.TID) = switch (event) {
+      let timestamp = DateTime.now().toTextFormatted(#iso);
+      let (message, rev) : (QueueMessage, ?TID.TID) = switch (event) {
         case (#commit(c)) {
           let message : QueueMessage = #commit({
             seq = seq;
@@ -77,15 +100,37 @@ module {
             ops = convertOps(c.ops);
             blobs = []; // deprecated
             prevData = c.prevData;
-            time = DateTime.now().toTextFormatted(#iso);
+            time = timestamp;
           });
-          (message, c.rev);
+          (message, ?c.rev);
+        };
+        case (#identity(change)) {
+          let message : QueueMessage = #identity({
+            did = change.did;
+            handle = change.handle;
+            seq = seq;
+            time = timestamp;
+          });
+          (message, null);
+        };
+        case (#account(change)) {
+          let message : QueueMessage = #account({
+            did = change.did;
+            active = change.active;
+            status = change.status;
+            seq = seq;
+            time = timestamp;
+          });
+          (message, null);
         };
       };
 
       Queue.pushBack(messages, message);
       seq += 1;
-      lastRev := ?rev;
+      switch (rev) {
+        case (null) ();
+        case (?r) lastRev := ?r;
+      };
 
       if (Queue.size(messages) > maxEventCount) {
         ignore Queue.popFront(messages);
@@ -138,6 +183,8 @@ module {
     func getSeq(msg : QueueMessage) : Int {
       switch (msg) {
         case (#commit(c)) c.seq;
+        case (#identity(i)) i.seq;
+        case (#account(a)) a.seq;
       };
     };
 

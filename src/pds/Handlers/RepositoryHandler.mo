@@ -203,14 +203,14 @@ module {
     cids : [CID.CID];
   };
 
-  public type OnEventCallback = (RepositoryMessageHandler.Event) -> ();
+  public type OnCommitCallback = (RepositoryMessageHandler.Commit) -> ();
 
   public class Handler(
     stableData : ?StableData,
     keyHandler : KeyHandler.HandlerInterface,
     serverInfoHandler : ServerInfoHandler.Handler,
     tidGenerator : TID.Generator,
-    onEvent : OnEventCallback,
+    onCommit : OnCommitCallback,
   ) {
     var dataOrNull = stableData;
 
@@ -247,10 +247,26 @@ module {
           let did = serverInfoHandler.get().plcIdentifier;
           let rev = tidGenerator.next();
           let signFunc = getSignFunc();
-          switch (await* Repository.empty(did, rev, signFunc)) {
+          let repository = switch (await* Repository.empty(did, rev, signFunc)) {
             case (#ok(repo)) repo;
             case (#err(e)) return #err("Failed to create new repository: " # e);
           };
+
+          let newBlocks = switch (CarUtil.fromRepository(repository, #full({ includeHistorical = false }))) {
+            case (#ok(data)) data;
+            case (#err(e)) Runtime.trap("Failed to export repository data for event: " # e);
+          };
+          let newBlocksBlob = Blob.fromArray(Car.toBytes(newBlocks));
+
+          onCommit({
+            repo = did;
+            commit = repository.head;
+            rev = rev;
+            blocks = newBlocksBlob;
+            ops = [];
+            prevData = null;
+          });
+          repository;
         };
       };
 
@@ -343,7 +359,7 @@ module {
 
       let prevData = Repository.getMstRootCid(repository);
 
-      let event = #commit({
+      onCommit({
         repo = did;
         commit = newRepository.head;
         rev = rev;
@@ -353,9 +369,7 @@ module {
           key = key;
         }];
         prevData = ?prevData;
-        since = ?repository.rev;
       });
-      onEvent(event);
 
       #ok({
         cid = recordCID;
@@ -422,7 +436,7 @@ module {
       let newBlocksBlob = Blob.fromArray(Car.toBytes(blocks));
 
       let prevData = Repository.getMstRootCid(repository);
-      let event : RepositoryMessageHandler.Event = #commit({
+      onCommit({
         repo = did;
         commit = newRepository.head;
         rev = rev;
@@ -436,7 +450,6 @@ module {
         }];
         prevData = ?prevData;
       });
-      onEvent(event);
 
       #ok({
         cid = newRecordCid;
@@ -491,7 +504,7 @@ module {
       let newBlocksBlob = Blob.fromArray(Car.toBytes(blocks));
 
       let prevData = Repository.getMstRootCid(repository);
-      let event : RepositoryMessageHandler.Event = #commit({
+      onCommit({
         repo = did;
         commit = newRepository.head;
         rev = rev;
@@ -505,7 +518,6 @@ module {
         }];
         prevData = ?prevData;
       });
-      onEvent(event);
 
       #ok({
         commit = ?{
@@ -592,7 +604,7 @@ module {
 
       let prevData = Repository.getMstRootCid(repository);
 
-      let event : RepositoryMessageHandler.Event = #commit({
+      onCommit({
         repo = did;
         commit = newRepository.head;
         rev = rev;
@@ -600,8 +612,6 @@ module {
         ops = operations;
         prevData = ?prevData;
       });
-
-      onEvent(event);
 
       #ok({
         commit = ?{
