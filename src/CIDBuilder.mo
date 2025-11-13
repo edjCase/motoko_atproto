@@ -3,7 +3,7 @@ import Commit "Commit";
 import DID "mo:did@3";
 import TID "mo:tid@1";
 import DagCbor "mo:dag-cbor@2";
-import Sha256 "mo:sha2/Sha256";
+import Sha256 "mo:sha2@0/Sha256";
 import BaseX "mo:base-x-encoder@2";
 import Text "mo:core@1/Text";
 import Array "mo:core@1/Array";

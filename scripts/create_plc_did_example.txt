@@ -1,1 +1,0 @@
-dfx canister call sctyd-5qaaa-aaaag-aa5lq-cai createPlcDid "(record {services=vec {record {id=\"atproto_pds\"; endpoint=\"https://pds.edjcase.com\"; \"type\"=\"AtprotoPersonalDataServer\"}}; alsoKnownAs=vec {\"at://edjcase.com\"}})" --ic

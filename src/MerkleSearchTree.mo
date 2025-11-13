@@ -3,7 +3,7 @@ import CID "mo:cid@1";
 import Blob "mo:core@1/Blob";
 import DynamicArray "mo:xtended-collections@0/DynamicArray";
 import Text "mo:core@1/Text";
-import Sha256 "mo:sha2/Sha256";
+import Sha256 "mo:sha2@0/Sha256";
 import Array "mo:core@1/Array";
 import Order "mo:core@1/Order";
 import Iter "mo:core@1/Iter";

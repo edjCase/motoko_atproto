@@ -9,7 +9,7 @@ import Iter "mo:core@1/Iter";
 import DagCbor "mo:dag-cbor@2";
 import { test } "mo:test";
 import { test = testAsync } "mo:test/async";
-import Repository "../src/atproto/Repository";
+import Repository "../src/Repository";
 import Sha256 "mo:sha2@0/Sha256";
 
 // Mock signing function for tests

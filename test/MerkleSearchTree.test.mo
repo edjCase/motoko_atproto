@@ -2,7 +2,7 @@ import Runtime "mo:core@1/Runtime";
 import CID "mo:cid@1";
 import Text "mo:core@1/Text";
 import Array "mo:core@1/Array";
-import MerkleSearchTree "../src/atproto/MerkleSearchTree";
+import MerkleSearchTree "../src/MerkleSearchTree";
 import { test } "mo:test";
 import Sha256 "mo:sha2@0/Sha256";
 import Nat "mo:core@1/Nat";
