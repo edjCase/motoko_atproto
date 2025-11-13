@@ -28,8 +28,12 @@ import App "mo:liminal@3/App";
 import RepositoryMessageHandler "./Handlers/RepositoryMessageHandler";
 import PureQueue "mo:core@1/pure/Queue";
 import RestApiRouter "./RestApiRouter";
-import List "mo:core@1/List";
 import Iter "mo:core@1/Iter";
+import Logging "mo:liminal@3/Logging";
+import Runtime "mo:core@1/Runtime";
+import Debug "mo:core@1/Debug";
+import Nat "mo:core@1/Nat";
+import Time "mo:core@1/Time";
 
 shared ({ caller = deployer }) persistent actor class Pds(
   initData : {
@@ -44,6 +48,14 @@ shared ({ caller = deployer }) persistent actor class Pds(
     lastRev = null;
     maxEventCount = 1000;
   };
+  type LogEntry = {
+    time : Time.Time;
+    level : Logging.LogLevel;
+    message : Text;
+  };
+  let maxLogCount = 10_000;
+  let minConsoleLogLevel = #info; // Minimum log level to print to console/Debug.print
+  var stableLogData : PureQueue.Queue<LogEntry> = PureQueue.empty<LogEntry>();
   var repositoryStableData : ?RepositoryHandler.StableData = null;
   var serverInfoStableData : ?ServerInfoHandler.StableData = null;
   var keyHandlerStableData : KeyHandler.StableData = {
@@ -96,7 +108,6 @@ shared ({ caller = deployer }) persistent actor class Pds(
   transient let restApiRouter = RestApiRouter.Router(
     messageHandler
   );
-  transient let httpLogs = List.empty<Text>();
 
   func buildLoggingMiddleware() : App.Middleware {
     {
@@ -108,8 +119,53 @@ shared ({ caller = deployer }) persistent actor class Pds(
         let response = await* next();
         let message = "HTTP: Method - " # debug_show (httpContext.request.method) # ", URL - " # debug_show (httpContext.request.url) # ", Response Code - " # debug_show (response.statusCode);
         httpContext.log(#info, message);
-        List.add(httpLogs, message);
+
         response;
+      };
+    };
+  };
+
+  transient let logger = {
+    log = func(level : Logging.LogLevel, message : Text) {
+
+      let logLevelText = Logging.levelToText(level);
+      let maxLogLevelLength = 7; // Length of longest log level text ("WARNING")
+      let paddingSize : Nat = maxLogLevelLength - logLevelText.size();
+      var padding = "";
+      for (i in Nat.range(0, paddingSize)) {
+        padding := padding # " ";
+      };
+      let logMessage = "[" # logLevelText # "] " # padding # message;
+
+      func getLevelNat(level : Logging.LogLevel) : Nat {
+        switch (level) {
+          case (#verbose) 0;
+          case (#debug_) 1;
+          case (#info) 2;
+          case (#warning) 3;
+          case (#error) 4;
+          case (#fatal) 5;
+        };
+      };
+
+      if (getLevelNat(level) >= getLevelNat(minConsoleLogLevel)) {
+        Debug.print(logMessage); // Print to console if level is above minimum
+      };
+      stableLogData := PureQueue.pushBack<LogEntry>(
+        stableLogData,
+        {
+          time = Time.now();
+          level = level;
+          message = message;
+        },
+      );
+
+      // Remove oldest log if we exceed max count
+      while (PureQueue.size(stableLogData) > maxLogCount) {
+        switch (PureQueue.popFront(stableLogData)) {
+          case (?(_, newQueue)) stableLogData := newQueue;
+          case (null) ();
+        };
       };
     };
   };
@@ -128,6 +184,7 @@ shared ({ caller = deployer }) persistent actor class Pds(
       Router.get("/", #query_(htmlRouter.getLandingPage)),
     ];
   };
+
   transient let app = Liminal.App({
     middleware = [
       buildLoggingMiddleware(),
@@ -142,7 +199,7 @@ shared ({ caller = deployer }) persistent actor class Pds(
     ];
     errorSerializer = Liminal.defaultJsonErrorSerializer;
     candidRepresentationNegotiator = Liminal.defaultCandidRepresentationNegotiator;
-    logger = Liminal.buildDebugLogger(#info);
+    logger = logger;
     urlNormalization = {
       pathIsCaseSensitive = false;
       preserveTrailingSlash = false;
@@ -169,16 +226,22 @@ shared ({ caller = deployer }) persistent actor class Pds(
     await* app.http_request_update(request);
   };
 
-  public func getHttpLogs(count : Nat) : async [Text] {
-    let dropCount : Nat = if (List.size(httpLogs) > count) {
-      List.size(httpLogs) - count;
-    } else {
-      0;
+  public shared query ({ caller }) func getLogs(limit : Nat, offset : Nat) : async [LogEntry] {
+    if (caller != owner and caller != deployer) {
+      return Runtime.trap("Only the owner or deployer can get the logs");
     };
-    List.values(httpLogs)
-    |> Iter.drop(_, dropCount)
-    |> Iter.take(_, count)
+    PureQueue.values(stableLogData)
+    |> Iter.drop(_, offset)
+    |> Iter.take(_, limit)
     |> Iter.toArray(_);
+  };
+
+  public shared ({ caller }) func clearLogs() : async Result.Result<(), Text> {
+    if (caller != owner and caller != deployer) {
+      return #err("Only the owner or deployer can clear the logs");
+    };
+    stableLogData := PureQueue.empty<LogEntry>();
+    #ok;
   };
 
   public shared ({ caller }) func post(message : Text) : async Result.Result<Text, Text> {
