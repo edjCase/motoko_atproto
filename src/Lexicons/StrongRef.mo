@@ -1,6 +1,5 @@
 import CID "mo:cid@1";
-import Json "mo:json@1";
-import AtUri "./AtUri";
+import AtUri "../AtUri";
 
 module {
 

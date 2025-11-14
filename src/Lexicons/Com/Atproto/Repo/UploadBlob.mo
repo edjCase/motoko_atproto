@@ -1,6 +1,6 @@
 import Json "mo:json@1";
 import Blob "mo:core@1/Blob";
-import BlobRef "../../../../BlobRef";
+import BlobRef "../../../BlobRef";
 
 module {
 

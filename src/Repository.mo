@@ -4,7 +4,7 @@ import TID "mo:tid@1";
 import DagCbor "mo:dag-cbor@2";
 import PureMap "mo:core@1/pure/Map";
 import MerkleNode "./MerkleNode";
-import BlobRef "./BlobRef";
+import BlobRef "./Lexicons/BlobRef";
 import Commit "./Commit";
 import MerkleSearchTree "./MerkleSearchTree";
 import Runtime "mo:core@1/Runtime";

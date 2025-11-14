@@ -196,8 +196,8 @@ await testAsync(
     let value1 = createTestValue("original");
     let tid2 = createTestTID(1000001);
 
-    let repo2 = switch (await* Repository.createRecord(repo, key, value1, did, tid2, mockSignFunc)) {
-      case (#ok((r, _))) r;
+    let (repo2, originalRecordCid) = switch (await* Repository.createRecord(repo, key, value1, did, tid2, mockSignFunc)) {
+      case (#ok((r, cid))) (r, cid);
       case (#err(e)) Runtime.trap("Create failed: " # e);
     };
 
@@ -215,11 +215,14 @@ await testAsync(
         mockSignFunc,
       )
     ) {
-      case (#ok((updatedRepo, newCid))) {
+      case (#ok((updatedRepo, { newCid; prevCid }))) {
         switch (Repository.getRecord(updatedRepo, key)) {
           case (?recordData) {
             if (recordData.cid != newCid) {
               Runtime.trap("Updated CID mismatch\nExpected: " # CID.toText(newCid) # "\nActual:   " # CID.toText(recordData.cid));
+            };
+            if (prevCid != originalRecordCid) {
+              Runtime.trap("Previous CID mismatch\nExpected: " # CID.toText(originalRecordCid) # "\nActual:   " # CID.toText(prevCid));
             };
           };
           case (null) Runtime.trap("Updated record not found");
