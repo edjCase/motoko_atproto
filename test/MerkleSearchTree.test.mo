@@ -7,6 +7,9 @@ import { test } "mo:test";
 import Sha256 "mo:sha2@0/Sha256";
 import Nat "mo:core@1/Nat";
 import Iter "mo:core@1/Iter";
+import Set "mo:core@1/Set";
+import CIDBuilder "../src/CIDBuilder";
+import Blob "mo:core@1/Blob";
 
 // Helper function to create test CIDs
 func createTestCID(content : Text) : CID.CID {
@@ -941,6 +944,279 @@ test(
         };
       };
       case (null) Runtime.trap("Failed to retrieve key after put");
+    };
+  },
+);
+
+test(
+  "MerkleSearchTree - CBOR Encoding Determinism",
+  func() {
+    let node = {
+      leftSubtreeCID = null;
+      entries = [{
+        prefixLength = 0;
+        keySuffix = Blob.toArray(Text.encodeUtf8("test"));
+        valueCID = createTestCID("value");
+        subtreeCID = null;
+      }];
+    };
+
+    // Calculate CID multiple times
+    let cid1 = CIDBuilder.fromMSTNode(node);
+    let cid2 = CIDBuilder.fromMSTNode(node);
+    let cid3 = CIDBuilder.fromMSTNode(node);
+
+    if (CID.toText(cid1) != CID.toText(cid2) or CID.toText(cid2) != CID.toText(cid3)) {
+      Runtime.trap(
+        "Non-deterministic CID generation!\n" #
+        "CID1: " # CID.toText(cid1) # "\n" #
+        "CID2: " # CID.toText(cid2) # "\n" #
+        "CID3: " # CID.toText(cid3)
+      );
+    };
+
+    // Test with left subtree
+    let nodeWithLeft = {
+      leftSubtreeCID = ?createTestCID("left");
+      entries = [{
+        prefixLength = 0;
+        keySuffix = Blob.toArray(Text.encodeUtf8("test"));
+        valueCID = createTestCID("value");
+        subtreeCID = ?createTestCID("right");
+      }];
+    };
+
+    let cid4 = CIDBuilder.fromMSTNode(nodeWithLeft);
+    let cid5 = CIDBuilder.fromMSTNode(nodeWithLeft);
+
+    if (CID.toText(cid4) != CID.toText(cid5)) {
+      Runtime.trap("Non-deterministic with subtrees!");
+    };
+  },
+);
+
+test(
+  "MerkleSearchTree - Node CID Integrity Check v0",
+  func() {
+    var mst = MerkleSearchTree.empty();
+
+    // Use simpler keys that are less likely to cause depth conflicts
+    let entries = [
+      ("com.example.record/1", createTestCID("value1")),
+      ("com.example.record/2", createTestCID("value2")),
+      ("com.example.record/3", createTestCID("value3")),
+    ];
+
+    // Build MST
+    for ((key, value) in entries.vals()) {
+      switch (MerkleSearchTree.add(mst, key, value)) {
+        case (#ok(newMst)) { mst := newMst };
+        case (#err(msg)) Runtime.trap("Failed to add: " # msg);
+      };
+    };
+
+    // Validate tree structure
+    switch (MerkleSearchTree.validate(mst)) {
+      case (#ok(_)) {};
+      case (#err(msg)) Runtime.trap("Tree validation failed: " # msg);
+    };
+
+    // Verify all entries retrievable
+    for ((key, expectedValue) in entries.vals()) {
+      switch (MerkleSearchTree.get(mst, key)) {
+        case (?value) {
+          if (CID.toText(value) != CID.toText(expectedValue)) {
+            Runtime.trap("Value mismatch for: " # key);
+          };
+        };
+        case (null) Runtime.trap("Lost key: " # key);
+      };
+    };
+  },
+);
+test(
+  "MerkleSearchTree - CID Content Integrity Check",
+  func() {
+    var mst = MerkleSearchTree.empty();
+
+    // Add first entry
+    let key = "app.bsky.feed.post/test1";
+    let value = createTestCID("value1");
+
+    switch (MerkleSearchTree.add(mst, key, value)) {
+      case (#ok(newMst)) { mst := newMst };
+      case (#err(msg)) Runtime.trap("Failed to add: " # msg);
+    };
+
+    // Check CIDs after first add
+    for ((nodeCID, node) in MerkleSearchTree.nodes(mst)) {
+      let recalculated = CIDBuilder.fromMSTNode(node);
+      if (CID.toText(nodeCID) != CID.toText(recalculated)) {
+        Runtime.trap("CID mismatch after FIRST add");
+      };
+    };
+
+    // Add second entry
+    let key2 = "app.bsky.feed.post/test2";
+    let value2 = createTestCID("value2");
+
+    switch (MerkleSearchTree.add(mst, key2, value2)) {
+      case (#ok(newMst)) { mst := newMst };
+      case (#err(msg)) Runtime.trap("Failed to add: " # msg);
+    };
+
+    // More detailed check after second add
+    var errorDetails = "";
+    for ((nodeCID, node) in MerkleSearchTree.nodes(mst)) {
+      let recalculated = CIDBuilder.fromMSTNode(node);
+      if (CID.toText(nodeCID) != CID.toText(recalculated)) {
+        // Collect details about the mismatch
+        errorDetails := errorDetails #
+        "\nStored CID: " # CID.toText(nodeCID) #
+        "\nRecalc CID: " # CID.toText(recalculated) #
+        "\nNode entries: " # Nat.toText(node.entries.size()) #
+        "\nHas left: " # debug_show (node.leftSubtreeCID != null);
+
+        // Check if this is an orphaned node from previous tree structure
+        if (nodeCID == mst.root) {
+          errorDetails := errorDetails # "\nThis is the ROOT node!";
+        };
+      };
+    };
+
+    if (errorDetails != "") {
+      Runtime.trap("CID integrity lost:\n" # errorDetails);
+    };
+
+    // Also check with includeHistorical=true to see all nodes
+    var historicalCount = 0;
+    for ((nodeCID, node) in MerkleSearchTree.nodesAdvanced(mst, { includeHistorical = true })) {
+      historicalCount += 1;
+    };
+
+    var currentCount = 0;
+    for ((nodeCID, node) in MerkleSearchTree.nodes(mst)) {
+      currentCount += 1;
+    };
+
+    // With this:
+    if (historicalCount < currentCount) {
+      Runtime.trap(
+        "Historical count should be >= current! Current: " # Nat.toText(currentCount) #
+        ", Historical: " # Nat.toText(historicalCount)
+      );
+    };
+  },
+);
+
+test(
+  "MerkleSearchTree - Node CID Integrity Check",
+  func() {
+    var mst = MerkleSearchTree.empty();
+
+    // Add entries that match your failing commits
+    let entries = [
+      ("app.bsky.feed.post/3m5yxtfzeej22", createTestCID("commit1")),
+      ("app.bsky.feed.post/3m5yxy2n6zc23", createTestCID("commit2")),
+      ("app.bsky.feed.post/3m5yy27y7ct23", createTestCID("commit3")),
+      ("app.bsky.graph.follow/user1", createTestCID("follow1")),
+      ("app.bsky.graph.follow/user2", createTestCID("follow2")),
+    ];
+
+    // Build MST incrementally, checking consistency after each add
+    for ((key, value) in entries.vals()) {
+      let rootBefore = mst.root;
+
+      switch (MerkleSearchTree.add(mst, key, value)) {
+        case (#ok(newMst)) {
+          mst := newMst;
+
+          // Verify the entry was added
+          switch (MerkleSearchTree.get(mst, key)) {
+            case (?retrieved) {
+              if (CID.toText(retrieved) != CID.toText(value)) {
+                Runtime.trap("Value mismatch after add for: " # key);
+              };
+            };
+            case (null) Runtime.trap("Failed to retrieve just-added key: " # key);
+          };
+
+          // Root should change after each add
+          if (CID.toText(rootBefore) == CID.toText(mst.root)) {
+            Runtime.trap("Root CID didn't change after adding: " # key);
+          };
+        };
+        case (#err(msg)) Runtime.trap("Failed to add: " # msg);
+      };
+    };
+
+    // Validate tree structure
+    switch (MerkleSearchTree.validate(mst)) {
+      case (#ok(_)) {}; // Good
+      case (#err(msg)) Runtime.trap("Tree validation failed: " # msg);
+    };
+
+    // Verify all entries are still retrievable with correct values
+    for ((key, expectedValue) in entries.vals()) {
+      switch (MerkleSearchTree.get(mst, key)) {
+        case (?value) {
+          if (CID.toText(value) != CID.toText(expectedValue)) {
+            Runtime.trap("Value corrupted for key: " # key);
+          };
+        };
+        case (null) Runtime.trap("Lost key in final tree: " # key);
+      };
+    };
+
+    // Test node traversal consistency
+    var nodeCount = 0;
+    var entryCount = 0;
+    let seenCIDs = Set.empty<CID.CID>();
+
+    for ((nodeCID, node) in MerkleSearchTree.nodes(mst)) {
+      nodeCount += 1;
+      entryCount += node.entries.size();
+
+      // Each node CID should be unique
+      if (Set.contains(seenCIDs, CIDBuilder.compare, nodeCID)) {
+        Runtime.trap(
+          "Duplicate node CID found: " # CID.toText(nodeCID) #
+          "\nThis indicates same content producing different CIDs"
+        );
+      };
+      Set.add(seenCIDs, CIDBuilder.compare, nodeCID);
+    };
+
+    if (nodeCount == 0) {
+      Runtime.trap("No nodes found in tree");
+    };
+
+    // Verify entry count matches what we added
+    let actualSize = MerkleSearchTree.size(mst);
+    if (actualSize != entries.size()) {
+      Runtime.trap(
+        "Size mismatch. Expected: " # Nat.toText(entries.size()) #
+        ", Got: " # Nat.toText(actualSize)
+      );
+    };
+
+    // Test that identical content produces identical CIDs
+    // by rebuilding the same tree
+    var mst2 = MerkleSearchTree.empty();
+    for ((key, value) in entries.vals()) {
+      switch (MerkleSearchTree.add(mst2, key, value)) {
+        case (#ok(newMst)) { mst2 := newMst };
+        case (#err(msg)) Runtime.trap("Failed to rebuild: " # msg);
+      };
+    };
+
+    // Both trees should have identical root CIDs
+    if (CID.toText(mst.root) != CID.toText(mst2.root)) {
+      Runtime.trap(
+        "Determinism failure! Same content produced different roots:\n" #
+        "First: " # CID.toText(mst.root) # "\n" #
+        "Second: " # CID.toText(mst2.root)
+      );
     };
   },
 );

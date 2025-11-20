@@ -46,12 +46,13 @@ module {
     ));
     fields;
   };
-
   public func fromMSTNode(node : MerkleNode.Node) : DagCbor.Value {
-    // Convert left CID
-    let leftCbor : DagCbor.Value = switch (node.leftSubtreeCID) {
-      case (null) #null_;
-      case (?cid) #cid(cid);
+    let fields = DynamicArray.DynamicArray<(Text, DagCbor.Value)>(2);
+
+    // Only add "l" field if left subtree exists
+    switch (node.leftSubtreeCID) {
+      case (?cid) fields.add(("l", #cid(cid)));
+      case (null) {}; // Don't add field at all
     };
 
     // Convert entries array
@@ -59,25 +60,24 @@ module {
     |> Array.map<MerkleNode.TreeEntry, DagCbor.Value>(
       _,
       func(entry : MerkleNode.TreeEntry) : DagCbor.Value {
+        let entryFields = DynamicArray.DynamicArray<(Text, DagCbor.Value)>(4);
 
-        let rightCbor : DagCbor.Value = switch (entry.subtreeCID) {
-          case (null) #null_;
-          case (?cid) #cid(cid);
+        entryFields.add(("p", #int(entry.prefixLength)));
+        entryFields.add(("k", #bytes(entry.keySuffix)));
+        entryFields.add(("v", #cid(entry.valueCID)));
+
+        // Only add "t" field if right subtree exists
+        switch (entry.subtreeCID) {
+          case (?cid) entryFields.add(("t", #cid(cid)));
+          case (null) {}; // Don't add field at all
         };
 
-        #map([
-          ("p", #int(entry.prefixLength)),
-          ("k", #bytes(entry.keySuffix)),
-          ("v", #cid(entry.valueCID)),
-          ("t", rightCbor),
-        ]);
+        #map(DynamicArray.toArray(entryFields));
       },
     );
 
-    #map([
-      ("l", leftCbor),
-      ("e", #array(entriesCbor)),
-    ]);
+    fields.add(("e", #array(entriesCbor)));
+    #map(DynamicArray.toArray(fields));
   };
 
 };

@@ -101,7 +101,27 @@ module {
     payload : DagCbor.Value;
   };
 
-  public func toDagCbor(message : Message) : DagCborMessage {
+  public func errorToDagCbor(error : Error) : DagCborMessage {
+    let header = #map([
+      ("op", #int(-1)),
+    ]);
+    let (kind, message) = switch (error) {
+      case (#futureCursor) ("FutureCursor", null);
+      case (#consumerTooSlow(details)) ("ConsumerTooSlow", details.message);
+    };
+    let payload = switch (message) {
+      case (?m) #map([
+        ("error", #text(kind)),
+        ("message", #text(m)),
+      ]);
+      case (null) #map([
+        ("error", #text(kind)),
+      ]);
+    };
+    { header; payload };
+  };
+
+  public func messageToDagCbor(message : Message) : DagCborMessage {
     switch (message) {
       case (#commit(commit)) {
         let header = #map([
