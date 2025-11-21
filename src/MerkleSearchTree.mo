@@ -354,18 +354,293 @@ module {
   };
 
   public func toDebugText(mst : MerkleSearchTree) : Text {
-    let buffer = List.empty<Text>();
     let rootNode = getRootNode(mst);
-    let leafCount = size(mst);
-    let treeDepth = getTreeDepth(mst);
+    let keyMap = PureMap.empty<Text, Text>();
+    let shortKeyCounts = PureMap.empty<Text, Nat>();
 
-    List.add(buffer, "Root CID: " # CID.toText(mst.root));
-    List.add(buffer, "Layer: " # Nat.toText(treeDepth - 1) # ", Leaf Count: " # Nat.toText(leafCount));
-    List.add(buffer, "Node structure (" # Nat.toText(rootNode.entries.size()) # " entries):");
+    let allKeys = List.empty<Text>();
+    collectKeys(mst, rootNode, allKeys);
 
-    debugNodeRecursive(mst, rootNode, 0, "-", buffer);
+    let allNodeCIDs = List.empty<CID.CID>();
+    collectNodeCIDs(mst, rootNode, mst.root, allNodeCIDs);
 
-    Text.join("\n", List.values(buffer));
+    var legend = keyMap;
+    var counts = shortKeyCounts;
+    let legendEntries = List.empty<(Text, Text)>();
+
+    for (fullKey in List.values(allKeys)) {
+      let baseShort = shortenKey(fullKey);
+      let count = switch (PureMap.get(counts, Text.compare, baseShort)) {
+        case (?n) n;
+        case null 0;
+      };
+      counts := PureMap.add(counts, Text.compare, baseShort, count + 1);
+
+      let shortKey = if (count == 0) baseShort else baseShort # "(" # Nat.toText(count + 1) # ")";
+      legend := PureMap.add(legend, Text.compare, fullKey, shortKey);
+      List.add(legendEntries, (shortKey, fullKey));
+    };
+
+    var nodeLegend = PureMap.empty<Text, Text>();
+    var nodeCounts = PureMap.empty<Text, Nat>();
+    let nodeLegendEntries = List.empty<(Text, Text)>();
+
+    for (cid in List.values(allNodeCIDs)) {
+      let fullCID = CID.toText(cid);
+      let baseShort = "N-" # shortenKey(fullCID);
+      let count = switch (PureMap.get(nodeCounts, Text.compare, baseShort)) {
+        case (?n) n;
+        case null 0;
+      };
+      nodeCounts := PureMap.add(nodeCounts, Text.compare, baseShort, count + 1);
+
+      let shortName = if (count == 0) baseShort else baseShort # "(" # Nat.toText(count + 1) # ")";
+      nodeLegend := PureMap.add(nodeLegend, Text.compare, fullCID, shortName);
+      List.add(nodeLegendEntries, (shortName, fullCID));
+    };
+
+    let treeResult = renderNodeTree(mst, rootNode, mst.root, legend, nodeLegend);
+
+    let allLines = List.empty<Text>();
+    List.add(allLines, "Legend:");
+    List.add(allLines, "  Keys:");
+    for ((short, full) in List.values(legendEntries)) {
+      List.add(allLines, "    " # short # ": " # full);
+    };
+    List.add(allLines, "  Nodes:");
+    for ((short, full) in List.values(nodeLegendEntries)) {
+      List.add(allLines, "    " # short # ": " # full);
+    };
+    List.add(allLines, "");
+    for (l in treeResult.lines.vals()) {
+      List.add(allLines, "~" # trimRight(l));
+    };
+
+    Text.join("\n", List.values(allLines));
+  };
+
+  private func collectKeys(mst : MerkleSearchTree, node : MerkleNode.Node, keys : List.List<Text>) {
+    switch (node.leftSubtreeCID) {
+      case (?cid) {
+        switch (getNode(mst, cid)) {
+          case (?sub) collectKeys(mst, sub, keys);
+          case null {};
+        };
+      };
+      case null {};
+    };
+
+    var prevKey : ?[Nat8] = null;
+    for (i in Nat.range(0, node.entries.size())) {
+      let entry = node.entries[i];
+      let key = reconstructKey(node.entries, i, prevKey);
+      List.add(keys, keyToText(key));
+
+      switch (entry.subtreeCID) {
+        case (?cid) {
+          switch (getNode(mst, cid)) {
+            case (?sub) collectKeys(mst, sub, keys);
+            case null {};
+          };
+        };
+        case null {};
+      };
+      prevKey := ?key;
+    };
+  };
+
+  private func collectNodeCIDs(mst : MerkleSearchTree, node : MerkleNode.Node, nodeCID : CID.CID, cids : List.List<CID.CID>) {
+    List.add(cids, nodeCID);
+
+    switch (node.leftSubtreeCID) {
+      case (?cid) {
+        switch (getNode(mst, cid)) {
+          case (?sub) collectNodeCIDs(mst, sub, cid, cids);
+          case null {};
+        };
+      };
+      case null {};
+    };
+
+    for (entry in node.entries.vals()) {
+      switch (entry.subtreeCID) {
+        case (?cid) {
+          switch (getNode(mst, cid)) {
+            case (?sub) collectNodeCIDs(mst, sub, cid, cids);
+            case null {};
+          };
+        };
+        case null {};
+      };
+    };
+  };
+
+  private func shortenKey(key : Text) : Text {
+    let chars = Text.toArray(key);
+    if (chars.size() <= 3) return key;
+    Text.fromIter(Array.sliceToArray(chars, (chars.size() - 3 : Nat), chars.size()).vals());
+  };
+
+  private func renderNodeTree(
+    mst : MerkleSearchTree,
+    node : MerkleNode.Node,
+    nodeCID : CID.CID,
+    legend : PureMap.Map<Text, Text>,
+    nodeLegend : PureMap.Map<Text, Text>,
+  ) : { lines : [Text]; width : Nat; rootPos : Nat } {
+    let nodeLabel = switch (PureMap.get(nodeLegend, Text.compare, CID.toText(nodeCID))) {
+      case (?s) s;
+      case null "N-???";
+    };
+
+    type Entry = {
+      label_ : Text;
+      subtree : ?{ node : MerkleNode.Node; cid : CID.CID };
+    };
+    let children = List.empty<Entry>();
+
+    switch (node.leftSubtreeCID) {
+      case (?cid) {
+        switch (getNode(mst, cid)) {
+          case (?sub) {
+            let subLabel = switch (PureMap.get(nodeLegend, Text.compare, CID.toText(cid))) {
+              case (?s) s;
+              case null "N-???";
+            };
+            List.add(children, { label_ = subLabel; subtree = ?{ node = sub; cid = cid } });
+          };
+          case null {};
+        };
+      };
+      case null {};
+    };
+
+    var prevKey : ?[Nat8] = null;
+    for (i in Nat.range(0, node.entries.size())) {
+      let entry = node.entries[i];
+      let key = reconstructKey(node.entries, i, prevKey);
+      let fullKeyText = keyToText(key);
+      let shortKey = switch (PureMap.get(legend, Text.compare, fullKeyText)) {
+        case (?s) s;
+        case null fullKeyText;
+      };
+      List.add(children, { label_ = shortKey; subtree = null });
+
+      switch (entry.subtreeCID) {
+        case (?cid) {
+          switch (getNode(mst, cid)) {
+            case (?sub) {
+              let subLabel = switch (PureMap.get(nodeLegend, Text.compare, CID.toText(cid))) {
+                case (?s) s;
+                case null "N-???";
+              };
+              List.add(children, { label_ = subLabel; subtree = ?{ node = sub; cid = cid } });
+            };
+            case null {};
+          };
+        };
+        case null {};
+      };
+      prevKey := ?key;
+    };
+
+    let childArray = List.toArray(children);
+    if (childArray.size() == 0) {
+      return {
+        lines = [nodeLabel];
+        width = nodeLabel.size();
+        rootPos = nodeLabel.size() / 2;
+      };
+    };
+
+    type Rendered = { lines : [Text]; width : Nat; rootPos : Nat };
+    let rendered = Array.map<Entry, Rendered>(
+      childArray,
+      func(c) {
+        switch (c.subtree) {
+          case (?sub) {
+            let result = renderNodeTree(mst, sub.node, sub.cid, legend, nodeLegend);
+            let width = Nat.max(result.width, c.label_.size());
+            { lines = result.lines; width; rootPos = result.rootPos };
+          };
+          case null {
+            let width = c.label_.size();
+            { lines = [c.label_]; width; rootPos = width / 2 };
+          };
+        };
+      },
+    );
+
+    let gap = 3;
+    let totalWidth = Array.foldLeft<Rendered, Nat>(rendered, 0, func(acc, r) = acc + r.width) + gap * (rendered.size() - 1 : Nat);
+    let maxHeight = Array.foldLeft<Rendered, Nat>(rendered, 0, func(acc, r) = Nat.max(acc, r.lines.size()));
+
+    let combined = DynamicArray.DynamicArray<Text>(maxHeight);
+    for (row in Nat.range(0, maxHeight)) {
+      var line = "";
+      for (i in Nat.range(0, rendered.size())) {
+        let r = rendered[i];
+        let text = if (row < r.lines.size()) r.lines[row] else "";
+        line #= padCenter(text, r.width);
+        if (i + 1 < rendered.size()) line #= repeatChar(' ', gap);
+      };
+      combined.add(line);
+    };
+
+    let positions = DynamicArray.DynamicArray<Nat>(rendered.size());
+    var pos = 0;
+    for (i in Nat.range(0, rendered.size())) {
+      positions.add(pos + rendered[i].rootPos);
+      pos += rendered[i].width + gap;
+    };
+
+    let connectorLine = buildConnector(DynamicArray.toArray(positions), totalWidth);
+    let childrenCenter = (positions.get(0) + positions.get(rendered.size() - 1)) / 2;
+    let labelStart = if (nodeLabel.size() / 2 > childrenCenter) 0 else (childrenCenter - nodeLabel.size() / 2 : Nat);
+    let padRight = if (labelStart + nodeLabel.size() >= totalWidth) 0 else (totalWidth - labelStart - nodeLabel.size() : Nat);
+    let rootLine = repeatChar(' ', labelStart) # nodeLabel # repeatChar(' ', padRight);
+    let stemLine = repeatChar(' ', childrenCenter) # "|" # repeatChar(' ', if (childrenCenter + 1 >= totalWidth) 0 else (totalWidth - childrenCenter - 1 : Nat));
+
+    {
+      lines = Array.concat([rootLine, stemLine, connectorLine], DynamicArray.toArray(combined));
+      width = totalWidth;
+      rootPos = childrenCenter;
+    };
+  };
+  private func trimRight(s : Text) : Text {
+    let chars = Text.toArray(s);
+    var endIndex = chars.size();
+    while (endIndex > 0 and chars[endIndex - 1] == ' ') {
+      endIndex -= 1;
+    };
+    if (endIndex == 0) return "";
+    Text.fromIter(Array.sliceToArray(chars, 0, endIndex).vals());
+  };
+
+  private func buildConnector(positions : [Nat], totalWidth : Nat) : Text {
+    if (positions.size() == 0) return "";
+    let leftmost = positions[0];
+    let rightmost = positions[positions.size() - 1];
+
+    let chars = Array.tabulate<Char>(
+      totalWidth,
+      func(i) {
+        if (i < leftmost or i > rightmost) ' ' else if (Array.indexOf<Nat>(positions, Nat.equal, i) != null) '|' else '_';
+      },
+    );
+    Text.fromIter(chars.vals());
+  };
+
+  private func repeatChar(c : Char, n : Nat) : Text {
+    Text.fromIter(Iter.map<Nat, Char>(Nat.range(0, n), func(_) = c));
+  };
+
+  private func padCenter(s : Text, width : Nat) : Text {
+    let len = s.size();
+    if (len >= width) return s;
+    let left : Nat = (width - len) / 2;
+    let right : Nat = width - len - left;
+    repeatChar(' ', left) # s # repeatChar(' ', right);
   };
 
   private func traverseTree(
@@ -440,60 +715,7 @@ module {
     };
   };
 
-  private func debugNodeRecursive(
-    mst : MerkleSearchTree,
-    node : MerkleNode.Node,
-    depth : Nat,
-    prefix : Text,
-    buffer : List.List<Text>,
-  ) {
-    var entryIndex = 0;
-
-    // Process left subtree first if it exists
-    switch (node.leftSubtreeCID) {
-      case (?cid) {
-        switch (getNode(mst, cid)) {
-          case (?subtree) {
-            List.add(buffer, prefix # "[" # Nat.toText(entryIndex) # "] LEFT SUBTREE: " # CID.toText(cid));
-            debugNodeRecursive(mst, subtree, depth + 1, prefix # "-", buffer);
-            entryIndex += 1;
-          };
-          case null {};
-        };
-      };
-      case null {};
-    };
-
-    // Process node entries
-    var prevKey : ?[Nat8] = null;
-    for (i in Nat.range(0, node.entries.size())) {
-      let entry = node.entries[i];
-      let key = reconstructKey(node.entries, i, prevKey);
-      let keyText = keyToText(key);
-
-      // Show the leaf entry
-      let leafLabel = if (depth > 0) "SUB-LEAF" else "LEAF";
-      List.add(buffer, prefix # "[" # Nat.toText(entryIndex) # "] " # leafLabel # ": " # keyText);
-      entryIndex += 1;
-
-      // Check if this entry has a subtree (after the entry)
-      switch (entry.subtreeCID) {
-        case (?cid) {
-          List.add(buffer, prefix # "[" # Nat.toText(entryIndex) # "] RIGHT SUBTREE: " # CID.toText(cid));
-          switch (getNode(mst, cid)) {
-            case (?subtree) {
-              debugNodeRecursive(mst, subtree, depth + 1, prefix # "-", buffer);
-            };
-            case null {};
-          };
-          entryIndex += 1;
-        };
-        case null {};
-      };
-
-      prevKey := ?key;
-    };
-  }; // PRIVATE HELPER FUNCTIONS
+  // PRIVATE HELPER FUNCTIONS
 
   private func loadNodeRecursive(
     cid : CID.CID,
@@ -656,7 +878,7 @@ module {
     if (keyBytes.size() > 256) return #err("Key too long (max 256 bytes)");
 
     let node = getRootNode(mst);
-    switch (addRecursive(mst, node, mst.root, keyBytes, value, addOnly)) {
+    switch (addRecursive(mst, node, keyBytes, value, addOnly)) {
       case (#ok({ newNodes; newNodeCID })) #ok({
         root = newNodeCID;
         nodes = newNodes;
@@ -673,7 +895,6 @@ module {
   private func addRecursive(
     mst : MerkleSearchTree,
     node : MerkleNode.Node,
-    nodeCID : CID.CID,
     key : [Nat8],
     value : CID.CID,
     addOnly : Bool,
@@ -702,7 +923,7 @@ module {
         };
         case (#less) {
           insertPos := i;
-          return insertAtPosition(mst, node, nodeCID, insertPos, key, value, addOnly);
+          return insertAtPosition(mst, node, insertPos, key, value, addOnly);
         };
         case (#greater) insertPos := i + 1;
       };
@@ -710,13 +931,12 @@ module {
     };
 
     // Insert at end or in appropriate position
-    insertAtPosition(mst, node, nodeCID, insertPos, key, value, addOnly);
+    insertAtPosition(mst, node, insertPos, key, value, addOnly);
   };
 
   private func insertAtPosition(
     mst : MerkleSearchTree,
     node : MerkleNode.Node,
-    nodeCID : CID.CID,
     pos : Nat,
     key : [Nat8],
     value : CID.CID,
@@ -758,7 +978,7 @@ module {
         case (?cid) {
           // Recursively add to subtree
           let ?subtree = getNode(mst, cid) else return #err("Subtree not found");
-          switch (addRecursive(mst, subtree, cid, key, value, addOnly)) {
+          switch (addRecursive(mst, subtree, key, value, addOnly)) {
             case (#ok({ newNodes; newNodeCID = newSubtreeCID })) {
               #ok(updateNodeSubtreeAndAdd(newNodes, node, pos, ?newSubtreeCID));
             };
@@ -784,22 +1004,265 @@ module {
       };
     } else {
       // keyDepth > nodeDepth
-      // Higher depth key must go in a new subtree, not at this level
+      // Higher depth key creates a new layer on top
+      // Three cases based on where the key falls relative to existing entries
 
-      // Create a new node containing just this higher-depth key
-      let newSubtree : MerkleNode.Node = {
-        leftSubtreeCID = ?nodeCID;
-        entries = [{
-          prefixLength = 0;
-          keySuffix = key;
-          valueCID = value;
-          subtreeCID = null;
-        }];
+      if (pos == 0) {
+        // Case 1: Before everything
+        // Key comes before all current entries, but at higher level
+        // Need to partition node.leftSubtreeCID around the new key
+
+        var currentNodes = mst.nodes;
+        var leftPartitionCID : ?CID.CID = null;
+        var rightPartitionCID : ?CID.CID = null;
+
+        switch (node.leftSubtreeCID) {
+          case (?leftCID) {
+            let ?leftSubtree = getNode(mst, leftCID) else return #err("Left subtree not found");
+            switch (partitionSubtree({ root = leftCID; nodes = currentNodes }, leftSubtree, key)) {
+              case (#ok({ leftCID = lCID; rightCID = rCID; nodes })) {
+                leftPartitionCID := lCID;
+                rightPartitionCID := rCID;
+                currentNodes := nodes;
+              };
+              case (#err(e)) return #err(e);
+            };
+          };
+          case (null) {};
+        };
+
+        // Right node contains all original entries with updated leftSubtreeCID
+        let rightNode : MerkleNode.Node = {
+          leftSubtreeCID = rightPartitionCID;
+          entries = node.entries;
+        };
+        let { newNodes = nodesAfterRight; newNodeCID = rightNodeCID } = addNode(currentNodes, rightNode);
+
+        // New root with the new key
+        let newRootNode : MerkleNode.Node = {
+          leftSubtreeCID = leftPartitionCID;
+          entries = [{
+            prefixLength = 0;
+            keySuffix = key;
+            valueCID = value;
+            subtreeCID = ?rightNodeCID;
+          }];
+        };
+        #ok(addNode(nodesAfterRight, newRootNode));
+
+      } else if (pos >= node.entries.size()) {
+        // Case 3: After everything
+        // Key comes after all current entries, but at higher level
+        // Need to partition the last entry's subtree
+
+        var currentNodes = mst.nodes;
+        var leftPartitionCID : ?CID.CID = null;
+        var rightPartitionCID : ?CID.CID = null;
+
+        let lastIdx : Nat = node.entries.size() - 1;
+        switch (node.entries[lastIdx].subtreeCID) {
+          case (?subtreeCID) {
+            let ?subtree = getNode(mst, subtreeCID) else return #err("Subtree not found");
+            switch (partitionSubtree({ root = subtreeCID; nodes = currentNodes }, subtree, key)) {
+              case (#ok({ leftCID = lCID; rightCID = rCID; nodes })) {
+                leftPartitionCID := lCID;
+                rightPartitionCID := rCID;
+                currentNodes := nodes;
+              };
+              case (#err(e)) return #err(e);
+            };
+          };
+          case (null) {};
+        };
+
+        // Update last entry's subtree to point to left partition
+        let updatedEntries = Array.tabulate<MerkleNode.TreeEntry>(
+          node.entries.size(),
+          func(i) = if (i == lastIdx) {
+            { node.entries[i] with subtreeCID = leftPartitionCID };
+          } else {
+            node.entries[i];
+          },
+        );
+
+        let leftNode : MerkleNode.Node = {
+          leftSubtreeCID = node.leftSubtreeCID;
+          entries = updatedEntries;
+        };
+        let { newNodes = nodesAfterLeft; newNodeCID = leftNodeCID } = addNode(currentNodes, leftNode);
+
+        // New root
+        let newRootNode : MerkleNode.Node = {
+          leftSubtreeCID = ?leftNodeCID;
+          entries = [{
+            prefixLength = 0;
+            keySuffix = key;
+            valueCID = value;
+            subtreeCID = rightPartitionCID;
+          }];
+        };
+        #ok(addNode(nodesAfterLeft, newRootNode));
+
+      } else {
+        // Case 2: Splits in the middle
+        // Key falls between entries[pos-1] and entries[pos], but at higher level
+        // Must partition the middle subtree and split the node
+
+        var currentNodes = mst.nodes;
+        var leftPartitionCID : ?CID.CID = null;
+        var rightPartitionCID : ?CID.CID = null;
+
+        // Partition the middle subtree (between entries[pos-1] and entries[pos])
+        switch (node.entries[pos - 1].subtreeCID) {
+          case (?subtreeCID) {
+            let ?subtree = getNode(mst, subtreeCID) else return #err("Middle subtree not found");
+            switch (partitionSubtree({ root = subtreeCID; nodes = currentNodes }, subtree, key)) {
+              case (#ok({ leftCID = lCID; rightCID = rCID; nodes })) {
+                leftPartitionCID := lCID;
+                rightPartitionCID := rCID;
+                currentNodes := nodes;
+              };
+              case (#err(e)) return #err(e);
+            };
+          };
+          case (null) {};
+        };
+
+        // Build left node: entries[0..pos-1] with last entry pointing to left partition
+        let leftEntries = Array.tabulate<MerkleNode.TreeEntry>(
+          pos,
+          func(i) = if (i == (pos - 1 : Nat)) {
+            { node.entries[i] with subtreeCID = leftPartitionCID };
+          } else {
+            node.entries[i];
+          },
+        );
+        let leftNode : MerkleNode.Node = {
+          leftSubtreeCID = node.leftSubtreeCID;
+          entries = leftEntries;
+        };
+        let { newNodes = nodesAfterLeft; newNodeCID = leftNodeCID } = addNode(currentNodes, leftNode);
+
+        // Build right node: right partition as left subtree, entries[pos..] recompressed
+        let rightEntries = recompressEntries(node.entries, pos);
+        let rightNode : MerkleNode.Node = {
+          leftSubtreeCID = rightPartitionCID;
+          entries = rightEntries;
+        };
+        let { newNodes = nodesAfterRight; newNodeCID = rightNodeCID } = addNode(nodesAfterLeft, rightNode);
+
+        // Build new root with new key bridging left and right
+        let newRootNode : MerkleNode.Node = {
+          leftSubtreeCID = ?leftNodeCID;
+          entries = [{
+            prefixLength = 0;
+            keySuffix = key;
+            valueCID = value;
+            subtreeCID = ?rightNodeCID;
+          }];
+        };
+        #ok(addNode(nodesAfterRight, newRootNode));
       };
-
-      // Add the new subtree
-      #ok(addNode(mst.nodes, newSubtree));
     };
+  };
+
+  // Partitions a subtree around a split key
+  // Returns left partition (keys < splitKey) and right partition (keys > splitKey)
+  private func partitionSubtree(
+    mst : MerkleSearchTree,
+    subtreeRoot : MerkleNode.Node,
+    splitKey : [Nat8],
+  ) : Result.Result<{ leftCID : ?CID.CID; rightCID : ?CID.CID; nodes : PureMap.Map<CID.CID, MerkleNode.Node> }, Text> {
+    // Collect all entries from subtree, partitioned by splitKey
+    let leftEntries = List.empty<(Text, CID.CID)>();
+    let rightEntries = List.empty<(Text, CID.CID)>();
+
+    traverseTreeNode(
+      mst,
+      subtreeRoot,
+      func(entryKey : [Nat8], valueCID : CID.CID) {
+        let keyText = keyToText(entryKey);
+        if (compareKeys(entryKey, splitKey) == #less) {
+          List.add(leftEntries, (keyText, valueCID));
+        } else {
+          List.add(rightEntries, (keyText, valueCID));
+        };
+      },
+    );
+
+    var currentNodes = mst.nodes;
+
+    // Build left subtree if non-empty
+    let leftCID : ?CID.CID = if (List.size(leftEntries) == 0) {
+      null;
+    } else {
+      var tempMst = empty();
+      for ((keyText, valueCID) in List.values(leftEntries)) {
+        switch (put(tempMst, keyText, valueCID)) {
+          case (#ok(newMst)) { tempMst := newMst };
+          case (#err(e)) return #err("Failed to build left partition: " # e);
+        };
+      };
+      // Merge nodes from temp tree
+      for ((cid, node) in PureMap.entries(tempMst.nodes)) {
+        currentNodes := PureMap.add(currentNodes, CIDBuilder.compare, cid, node);
+      };
+      ?tempMst.root;
+    };
+
+    // Build right subtree if non-empty
+    let rightCID : ?CID.CID = if (List.size(rightEntries) == 0) {
+      null;
+    } else {
+      var tempMst = empty();
+      for ((keyText, valueCID) in List.values(rightEntries)) {
+        switch (put(tempMst, keyText, valueCID)) {
+          case (#ok(newMst)) { tempMst := newMst };
+          case (#err(e)) return #err("Failed to build right partition: " # e);
+        };
+      };
+      // Merge nodes from temp tree
+      for ((cid, node) in PureMap.entries(tempMst.nodes)) {
+        currentNodes := PureMap.add(currentNodes, CIDBuilder.compare, cid, node);
+      };
+      ?tempMst.root;
+    };
+
+    #ok({ leftCID; rightCID; nodes = currentNodes });
+  };
+
+  // Recompresses entries starting from startIndex with fresh prefix lengths
+  private func recompressEntries(
+    originalEntries : [MerkleNode.TreeEntry],
+    startIndex : Nat,
+  ) : [MerkleNode.TreeEntry] {
+    let count : Nat = originalEntries.size() - startIndex;
+    if (count == 0) return [];
+
+    // Reconstruct full keys first
+    let fullKeys = Array.tabulate<[Nat8]>(
+      count,
+      func(i) = reconstructKey(originalEntries, startIndex + i, null),
+    );
+
+    // Recompress relative to each other
+    Array.tabulate<MerkleNode.TreeEntry>(
+      count,
+      func(i) {
+        let entry = originalEntries[startIndex + i];
+        let fullKey = fullKeys[i];
+
+        if (i == 0) {
+          // First entry has no prefix compression
+          { entry with prefixLength = 0; keySuffix = fullKey };
+        } else {
+          let prevKey = fullKeys[i - 1];
+          let prefixLen = findCommonPrefixLength(prevKey, fullKey);
+          let suffix = Array.sliceToArray(fullKey, prefixLen, fullKey.size());
+          { entry with prefixLength = prefixLen; keySuffix = suffix };
+        };
+      },
+    );
   };
 
   private func insertAndCompress(
@@ -1034,7 +1497,7 @@ module {
               let keyBytes = keyToBytes(keyText);
               let ?currentNode = getNode({ root = currentNodeCID; nodes = currentNodes }, currentNodeCID) else return #err("Current node not found");
 
-              switch (addRecursive({ root = currentNodeCID; nodes = currentNodes }, currentNode, currentNodeCID, keyBytes, valueCID, false)) {
+              switch (addRecursive({ root = currentNodeCID; nodes = currentNodes }, currentNode, keyBytes, valueCID, false)) {
                 case (#ok({ newNodes = updatedNodes; newNodeCID = updatedCID })) {
                   currentNodes := updatedNodes;
                   currentNodeCID := updatedCID;
@@ -1083,7 +1546,7 @@ module {
                     let keyBytes = keyToBytes(keyText);
                     let ?currentNode = getNode({ root = currentNodeCID; nodes = currentNodes }, currentNodeCID) else return #err("Current node not found");
 
-                    switch (addRecursive({ root = currentNodeCID; nodes = currentNodes }, currentNode, currentNodeCID, keyBytes, valueCID, false)) {
+                    switch (addRecursive({ root = currentNodeCID; nodes = currentNodes }, currentNode, keyBytes, valueCID, false)) {
                       case (#ok({ newNodes = updatedNodes; newNodeCID = updatedCID })) {
                         currentNodes := updatedNodes;
                         currentNodeCID := updatedCID;

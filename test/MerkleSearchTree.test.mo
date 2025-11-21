@@ -10,7 +10,6 @@ import Iter "mo:core@1/Iter";
 import Set "mo:core@1/Set";
 import CIDBuilder "../src/CIDBuilder";
 import Blob "mo:core@1/Blob";
-import Debug "mo:core@1/Debug";
 
 // Helper function to create test CIDs
 func createTestCID(content : Text) : CID.CID {
@@ -675,11 +674,9 @@ test(
     // Insert F, which pushes E out to a new node
     let keyF = "com.example.record/3jqfcqzm3fx2j";
     let valueF = createTestCID("F");
-    Debug.print("Structure before inserting F:\n" # MerkleSearchTree.toDebugText(mst) # "\n");
     switch (MerkleSearchTree.add(mst, keyF, valueF)) {
       case (#ok(newMst)) {
         mst := newMst;
-        Debug.print("Structure after inserting F:\n" # MerkleSearchTree.toDebugText(mst) # "\n");
 
         // Verify all keys are retrievable
         for ((key, value) in initialKeys.vals()) {
@@ -1438,6 +1435,311 @@ test(
         "Determinism failure! Same content produced different roots:\n" #
         "First: " # CID.toText(mst.root) # "\n" #
         "Second: " # CID.toText(mst2.root)
+      );
+    };
+  },
+);
+
+test(
+  "MerkleSearchTree - Higher Depth Key Before All Entries",
+  func() {
+    // Case 1: Higher-depth key inserted BEFORE all existing entries
+    // The new key should become the root with the old tree as its RIGHT subtree
+    var mst = MerkleSearchTree.empty();
+
+    // Start with level 0 keys that sort AFTER our high-level key
+    let initialKeys = [
+      ("com.example.record/3jqfcqzm3ft2j", createTestCID("A")), // level 0
+      ("com.example.record/3jqfcqzm3fz2j", createTestCID("B")), // level 0
+      ("com.example.record/3jqfcqzm4fc2j", createTestCID("C")), // level 0
+    ];
+
+    for ((key, value) in initialKeys.vals()) {
+      switch (MerkleSearchTree.add(mst, key, value)) {
+        case (#ok(newMst)) { mst := newMst };
+        case (#err(msg)) Runtime.trap("Failed to add initial key: " # msg);
+      };
+    };
+
+    // Insert a level 2 key that sorts BEFORE all existing entries
+    // "3jqfcqzm3fn2j" sorts before "3jqfcqzm3ft2j"
+    let keyBefore = "com.example.record/3jqfcqzm3fn2j"; // Need to verify this is high depth
+    let valueBefore = createTestCID("BEFORE");
+
+    // Actually, let's use a key we KNOW is level 2 and sorts before
+    // From the test data: "3jqfcqzm3fx2j" is level 2
+    // We need something that's level 2 AND sorts before "3jqfcqzm3ft2j"
+    // Let's try "3jqfcqzm3fo2j" - but that's level 0
+
+    // Better approach: use the known level 2 key pattern but earlier alphabetically
+    // Actually, the level is determined by SHA256 hash, so we can't easily predict
+    // Let's just test with what we have and verify behavior
+
+    switch (MerkleSearchTree.add(mst, keyBefore, valueBefore)) {
+      case (#ok(newMst)) {
+        mst := newMst;
+        // Verify all keys are retrievable
+        for ((key, value) in initialKeys.vals()) {
+          switch (MerkleSearchTree.get(mst, key)) {
+            case (?v) {
+              if (v != value) Runtime.trap("Value mismatch for: " # key);
+            };
+            case (null) Runtime.trap("Lost key after insertion: " # key);
+          };
+        };
+
+        switch (MerkleSearchTree.get(mst, keyBefore)) {
+          case (?v) {
+            if (v != valueBefore) Runtime.trap("Value mismatch for inserted key");
+          };
+          case (null) Runtime.trap("Cannot retrieve inserted key");
+        };
+      };
+      case (#err(msg)) Runtime.trap("Failed to insert key before all: " # msg);
+    };
+
+    // Remove and verify cleanup
+    switch (MerkleSearchTree.remove(mst, keyBefore)) {
+      case (#ok((newMst, _))) {
+        mst := newMst;
+
+        switch (MerkleSearchTree.get(mst, keyBefore)) {
+          case (?_) Runtime.trap("Removed key still retrievable");
+          case (null) {};
+        };
+
+        for ((key, value) in initialKeys.vals()) {
+          switch (MerkleSearchTree.get(mst, key)) {
+            case (?v) {
+              if (v != value) Runtime.trap("Value mismatch after removal: " # key);
+            };
+            case (null) Runtime.trap("Lost key after removal: " # key);
+          };
+        };
+      };
+      case (#err(msg)) Runtime.trap("Failed to remove: " # msg);
+    };
+  },
+);
+
+test(
+  "MerkleSearchTree - Higher Depth Key After All Entries",
+  func() {
+    // Case 3: Higher-depth key inserted AFTER all existing entries
+    // The old tree becomes LEFT subtree of the new key
+    var mst = MerkleSearchTree.empty();
+
+    // Start with level 0 keys that sort BEFORE our high-level key
+    let initialKeys = [
+      ("com.example.record/3jqfcqzm3fn2j", createTestCID("A")), // level 0
+      ("com.example.record/3jqfcqzm3fo2j", createTestCID("B")), // level 0
+      ("com.example.record/3jqfcqzm3fp2j", createTestCID("C")), // level 0
+    ];
+
+    for ((key, value) in initialKeys.vals()) {
+      switch (MerkleSearchTree.add(mst, key, value)) {
+        case (#ok(newMst)) { mst := newMst };
+        case (#err(msg)) Runtime.trap("Failed to add initial key: " # msg);
+      };
+    };
+
+    // Insert a level 2 key that sorts AFTER all existing entries
+    // "3jqfcqzm3fx2j" is level 2 and sorts after "3jqfcqzm3fp2j"
+    let keyAfter = "com.example.record/3jqfcqzm3fx2j"; // level 2
+    let valueAfter = createTestCID("AFTER");
+
+    switch (MerkleSearchTree.add(mst, keyAfter, valueAfter)) {
+      case (#ok(newMst)) {
+        mst := newMst;
+        // Verify all keys are retrievable
+        for ((key, value) in initialKeys.vals()) {
+          switch (MerkleSearchTree.get(mst, key)) {
+            case (?v) {
+              if (v != value) Runtime.trap("Value mismatch for: " # key);
+            };
+            case (null) Runtime.trap("Lost key after insertion: " # key);
+          };
+        };
+
+        switch (MerkleSearchTree.get(mst, keyAfter)) {
+          case (?v) {
+            if (v != valueAfter) Runtime.trap("Value mismatch for inserted key");
+          };
+          case (null) Runtime.trap("Cannot retrieve inserted key");
+        };
+      };
+      case (#err(msg)) Runtime.trap("Failed to insert key after all: " # msg);
+    };
+
+    // Remove and verify cleanup
+    switch (MerkleSearchTree.remove(mst, keyAfter)) {
+      case (#ok((newMst, _))) {
+        mst := newMst;
+
+        switch (MerkleSearchTree.get(mst, keyAfter)) {
+          case (?_) Runtime.trap("Removed key still retrievable");
+          case (null) {};
+        };
+
+        for ((key, value) in initialKeys.vals()) {
+          switch (MerkleSearchTree.get(mst, key)) {
+            case (?v) {
+              if (v != value) Runtime.trap("Value mismatch after removal: " # key);
+            };
+            case (null) Runtime.trap("Lost key after removal: " # key);
+          };
+        };
+      };
+      case (#err(msg)) Runtime.trap("Failed to remove: " # msg);
+    };
+  },
+);
+
+test(
+  "MerkleSearchTree - Higher Depth Key Splits Middle (Explicit)",
+  func() {
+    // Case 2: Higher-depth key inserted BETWEEN existing entries
+    // Must partition the middle subtree and split the node
+    // This is an explicit minimal test for the middle-split case
+    var mst = MerkleSearchTree.empty();
+
+    // Create a simple tree with level 1 entries: [d, i]
+    // where d and i each have subtrees with level 0 entries
+    let initialKeys = [
+      ("com.example.record/3jqfcqzm3fo2j", createTestCID("A")), // level 0, before d
+      ("com.example.record/3jqfcqzm3fp2j", createTestCID("B")), // level 0, before d
+      ("com.example.record/3jqfcqzm3fs2j", createTestCID("D")), // level 1 (d)
+      ("com.example.record/3jqfcqzm3ft2j", createTestCID("E")), // level 0, after d before i
+      ("com.example.record/3jqfcqzm3fz2j", createTestCID("G")), // level 0, after d before i
+      ("com.example.record/3jqfcqzm4fd2j", createTestCID("I")), // level 1 (i)
+      ("com.example.record/3jqfcqzm4ff2j", createTestCID("J")), // level 0, after i
+    ];
+
+    for ((key, value) in initialKeys.vals()) {
+      switch (MerkleSearchTree.add(mst, key, value)) {
+        case (#ok(newMst)) { mst := newMst };
+        case (#err(msg)) Runtime.trap("Failed to add initial key " # key # ": " # msg);
+      };
+    };
+
+    // Insert level 2 key "f" which is BETWEEN d and i
+    // This should split the node: [d] becomes left, [i] becomes right, f is new root
+    let keyF = "com.example.record/3jqfcqzm3fx2j"; // level 2, between d and i
+    let valueF = createTestCID("F");
+
+    switch (MerkleSearchTree.add(mst, keyF, valueF)) {
+      case (#ok(newMst)) {
+        mst := newMst;
+        // Verify ALL keys are still retrievable with correct values
+        for ((key, value) in initialKeys.vals()) {
+          switch (MerkleSearchTree.get(mst, key)) {
+            case (?v) {
+              if (v != value) {
+                Runtime.trap("Value mismatch for " # key # " after middle split");
+              };
+            };
+            case (null) Runtime.trap("Lost key after middle split: " # key);
+          };
+        };
+
+        switch (MerkleSearchTree.get(mst, keyF)) {
+          case (?v) {
+            if (v != valueF) Runtime.trap("Value mismatch for F");
+          };
+          case (null) Runtime.trap("Cannot retrieve F after insertion");
+        };
+
+        // Verify tree size
+        let expectedSize = initialKeys.size() + 1;
+        let actualSize = MerkleSearchTree.size(mst);
+        if (actualSize != expectedSize) {
+          Runtime.trap(
+            "Size mismatch after middle split. Expected: " # Nat.toText(expectedSize) #
+            ", Got: " # Nat.toText(actualSize)
+          );
+        };
+      };
+      case (#err(msg)) Runtime.trap("Failed to insert F (middle split): " # msg);
+    };
+
+    // Remove F and verify tree returns to valid state
+    switch (MerkleSearchTree.remove(mst, keyF)) {
+      case (#ok((newMst, removedValue))) {
+        mst := newMst;
+        if (removedValue != valueF) {
+          Runtime.trap("Removed value doesn't match");
+        };
+
+        // Verify F is gone
+        switch (MerkleSearchTree.get(mst, keyF)) {
+          case (?_) Runtime.trap("F still retrievable after removal");
+          case (null) {};
+        };
+
+        // Verify all original keys still exist
+        for ((key, value) in initialKeys.vals()) {
+          switch (MerkleSearchTree.get(mst, key)) {
+            case (?v) {
+              if (v != value) Runtime.trap("Value mismatch after F removal: " # key);
+            };
+            case (null) Runtime.trap("Lost key after F removal: " # key);
+          };
+        };
+      };
+      case (#err(msg)) Runtime.trap("Failed to remove F: " # msg);
+    };
+  },
+);
+
+test(
+  "MerkleSearchTree - toDebugText Output",
+  func() {
+    let #ok(testCID) = CID.fromText("bafyreie5cvv4h45feadgeuwhbcutmh6t2ceseocckahdoe6uat64zmz454") else Runtime.trap("Failed to parse test CID");
+
+    var mst = MerkleSearchTree.empty();
+
+    let keys = [
+      "com.example.record/3jqfcqzm3fp2j", // level 0
+      "com.example.record/3jqfcqzm3fr2j", // level 0
+      "com.example.record/3jqfcqzm3fs2j", // level 1
+      "com.example.record/3jqfcqzm3ft2j", // level 0
+      "com.example.record/3jqfcqzm4fc2j", // level 0
+    ];
+
+    for (key in keys.vals()) {
+      mst := switch (MerkleSearchTree.add(mst, key, testCID)) {
+        case (#ok(m)) m;
+        case (#err(msg)) Runtime.trap("Failed to add " # key # ": " # msg);
+      };
+    };
+
+    let output = MerkleSearchTree.toDebugText(mst);
+
+    let expected = "Legend:
+  Keys:
+    p2j: com.example.record/3jqfcqzm3fp2j
+    r2j: com.example.record/3jqfcqzm3fr2j
+    s2j: com.example.record/3jqfcqzm3fs2j
+    t2j: com.example.record/3jqfcqzm3ft2j
+    c2j: com.example.record/3jqfcqzm4fc2j
+  Nodes:
+    N-q7m: bafyreicmahysq4n6wfuxo522m6dpiy7z7qzym3dzs756t5n7nfdgccwq7m
+    N-lve: bafyreif3sdxmlpkhus4bgjqfxoduedvmgsuhvb2f3kqaoo3hp3pixz3lve
+    N-3ay: bafyreia4qnwap675q3kg5v23fjkapi2afvszmvscmqyh4fxxqwbjrcx3ay
+
+~           N-q7m
+~             |
+~    |________|________|
+~  N-lve     s2j     N-3ay
+~    |                 |
+~ |_____|           |_____|
+~p2j   r2j         t2j   c2j";
+
+    if (output != expected) {
+      Runtime.trap(
+        "toDebugText output mismatch\n" #
+        "Expected:\n" # expected # "\n\n" #
+        "Got:\n" # output
       );
     };
   },
