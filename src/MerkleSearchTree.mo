@@ -358,7 +358,7 @@ module {
     let keyMap = PureMap.empty<Text, Text>();
     let shortKeyCounts = PureMap.empty<Text, Nat>();
 
-    let allKeys = List.empty<Text>();
+    let allKeys = List.empty<(Text, CID.CID)>();
     collectKeys(mst, rootNode, allKeys);
 
     let allNodeCIDs = List.empty<CID.CID>();
@@ -366,9 +366,9 @@ module {
 
     var legend = keyMap;
     var counts = shortKeyCounts;
-    let legendEntries = List.empty<(Text, Text)>();
+    let legendEntries = List.empty<(Text, Text, CID.CID)>();
 
-    for (fullKey in List.values(allKeys)) {
+    for ((fullKey, cid) in List.values(allKeys)) {
       let baseShort = shortenKey(fullKey);
       let count = switch (PureMap.get(counts, Text.compare, baseShort)) {
         case (?n) n;
@@ -378,7 +378,7 @@ module {
 
       let shortKey = if (count == 0) baseShort else baseShort # "(" # Nat.toText(count + 1) # ")";
       legend := PureMap.add(legend, Text.compare, fullKey, shortKey);
-      List.add(legendEntries, (shortKey, fullKey));
+      List.add(legendEntries, (shortKey, fullKey, cid));
     };
 
     var nodeLegend = PureMap.empty<Text, Text>();
@@ -404,8 +404,8 @@ module {
     let allLines = List.empty<Text>();
     List.add(allLines, "Legend:");
     List.add(allLines, "  Keys:");
-    for ((short, full) in List.values(legendEntries)) {
-      List.add(allLines, "    " # short # ": " # full);
+    for ((short, full, cid) in List.values(legendEntries)) {
+      List.add(allLines, "    " # short # ": " # full # " (" # CID.toText(cid) # ")");
     };
     List.add(allLines, "  Nodes:");
     for ((short, full) in List.values(nodeLegendEntries)) {
@@ -413,13 +413,13 @@ module {
     };
     List.add(allLines, "");
     for (l in treeResult.lines.vals()) {
-      List.add(allLines, "~" # trimRight(l));
+      List.add(allLines, "* " # trimRight(l));
     };
 
     Text.join("\n", List.values(allLines));
   };
 
-  private func collectKeys(mst : MerkleSearchTree, node : MerkleNode.Node, keys : List.List<Text>) {
+  private func collectKeys(mst : MerkleSearchTree, node : MerkleNode.Node, keys : List.List<(Text, CID.CID)>) {
     switch (node.leftSubtreeCID) {
       case (?cid) {
         switch (getNode(mst, cid)) {
@@ -434,7 +434,7 @@ module {
     for (i in Nat.range(0, node.entries.size())) {
       let entry = node.entries[i];
       let key = reconstructKey(node.entries, i, prevKey);
-      List.add(keys, keyToText(key));
+      List.add(keys, (keyToText(key), entry.valueCID));
 
       switch (entry.subtreeCID) {
         case (?cid) {

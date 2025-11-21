@@ -1717,23 +1717,23 @@ test(
 
     let expected = "Legend:
   Keys:
-    p2j: com.example.record/3jqfcqzm3fp2j
-    r2j: com.example.record/3jqfcqzm3fr2j
-    s2j: com.example.record/3jqfcqzm3fs2j
-    t2j: com.example.record/3jqfcqzm3ft2j
-    c2j: com.example.record/3jqfcqzm4fc2j
+    p2j: com.example.record/3jqfcqzm3fp2j (bafyreie5cvv4h45feadgeuwhbcutmh6t2ceseocckahdoe6uat64zmz454)
+    r2j: com.example.record/3jqfcqzm3fr2j (bafyreie5cvv4h45feadgeuwhbcutmh6t2ceseocckahdoe6uat64zmz454)
+    s2j: com.example.record/3jqfcqzm3fs2j (bafyreie5cvv4h45feadgeuwhbcutmh6t2ceseocckahdoe6uat64zmz454)
+    t2j: com.example.record/3jqfcqzm3ft2j (bafyreie5cvv4h45feadgeuwhbcutmh6t2ceseocckahdoe6uat64zmz454)
+    c2j: com.example.record/3jqfcqzm4fc2j (bafyreie5cvv4h45feadgeuwhbcutmh6t2ceseocckahdoe6uat64zmz454)
   Nodes:
     N-q7m: bafyreicmahysq4n6wfuxo522m6dpiy7z7qzym3dzs756t5n7nfdgccwq7m
     N-lve: bafyreif3sdxmlpkhus4bgjqfxoduedvmgsuhvb2f3kqaoo3hp3pixz3lve
     N-3ay: bafyreia4qnwap675q3kg5v23fjkapi2afvszmvscmqyh4fxxqwbjrcx3ay
 
-~           N-q7m
-~             |
-~    |________|________|
-~  N-lve     s2j     N-3ay
-~    |                 |
-~ |_____|           |_____|
-~p2j   r2j         t2j   c2j";
+*            N-q7m
+*              |
+*     |________|________|
+*   N-lve     s2j     N-3ay
+*     |                 |
+*  |_____|           |_____|
+* p2j   r2j         t2j   c2j";
 
     if (output != expected) {
       Runtime.trap(

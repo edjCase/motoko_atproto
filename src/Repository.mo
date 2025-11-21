@@ -559,6 +559,11 @@ module {
     });
   };
 
+  public func toDebugText(repository : Repository) : Text {
+    let mst = buildMerkleSearchTree(repository);
+    MerkleSearchTree.toDebugText(mst);
+  };
+
   private func commitNewData(
     repository : Repository,
     newMst : MerkleSearchTree.MerkleSearchTree,
