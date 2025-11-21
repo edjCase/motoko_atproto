@@ -10,6 +10,7 @@ import Iter "mo:core@1/Iter";
 import Set "mo:core@1/Set";
 import CIDBuilder "../src/CIDBuilder";
 import Blob "mo:core@1/Blob";
+import Debug "mo:core@1/Debug";
 
 // Helper function to create test CIDs
 func createTestCID(content : Text) : CID.CID {
@@ -364,7 +365,6 @@ test(
     // Add all records
     for (key in keys.vals()) {
       let valueCID = createTestCID(key);
-
       switch (MerkleSearchTree.add(mst, key, valueCID)) {
         case (#ok(newMst)) {
           mst := newMst;
@@ -675,9 +675,11 @@ test(
     // Insert F, which pushes E out to a new node
     let keyF = "com.example.record/3jqfcqzm3fx2j";
     let valueF = createTestCID("F");
+    Debug.print("Structure before inserting F:\n" # MerkleSearchTree.toDebugText(mst) # "\n");
     switch (MerkleSearchTree.add(mst, keyF, valueF)) {
       case (#ok(newMst)) {
         mst := newMst;
+        Debug.print("Structure after inserting F:\n" # MerkleSearchTree.toDebugText(mst) # "\n");
 
         // Verify all keys are retrievable
         for ((key, value) in initialKeys.vals()) {
@@ -991,6 +993,226 @@ test(
 
     if (CID.toText(cid4) != CID.toText(cid5)) {
       Runtime.trap("Non-deterministic with subtrees!");
+    };
+  },
+);
+
+test(
+  "MerkleSearchTree - Interop: Empty Tree Root CID",
+  func() {
+    let mst = MerkleSearchTree.empty();
+    let rootCID = mst.root;
+    let expected = "bafyreie5737gdxlw5i64vzichcalba3z2v5n6icifvx5xytvske7mr3hpm";
+
+    if (CID.toText(rootCID) != expected) {
+      Runtime.trap(
+        "Empty tree root mismatch\n" #
+        "Expected: " # expected # "\n" #
+        "Got:      " # CID.toText(rootCID)
+      );
+    };
+  },
+);
+
+test(
+  "MerkleSearchTree - Interop: Trivial Tree Root CID",
+  func() {
+    let #ok(testCID) = CID.fromText("bafyreie5cvv4h45feadgeuwhbcutmh6t2ceseocckahdoe6uat64zmz454") else Runtime.trap("Failed to parse test CID");
+
+    let mst = switch (
+      MerkleSearchTree.add(
+        MerkleSearchTree.empty(),
+        "com.example.record/3jqfcqzm3fo2j",
+        testCID,
+      )
+    ) {
+      case (#ok(m)) m;
+      case (#err(msg)) Runtime.trap("Failed to add: " # msg);
+    };
+
+    let expected = "bafyreibj4lsc3aqnrvphp5xmrnfoorvru4wynt6lwidqbm2623a6tatzdu";
+    if (CID.toText(mst.root) != expected) {
+      Runtime.trap(
+        "Trivial tree root mismatch\n" #
+        "Expected: " # expected # "\n" #
+        "Got:      " # CID.toText(mst.root)
+      );
+    };
+
+    if (MerkleSearchTree.size(mst) != 1) {
+      Runtime.trap("Expected 1 leaf, got: " # Nat.toText(MerkleSearchTree.size(mst)));
+    };
+  },
+);
+
+test(
+  "MerkleSearchTree - Interop: Single Layer 2 Root CID",
+  func() {
+    let #ok(testCID) = CID.fromText("bafyreie5cvv4h45feadgeuwhbcutmh6t2ceseocckahdoe6uat64zmz454") else Runtime.trap("Failed to parse test CID");
+
+    let mst = switch (
+      MerkleSearchTree.add(
+        MerkleSearchTree.empty(),
+        "com.example.record/3jqfcqzm3fx2j",
+        testCID,
+      )
+    ) {
+      case (#ok(m)) m;
+      case (#err(msg)) Runtime.trap("Failed to add: " # msg);
+    };
+
+    let expected = "bafyreih7wfei65pxzhauoibu3ls7jgmkju4bspy4t2ha2qdjnzqvoy33ai";
+    if (CID.toText(mst.root) != expected) {
+      Runtime.trap(
+        "Single layer 2 root mismatch\n" #
+        "Expected: " # expected # "\n" #
+        "Got:      " # CID.toText(mst.root)
+      );
+    };
+  },
+);
+
+test(
+  "MerkleSearchTree - Interop: Simple Tree Root CID",
+  func() {
+    // EXPECTED
+    // Key levels:
+    //   com.example.record/3jqfcqzm3fp2j -> level 0
+    //   com.example.record/3jqfcqzm3fr2j -> level 0
+    //   com.example.record/3jqfcqzm3fs2j -> level 1
+    //   com.example.record/3jqfcqzm3ft2j -> level 0
+    //   com.example.record/3jqfcqzm4fc2j -> level 0
+
+    // === After adding record 1 ===
+    // Root CID: bafyreigjntfwvqhweqji2fwksikbi5blcg5agga2hyy6mmf33yn57hb2kq
+    // Layer: 0, Leaf Count: 1
+    // Node structure (1 entries):
+    //   [0] LEAF: com.example.record/3jqfcqzm3fp2j
+
+    // === After adding record 2 ===
+    // Root CID: bafyreif3sdxmlpkhus4bgjqfxoduedvmgsuhvb2f3kqaoo3hp3pixz3lve
+    // Layer: 0, Leaf Count: 2
+    // Node structure (2 entries):
+    //   [0] LEAF: com.example.record/3jqfcqzm3fp2j
+    //   [1] LEAF: com.example.record/3jqfcqzm3fr2j
+
+    // === After adding record 3 (level 1) ===
+    // Root CID: bafyreidipbgtyjmceeib3xielr4exatdyhqdcwnicbdu5hsrv6tqry25xa
+    // Layer: 1, Leaf Count: 3
+    // Node structure (2 entries):
+    //   [0] SUBTREE: bafyreif3sdxmlpkhus4bgjqfxoduedvmgsuhvb2f3kqaoo3hp3pixz3lve
+    //       [0] SUB-LEAF: com.example.record/3jqfcqzm3fp2j
+    //       [1] SUB-LEAF: com.example.record/3jqfcqzm3fr2j
+    //   [1] LEAF: com.example.record/3jqfcqzm3fs2j
+
+    // === After adding record 4 ===
+    // Root CID: bafyreielvkk5i2mjqjnkc2x4qfpk7ocazupvjnb4zcfpaddefpbpdljc3m
+    // Layer: 1, Leaf Count: 4
+    // Node structure (3 entries):
+    //   [0] SUBTREE: bafyreif3sdxmlpkhus4bgjqfxoduedvmgsuhvb2f3kqaoo3hp3pixz3lve
+    //       [0] SUB-LEAF: com.example.record/3jqfcqzm3fp2j
+    //       [1] SUB-LEAF: com.example.record/3jqfcqzm3fr2j
+    //   [1] LEAF: com.example.record/3jqfcqzm3fs2j
+    //   [2] SUBTREE: bafyreic7viy36qabdlxzeguqyojwl4qobai57wq6hexjjmsjlj4vrrirje
+    //       [0] SUB-LEAF: com.example.record/3jqfcqzm3ft2j
+
+    // === After adding record 5 (final) ===
+    // Root CID: bafyreicmahysq4n6wfuxo522m6dpiy7z7qzym3dzs756t5n7nfdgccwq7m
+    // Layer: 1, Leaf Count: 5
+    // Node structure (3 entries):
+    //   [0] SUBTREE: bafyreif3sdxmlpkhus4bgjqfxoduedvmgsuhvb2f3kqaoo3hp3pixz3lve
+    //       [0] SUB-LEAF: com.example.record/3jqfcqzm3fp2j
+    //       [1] SUB-LEAF: com.example.record/3jqfcqzm3fr2j
+    //   [1] LEAF: com.example.record/3jqfcqzm3fs2j
+    //   [2] SUBTREE: bafyreia4qnwap675q3kg5v23fjkapi2afvszmvscmqyh4fxxqwbjrcx3ay
+    //       [0] SUB-LEAF: com.example.record/3jqfcqzm3ft2j
+    //       [1] SUB-LEAF: com.example.record/3jqfcqzm4fc2j
+
+    let #ok(testCID) = CID.fromText("bafyreie5cvv4h45feadgeuwhbcutmh6t2ceseocckahdoe6uat64zmz454") else Runtime.trap("Failed to parse test CID");
+
+    var mst = MerkleSearchTree.empty();
+
+    // Add keys in order
+    let keys = [
+      "com.example.record/3jqfcqzm3fp2j", // level 0
+      "com.example.record/3jqfcqzm3fr2j", // level 0
+      "com.example.record/3jqfcqzm3fs2j", // level 1
+      "com.example.record/3jqfcqzm3ft2j", // level 0
+      "com.example.record/3jqfcqzm4fc2j", // level 0
+    ];
+
+    for ((i, key) in Iter.enumerate(keys.vals())) {
+      mst := switch (MerkleSearchTree.add(mst, key, testCID)) {
+        case (#ok(m)) m;
+        case (#err(msg)) Runtime.trap("Failed to add " # key # ": " # msg);
+      };
+    };
+
+    let expected = "bafyreicmahysq4n6wfuxo522m6dpiy7z7qzym3dzs756t5n7nfdgccwq7m";
+    if (CID.toText(mst.root) != expected) {
+      Runtime.trap(
+        "Simple tree root mismatch\n" #
+        "Expected: " # expected # "\n" #
+        "Got:      " # CID.toText(mst.root)
+      );
+    };
+
+    if (MerkleSearchTree.size(mst) != 5) {
+      Runtime.trap("Expected 5 leaves, got: " # Nat.toText(MerkleSearchTree.size(mst)));
+    };
+  },
+);
+
+test(
+  "MerkleSearchTree - Interop: Trim Top on Delete",
+  func() {
+    let #ok(testCID) = CID.fromText("bafyreie5cvv4h45feadgeuwhbcutmh6t2ceseocckahdoe6uat64zmz454") else Runtime.trap("Failed to parse test CID");
+
+    var mst = MerkleSearchTree.empty();
+
+    // Build tree with 6 entries (layer 1)
+    let keys = [
+      "com.example.record/3jqfcqzm3fn2j", // level 0
+      "com.example.record/3jqfcqzm3fo2j", // level 0
+      "com.example.record/3jqfcqzm3fp2j", // level 0
+      "com.example.record/3jqfcqzm3fs2j", // level 1
+      "com.example.record/3jqfcqzm3ft2j", // level 0
+      "com.example.record/3jqfcqzm3fu2j", // level 0
+    ];
+
+    for (key in keys.vals()) {
+      mst := switch (MerkleSearchTree.add(mst, key, testCID)) {
+        case (#ok(m)) m;
+        case (#err(msg)) Runtime.trap("Failed to add: " # msg);
+      };
+    };
+
+    let l1Root = "bafyreifnqrwbk6ffmyaz5qtujqrzf5qmxf7cbxvgzktl4e3gabuxbtatv4";
+    if (CID.toText(mst.root) != l1Root) {
+      Runtime.trap(
+        "L1 root mismatch after adds\n" #
+        "Expected: " # l1Root # "\n" #
+        "Got:      " # CID.toText(mst.root)
+      );
+    };
+
+    // Delete the level 1 key - should trim to layer 0
+    mst := switch (MerkleSearchTree.remove(mst, "com.example.record/3jqfcqzm3fs2j")) {
+      case (#ok((m, _))) m;
+      case (#err(msg)) Runtime.trap("Failed to remove: " # msg);
+    };
+
+    let l0Root = "bafyreie4kjuxbwkhzg2i5dljaswcroeih4dgiqq6pazcmunwt2byd725vi";
+    if (CID.toText(mst.root) != l0Root) {
+      Runtime.trap(
+        "L0 root mismatch after delete\n" #
+        "Expected: " # l0Root # "\n" #
+        "Got:      " # CID.toText(mst.root)
+      );
+    };
+
+    if (MerkleSearchTree.size(mst) != 5) {
+      Runtime.trap("Expected 5 leaves after delete");
     };
   },
 );

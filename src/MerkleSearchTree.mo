@@ -356,8 +356,14 @@ module {
   public func toDebugText(mst : MerkleSearchTree) : Text {
     let buffer = List.empty<Text>();
     let rootNode = getRootNode(mst);
+    let leafCount = size(mst);
+    let treeDepth = getTreeDepth(mst);
 
-    debugNodeRecursive(mst, rootNode, mst.root, 0, "", buffer);
+    List.add(buffer, "Root CID: " # CID.toText(mst.root));
+    List.add(buffer, "Layer: " # Nat.toText(treeDepth - 1) # ", Leaf Count: " # Nat.toText(leafCount));
+    List.add(buffer, "Node structure (" # Nat.toText(rootNode.entries.size()) # " entries):");
+
+    debugNodeRecursive(mst, rootNode, 0, "-", buffer);
 
     Text.join("\n", List.values(buffer));
   };
@@ -437,34 +443,20 @@ module {
   private func debugNodeRecursive(
     mst : MerkleSearchTree,
     node : MerkleNode.Node,
-    nodeCID : CID.CID,
     depth : Nat,
     prefix : Text,
     buffer : List.List<Text>,
   ) {
-    let indent = if (depth == 0) "" else prefix;
-    let cidText = CID.toText(nodeCID);
+    var entryIndex = 0;
 
-    let keyRange = if (node.entries.size() > 0) {
-      let firstKey = reconstructKey(node.entries, 0, null);
-      let lastKey = reconstructKey(node.entries, node.entries.size() - 1, null);
-      " range:" # keyToText(firstKey) # "-" # keyToText(lastKey);
-    } else {
-      " (empty)";
-    };
-
-    List.add(
-      buffer,
-      indent # "[" # cidText # "] keys:" # Nat.toText(node.entries.size()) # keyRange # " depth:" # Nat.toText(depth),
-    );
-
-    // Process left subtree
+    // Process left subtree first if it exists
     switch (node.leftSubtreeCID) {
       case (?cid) {
         switch (getNode(mst, cid)) {
           case (?subtree) {
-            let newPrefix = if (depth == 0) "├─ " else prefix # "│  ";
-            debugNodeRecursive(mst, subtree, cid, depth + 1, newPrefix, buffer);
+            List.add(buffer, prefix # "[" # Nat.toText(entryIndex) # "] LEFT SUBTREE: " # CID.toText(cid));
+            debugNodeRecursive(mst, subtree, depth + 1, prefix # "-", buffer);
+            entryIndex += 1;
           };
           case null {};
         };
@@ -472,31 +464,36 @@ module {
       case null {};
     };
 
-    // Process entries and their subtrees
+    // Process node entries
+    var prevKey : ?[Nat8] = null;
     for (i in Nat.range(0, node.entries.size())) {
       let entry = node.entries[i];
+      let key = reconstructKey(node.entries, i, prevKey);
+      let keyText = keyToText(key);
 
+      // Show the leaf entry
+      let leafLabel = if (depth > 0) "SUB-LEAF" else "LEAF";
+      List.add(buffer, prefix # "[" # Nat.toText(entryIndex) # "] " # leafLabel # ": " # keyText);
+      entryIndex += 1;
+
+      // Check if this entry has a subtree (after the entry)
       switch (entry.subtreeCID) {
         case (?cid) {
+          List.add(buffer, prefix # "[" # Nat.toText(entryIndex) # "] RIGHT SUBTREE: " # CID.toText(cid));
           switch (getNode(mst, cid)) {
             case (?subtree) {
-              let isLast = i == (node.entries.size() - 1 : Nat);
-              let newPrefix = if (depth == 0) {
-                if (isLast) "└─ " else "├─ ";
-              } else {
-                prefix # (if (isLast) "   " else "│  ");
-              };
-              debugNodeRecursive(mst, subtree, cid, depth + 1, newPrefix, buffer);
+              debugNodeRecursive(mst, subtree, depth + 1, prefix # "-", buffer);
             };
             case null {};
           };
+          entryIndex += 1;
         };
         case null {};
       };
-    };
-  };
 
-  // PRIVATE HELPER FUNCTIONS
+      prevKey := ?key;
+    };
+  }; // PRIVATE HELPER FUNCTIONS
 
   private func loadNodeRecursive(
     cid : CID.CID,
@@ -659,7 +656,7 @@ module {
     if (keyBytes.size() > 256) return #err("Key too long (max 256 bytes)");
 
     let node = getRootNode(mst);
-    switch (addRecursive(mst, node, keyBytes, value, addOnly)) {
+    switch (addRecursive(mst, node, mst.root, keyBytes, value, addOnly)) {
       case (#ok({ newNodes; newNodeCID })) #ok({
         root = newNodeCID;
         nodes = newNodes;
@@ -676,6 +673,7 @@ module {
   private func addRecursive(
     mst : MerkleSearchTree,
     node : MerkleNode.Node,
+    nodeCID : CID.CID,
     key : [Nat8],
     value : CID.CID,
     addOnly : Bool,
@@ -704,7 +702,7 @@ module {
         };
         case (#less) {
           insertPos := i;
-          return insertAtPosition(mst, node, insertPos, key, value, addOnly);
+          return insertAtPosition(mst, node, nodeCID, insertPos, key, value, addOnly);
         };
         case (#greater) insertPos := i + 1;
       };
@@ -712,17 +710,29 @@ module {
     };
 
     // Insert at end or in appropriate position
-    insertAtPosition(mst, node, insertPos, key, value, addOnly);
+    insertAtPosition(mst, node, nodeCID, insertPos, key, value, addOnly);
   };
 
   private func insertAtPosition(
     mst : MerkleSearchTree,
     node : MerkleNode.Node,
+    nodeCID : CID.CID,
     pos : Nat,
     key : [Nat8],
     value : CID.CID,
     addOnly : Bool,
   ) : Result.Result<UpdatedNodeData, Text> {
+    // Empty node - just add the entry directly
+    if (node.entries.size() == 0) {
+      let newEntries = [{
+        prefixLength = 0;
+        keySuffix = key;
+        valueCID = value;
+        subtreeCID = null;
+      }];
+      let updatedNode = { node with entries = newEntries };
+      return #ok(addNode(mst.nodes, updatedNode));
+    };
 
     // Determine if key belongs at this level
     let nodeDepth = calculateDepth(reconstructKey(node.entries, 0, null));
@@ -748,7 +758,7 @@ module {
         case (?cid) {
           // Recursively add to subtree
           let ?subtree = getNode(mst, cid) else return #err("Subtree not found");
-          switch (addRecursive(mst, subtree, key, value, addOnly)) {
+          switch (addRecursive(mst, subtree, cid, key, value, addOnly)) {
             case (#ok({ newNodes; newNodeCID = newSubtreeCID })) {
               #ok(updateNodeSubtreeAndAdd(newNodes, node, pos, ?newSubtreeCID));
             };
@@ -778,7 +788,7 @@ module {
 
       // Create a new node containing just this higher-depth key
       let newSubtree : MerkleNode.Node = {
-        leftSubtreeCID = null;
+        leftSubtreeCID = ?nodeCID;
         entries = [{
           prefixLength = 0;
           keySuffix = key;
@@ -788,8 +798,7 @@ module {
       };
 
       // Add the new subtree
-      let { newNodes; newNodeCID = newSubtreeCID } = addNode(mst.nodes, newSubtree);
-      #ok(updateNodeSubtreeAndAdd(newNodes, node, pos, ?newSubtreeCID));
+      #ok(addNode(mst.nodes, newSubtree));
     };
   };
 
@@ -954,26 +963,177 @@ module {
         continue f;
       };
 
+      // Found the entry to remove
+      let removedEntry = node.entries[i];
       let entries = DynamicArray.fromArray<MerkleNode.TreeEntry>(node.entries);
-      let removedEntry = entries.remove(i);
-      switch (entries.getOpt(i)) {
-        case (null) (); // Removed last entry, nothing to adjust
-        case (?nextEntry) {
-          // Adjust next entry's prefixLength and keySuffix
-          let nextKey = reconstructKey(node.entries, i + 1, ?entryKey);
-          let (newSuffix, newPrefixLength) = switch (prevKeyOrNull) {
-            case (?prevKey) {
-              // If there's a previous entry, adjust the next entry's suffix
-              let prefixLength = findCommonPrefixLength(prevKey, nextKey);
-              let suffix = Array.sliceToArray(nextKey, prefixLength, nextKey.size());
-              (suffix, prefixLength);
+      let _ = entries.remove(i);
+
+      // Handle the right subtree of the removed entry
+      // The right subtree needs to be merged into the remaining structure
+      switch (removedEntry.subtreeCID) {
+        case (?rightSubtreeCID) {
+          // The removed entry had a right subtree
+          // This subtree needs to be preserved
+
+          if (i < entries.size()) {
+            // There's a next entry after the removed one
+            // Merge the right subtree with the next entry
+            let nextEntry = entries.get(i);
+            let nextKey = reconstructKey(node.entries, i + 1, ?entryKey);
+
+            // Recompute the next entry's prefix relative to the previous entry
+            let (newSuffix, newPrefixLength) = switch (prevKeyOrNull) {
+              case (?prevKey) {
+                let prefixLength = findCommonPrefixLength(prevKey, nextKey);
+                let suffix = Array.sliceToArray(nextKey, prefixLength, nextKey.size());
+                (suffix, prefixLength);
+              };
+              case (null) {
+                (nextKey, 0);
+              };
             };
-            case (null) {
-              // If there's no previous entry, then should be the full key with no prefixLength
-              (nextKey, 0);
+
+            // We need to merge rightSubtreeCID entries with the current structure
+            // The rightSubtreeCID should be re-inserted into the tree
+            // For now, we need to handle this by merging all entries from the subtree
+            let ?rightSubtreeNode = getNode(mst, rightSubtreeCID) else return #err("Right subtree not found");
+
+            // Collect all entries from the right subtree
+            let subtreeEntries = List.empty<(Text, CID.CID)>();
+            traverseTreeNode(
+              mst,
+              rightSubtreeNode,
+              func(key : [Nat8], value : CID.CID) {
+                List.add(subtreeEntries, (keyToText(key), value));
+              },
+            );
+
+            // Update the current entry
+            entries.put(
+              i,
+              {
+                prefixLength = newPrefixLength;
+                keySuffix = newSuffix;
+                valueCID = nextEntry.valueCID;
+                subtreeCID = nextEntry.subtreeCID;
+              },
+            );
+
+            // Create the updated node
+            let updatedNode = {
+              node with
+              entries = DynamicArray.toArray(entries)
+            };
+            let newNodes = addNode(mst.nodes, updatedNode);
+
+            // Re-insert all entries from the right subtree
+            var currentNodes = newNodes.newNodes;
+            var currentNodeCID = newNodes.newNodeCID;
+
+            for ((keyText, valueCID) in List.values(subtreeEntries)) {
+              let keyBytes = keyToBytes(keyText);
+              let ?currentNode = getNode({ root = currentNodeCID; nodes = currentNodes }, currentNodeCID) else return #err("Current node not found");
+
+              switch (addRecursive({ root = currentNodeCID; nodes = currentNodes }, currentNode, currentNodeCID, keyBytes, valueCID, false)) {
+                case (#ok({ newNodes = updatedNodes; newNodeCID = updatedCID })) {
+                  currentNodes := updatedNodes;
+                  currentNodeCID := updatedCID;
+                };
+                case (#err(e)) return #err("Failed to re-insert entry: " # e);
+              };
+            };
+
+            return #ok({
+              updatedNodeData = {
+                newNodes = currentNodes;
+                newNodeCID = currentNodeCID;
+              };
+              removedEntryValue = removedEntry.valueCID;
+            });
+          } else {
+            // This was the last entry
+            // Attach the right subtree to the previous entry
+            if (i > 0) {
+              let prevEntry = entries.get(i - 1);
+              entries.put(i - 1, { prevEntry with subtreeCID = ?rightSubtreeCID });
+            } else {
+              // This was the only entry and it had a right subtree
+              // Need to merge the leftSubtree with the right subtree
+              switch (node.leftSubtreeCID) {
+                case (?leftSubtreeCID) {
+                  // Both subtrees exist, need to merge them
+                  let ?rightSubtreeNode = getNode(mst, rightSubtreeCID) else return #err("Right subtree not found");
+
+                  // Collect all entries from right subtree
+                  let subtreeEntries = List.empty<(Text, CID.CID)>();
+                  traverseTreeNode(
+                    mst,
+                    rightSubtreeNode,
+                    func(key : [Nat8], value : CID.CID) {
+                      List.add(subtreeEntries, (keyToText(key), value));
+                    },
+                  );
+
+                  // Start with left subtree as the new root
+                  var currentNodes = mst.nodes;
+                  var currentNodeCID = leftSubtreeCID;
+
+                  // Re-insert all entries from the right subtree
+                  for ((keyText, valueCID) in List.values(subtreeEntries)) {
+                    let keyBytes = keyToBytes(keyText);
+                    let ?currentNode = getNode({ root = currentNodeCID; nodes = currentNodes }, currentNodeCID) else return #err("Current node not found");
+
+                    switch (addRecursive({ root = currentNodeCID; nodes = currentNodes }, currentNode, currentNodeCID, keyBytes, valueCID, false)) {
+                      case (#ok({ newNodes = updatedNodes; newNodeCID = updatedCID })) {
+                        currentNodes := updatedNodes;
+                        currentNodeCID := updatedCID;
+                      };
+                      case (#err(e)) return #err("Failed to re-insert entry: " # e);
+                    };
+                  };
+
+                  return #ok({
+                    updatedNodeData = {
+                      newNodes = currentNodes;
+                      newNodeCID = currentNodeCID;
+                    };
+                    removedEntryValue = removedEntry.valueCID;
+                  });
+                };
+                case (null) {
+                  // Only right subtree exists, return it as the new root
+                  return #ok({
+                    updatedNodeData = {
+                      newNodes = mst.nodes;
+                      newNodeCID = rightSubtreeCID;
+                    };
+                    removedEntryValue = removedEntry.valueCID;
+                  });
+                };
+              };
             };
           };
-          entries.put(i, { nextEntry with keySuffix = newSuffix; prefixLength = newPrefixLength });
+        };
+        case (null) {
+          // No right subtree to handle
+          switch (entries.getOpt(i)) {
+            case (null) (); // Removed last entry, nothing to adjust
+            case (?nextEntry) {
+              // Adjust next entry's prefixLength and keySuffix
+              let nextKey = reconstructKey(node.entries, i + 1, ?entryKey);
+              let (newSuffix, newPrefixLength) = switch (prevKeyOrNull) {
+                case (?prevKey) {
+                  let prefixLength = findCommonPrefixLength(prevKey, nextKey);
+                  let suffix = Array.sliceToArray(nextKey, prefixLength, nextKey.size());
+                  (suffix, prefixLength);
+                };
+                case (null) {
+                  (nextKey, 0);
+                };
+              };
+              entries.put(i, { nextEntry with keySuffix = newSuffix; prefixLength = newPrefixLength });
+            };
+          };
         };
       };
 

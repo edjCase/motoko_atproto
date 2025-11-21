@@ -50,10 +50,11 @@ module {
     let fields = DynamicArray.DynamicArray<(Text, DagCbor.Value)>(2);
 
     // Only add "l" field if left subtree exists
-    switch (node.leftSubtreeCID) {
-      case (?cid) fields.add(("l", #cid(cid)));
-      case (null) {}; // Don't add field at all
+    let leftSubtreeCIDCbor = switch (node.leftSubtreeCID) {
+      case (?cid) #cid(cid);
+      case (null) #null_;
     };
+    fields.add(("l", leftSubtreeCIDCbor));
 
     // Convert entries array
     let entriesCbor = node.entries
@@ -67,10 +68,11 @@ module {
         entryFields.add(("v", #cid(entry.valueCID)));
 
         // Only add "t" field if right subtree exists
-        switch (entry.subtreeCID) {
-          case (?cid) entryFields.add(("t", #cid(cid)));
-          case (null) {}; // Don't add field at all
+        let subtreeCIDCbor = switch (entry.subtreeCID) {
+          case (?cid) #cid(cid);
+          case (null) #null_;
         };
+        entryFields.add(("t", subtreeCIDCbor));
 
         #map(DynamicArray.toArray(entryFields));
       },
