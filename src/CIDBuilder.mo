@@ -2,7 +2,6 @@ import CID "mo:cid@1";
 import Commit "Commit";
 import DagCbor "mo:dag-cbor@2";
 import Sha256 "mo:sha2@0/Sha256";
-import Text "mo:core@1/Text";
 import Runtime "mo:core@1/Runtime";
 import MerkleNode "MerkleNode";
 import Order "mo:core@1/Order";
