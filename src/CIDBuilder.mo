@@ -28,10 +28,6 @@ module {
     });
   };
 
-  public func fromRecord(key : Text, value : DagCbor.Value) : CID.CID {
-    fromDagCbor(DagCborBuilder.fromRecord(key, value));
-  };
-
   public func fromUnsignedCommit(commit : Commit.UnsignedCommit) : CID.CID {
     fromDagCbor(DagCborBuilder.fromUnsignedCommit(commit));
   };
@@ -44,7 +40,7 @@ module {
     fromDagCbor(DagCborBuilder.fromMSTNode(node));
   };
 
-  func fromDagCbor(cbor : DagCbor.Value) : CID.CID {
+  public func fromDagCbor(cbor : DagCbor.Value) : CID.CID {
     let bytes = switch (DagCbor.toBytes(cbor)) {
       case (#ok(blob)) blob;
       case (#err(e)) Runtime.trap("Failed to encode commit to CBOR: " # debug_show (e));

@@ -223,7 +223,7 @@ module {
     rev : TID.TID,
     signFunc : (Blob) -> async* Result.Result<Blob, Text>,
   ) : async* Result.Result<(Repository, CID.CID), Text> {
-    let recordCID = CIDBuilder.fromRecord(key.recordKey, value);
+    let recordCID = CIDBuilder.fromDagCbor(value);
 
     // Create record path
     let path = switch (keyToTextAndValidate(key)) {
@@ -279,7 +279,7 @@ module {
       case (null) return #err("Record to update does not exist: " # currentPath);
     };
 
-    let newRecordCid = CIDBuilder.fromRecord(key.recordKey, value);
+    let newRecordCid = CIDBuilder.fromDagCbor(value);
 
     // Create record path
     let path = switch (keyToTextAndValidate(key)) {
@@ -374,7 +374,7 @@ module {
       let result : WriteResult = switch (writeOp) {
         case (#create(createOp)) {
           // TODO consolidate with createRecord
-          let recordCID = CIDBuilder.fromRecord(createOp.key.recordKey, createOp.value);
+          let recordCID = CIDBuilder.fromDagCbor(createOp.value);
           updatedRecords := PureMap.add(updatedRecords, CIDBuilder.compare, recordCID, createOp.value);
 
           // Create record path for MST
@@ -402,7 +402,7 @@ module {
             case (null) return #err("Record to update does not exist: " # currentPath);
           };
           // TODO consolidate with putRecord
-          let newRecordCid = CIDBuilder.fromRecord(updateOp.key.recordKey, updateOp.value);
+          let newRecordCid = CIDBuilder.fromDagCbor(updateOp.value);
           updatedRecords := PureMap.add(updatedRecords, CIDBuilder.compare, newRecordCid, updateOp.value);
 
           // Create record path for MST

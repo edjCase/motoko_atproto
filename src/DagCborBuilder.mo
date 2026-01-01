@@ -10,13 +10,6 @@ import Blob "mo:core@1/Blob";
 
 module {
 
-  public func fromRecord(key : Text, value : DagCbor.Value) : DagCbor.Value {
-    #map([
-      ("key", #text(key)),
-      ("value", value),
-    ]);
-  };
-
   public func fromUnsignedCommit(unsigned : Commit.UnsignedCommit) : DagCbor.Value {
     #map(DynamicArray.toArray(fromUnsignedCommitInternal(unsigned)));
   };
