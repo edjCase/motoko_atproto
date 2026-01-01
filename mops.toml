@@ -1,7 +1,7 @@
 [package]
 name = "atproto"
 version = "0.0.1"
-description = ""
+description = "Core library for working with the AT Protocol in Motoko."
 repository = "https://github.com/edjcase/motoko_atproto"
 keywords = [ "at", "protocol", "atproto", "ipld" ]
 license = "MIT"

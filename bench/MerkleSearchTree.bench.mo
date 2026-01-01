@@ -4,7 +4,7 @@ import Result "mo:core@1/Result";
 import Blob "mo:core@1/Blob";
 import Runtime "mo:core@1/Runtime";
 import CID "mo:cid@1";
-import MerkleSearchTree "../src/atproto/MerkleSearchTree";
+import MerkleSearchTree "../src/MerkleSearchTree";
 import Array "mo:core@1/Array";
 
 module {

@@ -56,7 +56,7 @@ module {
             "active",
             switch (repo.active) {
               case (?a) { #bool(a) };
-              case (null) { # null };
+              case (null) { #null_ };
             },
           ),
           ("status", status),
